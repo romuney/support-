@@ -91,6 +91,11 @@ audience: agent
 `date`, `type` (`report` | `access` | `question` | `incident` | `export`),
 `asker` (команда или роль, **не ФИО**), `status`, `link` (тред), `needs_review`.
 
+У кейсов, восстановленных из выгрузки канала, дополнительно `source: channel-import`
+и `external_id` (идентификатор обращения в выгрузке — нужен, чтобы повторный импорт
+не задваивал записи). Такой кейс беднее написанного вручную и при конфликте уступает
+ему: см. [`docs/prompt-import-channel.md`](docs/prompt-import-channel.md).
+
 **Выгрузка (`exports/*/README.md`):**
 `date`, `asker`, `deadline`, `status` (`agreed` | `in_progress` | `delivered`),
 `link`, `tables`, `case`.
