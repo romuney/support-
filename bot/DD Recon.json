@@ -189,7 +189,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\n// Что вернули пять суб-ресурсов карточки отчёта и ГДЕ ЛЕЖИТ ВЛАДЕЛЕЦ.\n//\n// Это и есть вопрос, ради которого фаза A существует: если владелец приходит\n// из каталога, в git его дублировать не нужно — он там протухнет молча, как\n// протух бы список полей. Ответ читается глазами один раз, поэтому вывод\n// сделан текстом, а не структурой.\nconst NAMES = [\"Recon related\", \"Recon summary\", \"Recon attribute\", \"Recon markdown\", \"Recon link\"];\nconst OWNER_RE = /владел|owner|steward|ответствен|responsible|автор|author|куратор/i;\n\nconst lines = [];\nconst owners = [];\n\n// Значение атрибута DD — обёртка { type, data }. Без распаковки тип поля\n// однажды уехал агенту строкой «[object Object]»: та же ошибка здесь сделала\n// бы владельца нечитаемым.\nconst attrData = (v) => (v && typeof v === 'object' && 'data' in v ? v.data : v);\nconst short = (v) => {\n  const s = typeof v === 'string' ? v : JSON.stringify(v);\n  return s === undefined ? '(undefined)' : s.length > 300 ? s.slice(0, 300) + '…' : s;\n};\n\nfor (const name of NAMES) {\n  let res;\n  try {\n    res = $(name).first().json;\n  } catch (e) {\n    lines.push(`${name}: узел не выполнялся`);\n    continue;\n  }\n  const status = res?.statusCode ?? '(нет statusCode)';\n  const body = res?.body ?? res;\n  lines.push('');\n  lines.push(`=== ${name} — HTTP ${status} ===`);\n  if (status === 401) {\n    // Отдельной строкой, а не общим «не то пришло»: 401 это истёкший Service\n    // Account, и лечится он не правкой запроса.\n    lines.push('истёк Service Account — обновить credential, запрос ни при чём');\n    continue;\n  }\n  if (body === undefined || body === null || body === '') {\n    lines.push('пустое тело');\n    continue;\n  }\n  if (typeof body === 'string') {\n    // HTML вместо JSON — это страница логина: followRedirects выключен\n    // именно от этого, но если пришло, надо назвать причину, а не «странный\n    // ответ».\n    lines.push(/^\\s*</.test(body)\n      ? 'пришёл HTML, а не JSON — похоже на страницу логина'\n      : short(body));\n    continue;\n  }\n  const keys = Object.keys(body);\n  lines.push('ключи верхнего уровня: ' + (keys.length ? keys.join(', ') : '(пусто)'));\n  lines.push(short(body));\n\n  // Ищем владельца ВЕЗДЕ, а не в угаданном заранее поле: имя ключа неизвестно,\n  // и подобрать его перебором дороже, чем прочитать один раз глазами.\n  const walk = (v, path) => {\n    if (v === null || typeof v !== 'object') return;\n    for (const [k, raw] of Object.entries(v)) {\n      const here = path ? path + '.' + k : k;\n      if (OWNER_RE.test(k)) owners.push(`${name}: ${here} = ${short(attrData(raw))}`);\n      walk(raw, here);\n    }\n  };\n  walk(body, '');\n}\n\nconst head = [];\nhead.push('РАЗВЕДКА ОТЧЁТА ' + \"urn:dd:reports:reports:report:1728\");\nhead.push('');\nhead.push(owners.length\n  ? 'ВЛАДЕЛЕЦ НАЙДЕН ЗДЕСЬ:\\n— ' + owners.join('\\n— ')\n  : 'ВЛАДЕЛЬЦА НЕ ВИДНО НИ В ОДНОМ ИЗ ПЯТИ ОТВЕТОВ. Это не значит, что его нет: '\n    + 'ключ может называться иначе — прочитать тела ниже глазами. Если его там '\n    + 'правда нет, владелец остаётся в git как исключение, и это ответ на '\n    + 'вопрос, ради которого разведка делалась.');\nhead.push('');\nhead.push('СВЕРИТЬ С ЭТАЛОНОМ (кого аналитик тегает по этим отчётам):');\nfor (const [r, who] of [[\"[CrossData] Лидерский снепшот\", \"[Login79]\"], [\"Активность в GitLab\", \"Aliya Kolomeets\"], [\"Амбассадорство сотрудников\", \"s.kopytov\"]]) head.push(`— ${r} → ${who}`);\n\nreturn [{ json: { report: head.concat(lines).join('\\n'), owner_hits: owners } }];\n",
+        "jsCode": "\n// Что вернули пять суб-ресурсов карточки отчёта и ГДЕ ЛЕЖИТ ВЛАДЕЛЕЦ.\n//\n// Это и есть вопрос, ради которого фаза A существует: если владелец приходит\n// из каталога, в git его дублировать не нужно — он там протухнет молча, как\n// протух бы список полей. Ответ читается глазами один раз, поэтому вывод\n// сделан текстом, а не структурой.\nconst NAMES = [\"Recon related\", \"Recon summary\", \"Recon attribute\", \"Recon markdown\", \"Recon link\"];\n// Прогон 2026-08-27: owner_hits оказался ПУСТ, хотя ответ владельца содержал.\n// В /attribute у отчёта лежат report_developer, data_team, developers_team\n// и support_channel — ни одно из них под прежний регексп не подходило,\n// и разведка отрапортовала «владельца не видно», имея его на руках.\n// Тихий отказ ровно того класса, от которого защищено всё остальное:\n// искали по угаданному списку слов и приняли промах списка за факт.\nconst OWNER_RE = /владел|owner|steward|ответствен|responsible|автор|author|куратор|developer|разработ|team|команд|support|поддержк|maintain|contact|контакт/i;\n\nconst lines = [];\nconst owners = [];\n\n// Значение атрибута DD — обёртка { type, data }. Без распаковки тип поля\n// однажды уехал агенту строкой «[object Object]»: та же ошибка здесь сделала\n// бы владельца нечитаемым.\nconst attrData = (v) => (v && typeof v === 'object' && 'data' in v ? v.data : v);\nconst short = (v) => {\n  const s = typeof v === 'string' ? v : JSON.stringify(v);\n  return s === undefined ? '(undefined)' : s.length > 300 ? s.slice(0, 300) + '…' : s;\n};\n\nfor (const name of NAMES) {\n  let res;\n  try {\n    res = $(name).first().json;\n  } catch (e) {\n    lines.push(`${name}: узел не выполнялся`);\n    continue;\n  }\n  const status = res?.statusCode ?? '(нет statusCode)';\n  const body = res?.body ?? res;\n  lines.push('');\n  lines.push(`=== ${name} — HTTP ${status} ===`);\n  if (status === 401) {\n    // Отдельной строкой, а не общим «не то пришло»: 401 это истёкший Service\n    // Account, и лечится он не правкой запроса.\n    lines.push('истёк Service Account — обновить credential, запрос ни при чём');\n    continue;\n  }\n  if (body === undefined || body === null || body === '') {\n    lines.push('пустое тело');\n    continue;\n  }\n  if (typeof body === 'string') {\n    // HTML вместо JSON — это страница логина: followRedirects выключен\n    // именно от этого, но если пришло, надо назвать причину, а не «странный\n    // ответ».\n    lines.push(/^\\s*</.test(body)\n      ? 'пришёл HTML, а не JSON — похоже на страницу логина'\n      : short(body));\n    continue;\n  }\n  const keys = Object.keys(body);\n  lines.push('ключи верхнего уровня: ' + (keys.length ? keys.join(', ') : '(пусто)'));\n  lines.push(short(body));\n\n  // Ищем владельца ВЕЗДЕ, а не в угаданном заранее поле: имя ключа неизвестно,\n  // и подобрать его перебором дороже, чем прочитать один раз глазами.\n  const walk = (v, path) => {\n    if (v === null || typeof v !== 'object') return;\n    for (const [k, raw] of Object.entries(v)) {\n      const here = path ? path + '.' + k : k;\n      if (OWNER_RE.test(k)) owners.push(`${name}: ${here} = ${short(attrData(raw))}`);\n      walk(raw, here);\n    }\n  };\n  walk(body, '');\n}\n\nconst head = [];\nhead.push('РАЗВЕДКА ОТЧЁТА ' + \"urn:dd:reports:reports:report:1728\");\nhead.push('');\nhead.push(owners.length\n  ? 'ВЛАДЕЛЕЦ НАЙДЕН ЗДЕСЬ:\\n— ' + owners.join('\\n— ')\n  : 'ВЛАДЕЛЬЦА НЕ ВИДНО НИ В ОДНОМ ИЗ ПЯТИ ОТВЕТОВ. Это не значит, что его нет: '\n    + 'ключ может называться иначе — прочитать тела ниже глазами. Если его там '\n    + 'правда нет, владелец остаётся в git как исключение, и это ответ на '\n    + 'вопрос, ради которого разведка делалась.');\nhead.push('');\nhead.push('СВЕРИТЬ С ЭТАЛОНОМ (кого аналитик тегает по этим отчётам):');\nfor (const [r, who] of [[\"[CrossData] Лидерский снепшот\", \"[Login79]\"], [\"Активность в GitLab\", \"Aliya Kolomeets\"], [\"Амбассадорство сотрудников\", \"s.kopytov\"]]) head.push(`— ${r} → ${who}`);\n\nreturn [{ json: { report: head.concat(lines).join('\\n'), owner_hits: owners } }];\n",
         "mode": "runOnceForAllItems"
       },
       "type": "n8n-nodes-base.code",
@@ -349,7 +349,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\n// Готовые строки таблицы «Отчёты Proteus» для kb/index.md.\n//\n// Мост — это ДВЕ колонки и только они: ключ ссылки и dd_urn. Ни названия,\n// ни владельца: они приезжают из карточки DD в момент ответа и в git\n// протухли бы молча — то же правило, по которому в статье не дублируется\n// состав полей.\nconst FEEDBACK = {\"23466\": \"[CrossData] Центр развития Аватар\", \"28227\": \"[C&B] Выгрузка заявлений на компенсацию\", \"23003\": \"[CrossData] Лидерский снепшот\", \"14586\": \"[CROSS SD] Поддержка программы Приведи друга\", \"35005\": \"Активность в GitLab\", \"employee_ambassadorship\": \"Амбассадорство сотрудников\", \"YApDgAlG5gQ\": \"[CrossData] Центр развития «Крепкие лиды»\", \"DKpqdNQa51J\": \"Путь лида\", \"jQpM212k30X\": \"Календарь присутствия сотрудников\", \"mb5bg1qzp1l\": \"Мониторинг аллокаций\"};\nconst NO_KEY = [\"Квоты и вакансии\", \"Юридические позиции сотрудника за период\", \"Справки и заявления (статистика)\", \"HR Executive Report\"];\n\n// Ключ ссылки Proteus — тот же разбор, что в «Plan» ядра (reportSlug):\n// /dashboard/23466/, /dashboard/p/el8AZBZX5Zv/, /dashboard/employee_ambassadorship/.\n// Служебные сегменты пропускаем, иначе ключом стало бы слово «p».\nconst reportSlug = (url) => {\n  const path = String(url ?? '').split('?')[0].split('#')[0];\n  const segs = path.split('/').filter(Boolean).filter((s) => !/^https?:$/.test(s));\n  const skip = new Set(['superset', 'dashboard', 'dashboards', 'p', 'list', 'view']);\n  for (let i = segs.length - 1; i >= 0; i--) {\n    if (!skip.has(segs[i].toLowerCase()) && !segs[i].includes('.')) return segs[i];\n  }\n  return '';\n};\n\nconst urlsOf = (v, out) => {\n  if (v === null || v === undefined) return out;\n  if (typeof v === 'string') {\n    for (const m of v.match(/https?:\\/\\/\\S+/g) || []) out.push(m.replace(/[),.;\"']+$/, ''));\n    return out;\n  }\n  if (typeof v === 'object') for (const x of Object.values(v)) urlsOf(x, out);\n  return out;\n};\n\nconst notes = $('Collect notes').all().map((i) => i.json);\nconst links = $input.all().map((i) => i.json);\n\nconst rows = [];      // { key, urn, url }\nconst noLink = [];\nconst notProteus = [];\n\n// Пара «отчёт ↔ его ссылки» держится ИНДЕКСОМ: оба списка идут по одному\n// и тому же порядку элементов, порядок n8n сохраняет. Ровно так же имя\n// колонки берётся из «Pick columns» в DD Lookup — ни один из ответов\n// каталога имени объекта не несёт.\nnotes.forEach((n, idx) => {\n  const res = links[idx] ?? {};\n  const status = res.statusCode ?? 0;\n  const body = res.body ?? res;\n  if (status && status !== 200) { noLink.push(`${n.urn}: HTTP ${status}`); return; }\n  const urls = urlsOf(body, []);\n  const proteus = urls.filter((u) => /proteus|superset/i.test(u));\n  if (!urls.length) { noLink.push(`${n.urn}: ссылок нет`); return; }\n  if (!proteus.length) { notProteus.push(`${n.urn}: ${urls[0]}`); return; }\n  const key = reportSlug(proteus[0]);\n  if (!key) { notProteus.push(`${n.urn}: ключ из ссылки не выделился — ${proteus[0]}`); return; }\n  rows.push({ key, urn: n.urn, url: proteus[0], fqn: n.fqn });\n});\n\n// Один ключ у двух отчётов — это не мост, а развилка: матчинг в «Plan» взял бы\n// первый попавшийся. Называем, а не схлопываем молча.\nconst byKey = new Map();\nfor (const r of rows) {\n  if (!byKey.has(r.key)) byKey.set(r.key, []);\n  byKey.get(r.key).push(r);\n}\nconst collisions = [...byKey].filter(([, v]) => v.length > 1)\n  .map(([k, v]) => `${k} → ${v.map((r) => r.urn).join(' и ')}`);\n\nconst meta = notes[0] ?? {};\nconst covered = Object.keys(FEEDBACK).filter((k) => byKey.has(k));\nconst missing = Object.keys(FEEDBACK).filter((k) => !byKey.has(k));\n\nconst out = [];\nout.push('МОСТ «ключ ссылки → dd_urn»: ' + byKey.size + ' пар из ' +\n  (meta._total_found ?? 0) + ' отчётов и ноутбуков, читающих витрины реестра');\nif (meta._dropped) {\n  out.push('ПО ЛИМИТУ НЕ ПРОВЕРЯЛИСЬ: ' + meta._dropped + ' объектов — ' +\n    'поднять MAX_NOTES в «Collect notes» и прогнать ещё раз');\n}\nif ((meta._problems ?? []).length) out.push('ВИТРИНЫ С ОШИБКОЙ: ' + meta._problems.join('; '));\nout.push('');\nout.push('ВСТАВИТЬ В kb/index.md, таблица «Отчёты Proteus»:');\nout.push('');\nout.push('| ключ ссылки | dd_urn |');\nout.push('|---|---|');\nfor (const [key, v] of [...byKey].sort((a, b) => a[0].localeCompare(b[0]))) {\n  out.push(`| ${key} | ${v[0].urn} |`);\n}\nout.push('');\nout.push('ПОКРЫТИЕ ЭТАЛОНА (ключи из фидбека аналитика): ' +\n  covered.length + ' из ' + Object.keys(FEEDBACK).length);\nfor (const k of missing) out.push(`— НЕ НАЙДЕН: ${k} (${FEEDBACK[k]})`);\nout.push('');\nout.push('ОТЧЁТЫ ФИДБЕКА БЕЗ КЛЮЧА ССЫЛКИ — мост их не закроет, искать по имени:');\nfor (const n of NO_KEY) out.push(`— ${n}`);\nif (collisions.length) {\n  out.push('');\n  out.push('ОДИН КЛЮЧ У НЕСКОЛЬКИХ ОБЪЕКТОВ — разобрать руками, матчинг возьмёт первый:');\n  for (const c of collisions) out.push('— ' + c);\n}\nif (noLink.length) {\n  out.push('');\n  out.push('БЕЗ ССЫЛОК (' + noLink.length + '):');\n  for (const s of noLink.slice(0, 30)) out.push('— ' + s);\n}\nif (notProteus.length) {\n  out.push('');\n  out.push('ССЫЛКИ ЕСТЬ, НО НЕ НА PROTEUS (' + notProteus.length + ') — это ноутбуки:');\n  for (const s of notProteus.slice(0, 30)) out.push('— ' + s);\n}\n\nreturn [{ json: {\n  report: out.join('\\n'),\n  rows: [...byKey].map(([key, v]) => ({ key, urn: v[0].urn, url: v[0].url })),\n  covered, missing, collisions,\n} }];\n",
+        "jsCode": "\n// Готовые строки таблицы «Отчёты Proteus» для kb/index.md.\n//\n// Мост — это ДВЕ колонки и только они: ключ ссылки и dd_urn. Ни названия,\n// ни владельца: они приезжают из карточки DD в момент ответа и в git\n// протухли бы молча — то же правило, по которому в статье не дублируется\n// состав полей.\nconst FEEDBACK = {\"23466\": \"[CrossData] Центр развития Аватар\", \"28227\": \"[C&B] Выгрузка заявлений на компенсацию\", \"23003\": \"[CrossData] Лидерский снепшот\", \"14586\": \"[CROSS SD] Поддержка программы Приведи друга\", \"35005\": \"Активность в GitLab\", \"employee_ambassadorship\": \"Амбассадорство сотрудников\", \"YApDgAlG5gQ\": \"[CrossData] Центр развития «Крепкие лиды»\", \"DKpqdNQa51J\": \"Путь лида\", \"jQpM212k30X\": \"Календарь присутствия сотрудников\", \"mb5bg1qzp1l\": \"Мониторинг аллокаций\"};\nconst NO_KEY = [\"Квоты и вакансии\", \"Юридические позиции сотрудника за период\", \"Справки и заявления (статистика)\", \"HR Executive Report\"];\n\n// Ключ ссылки Proteus — тот же разбор, что в «Plan» ядра (reportSlug):\n// /dashboard/23466/, /dashboard/p/el8AZBZX5Zv/, /dashboard/employee_ambassadorship/.\n// Служебные сегменты пропускаем, иначе ключом стало бы слово «p».\nconst reportSlug = (url) => {\n  const path = String(url ?? '').split('?')[0].split('#')[0];\n  const segs = path.split('/').filter(Boolean).filter((s) => !/^https?:$/.test(s));\n  const skip = new Set(['superset', 'dashboard', 'dashboards', 'p', 'list', 'view']);\n  for (let i = segs.length - 1; i >= 0; i--) {\n    if (!skip.has(segs[i].toLowerCase()) && !segs[i].includes('.')) return segs[i];\n  }\n  return '';\n};\n\nconst urlsOf = (v, out) => {\n  if (v === null || v === undefined) return out;\n  if (typeof v === 'string') {\n    for (const m of v.match(/https?:\\/\\/\\S+/g) || []) out.push(m.replace(/[),.;\"']+$/, ''));\n    return out;\n  }\n  if (typeof v === 'object') for (const x of Object.values(v)) urlsOf(x, out);\n  return out;\n};\n\nconst notes = $('Collect notes').all().map((i) => i.json);\nconst links = $input.all().map((i) => i.json);\n\nconst rows = [];      // { key, urn, url }\nconst noLink = [];\nconst notProteus = [];\n\n// Пара «отчёт ↔ его ссылки» держится ИНДЕКСОМ: оба списка идут по одному\n// и тому же порядку элементов, порядок n8n сохраняет. Ровно так же имя\n// колонки берётся из «Pick columns» в DD Lookup — ни один из ответов\n// каталога имени объекта не несёт.\nnotes.forEach((n, idx) => {\n  const res = links[idx] ?? {};\n  const status = res.statusCode ?? 0;\n  const body = res.body ?? res;\n  if (status && status !== 200) { noLink.push(`${n.urn}: HTTP ${status}`); return; }\n  const urls = urlsOf(body, []);\n  const proteus = urls.filter((u) => /proteus|superset/i.test(u));\n  if (!urls.length) { noLink.push(`${n.urn}: ссылок нет`); return; }\n  if (!proteus.length) { notProteus.push(`${n.urn}: ${urls[0]}`); return; }\n  const key = reportSlug(proteus[0]);\n  if (!key) { notProteus.push(`${n.urn}: ключ из ссылки не выделился — ${proteus[0]}`); return; }\n  rows.push({ key, urn: n.urn, url: proteus[0], fqn: n.fqn });\n});\n\n// Один ключ у двух отчётов — это не мост, а развилка: матчинг в «Plan» взял бы\n// первый попавшийся. Называем, а не схлопываем молча.\nconst byKey = new Map();\nfor (const r of rows) {\n  if (!byKey.has(r.key)) byKey.set(r.key, []);\n  byKey.get(r.key).push(r);\n}\nconst collisions = [...byKey].filter(([, v]) => v.length > 1)\n  .map(([k, v]) => `${k} → ${v.map((r) => r.urn).join(' и ')}`);\n\nconst meta = notes[0] ?? {};\nconst covered = Object.keys(FEEDBACK).filter((k) => byKey.has(k));\nconst missing = Object.keys(FEEDBACK).filter((k) => !byKey.has(k));\n\nconst out = [];\nout.push('МОСТ «ключ ссылки → dd_urn»: ' + byKey.size + ' пар из ' +\n  (meta._total_found ?? 0) + ' отчётов и ноутбуков, читающих витрины реестра');\nif (meta._dropped) {\n  out.push('ПО ЛИМИТУ НЕ ПРОВЕРЯЛИСЬ: ' + meta._dropped + ' объектов.');\n}\n// Прогон 2026-08-27: 0 пар из 1782, и все 60 проверенных оказались ноутбуками\n// Helicopter. Поднимать лимит бессмысленно — связь `notes` по построению\n// возвращает сущности типа NOTE, а дашборды Proteus это тип REPORT.\n// Мост через неё не собрать ни при каком лимите; см. фазу E.\nif (!byKey.size) {\n  out.push('');\n  out.push('НИ ОДНОЙ ПАРЫ. Если среди проверенных только ноутбуки Helicopter —');\n  out.push('дело НЕ в лимите: связь «notes» отдаёт сущности типа NOTE, а');\n  out.push('дашборды Proteus это тип REPORT. Нужна другая связь либо поиск —');\n  out.push('см. вывод ноды «Shape probes» (фаза E).');\n}\nif ((meta._problems ?? []).length) out.push('ВИТРИНЫ С ОШИБКОЙ: ' + meta._problems.join('; '));\nout.push('');\nout.push('ВСТАВИТЬ В kb/index.md, таблица «Отчёты Proteus»:');\nout.push('');\nout.push('| ключ ссылки | dd_urn |');\nout.push('|---|---|');\nfor (const [key, v] of [...byKey].sort((a, b) => a[0].localeCompare(b[0]))) {\n  out.push(`| ${key} | ${v[0].urn} |`);\n}\nout.push('');\nout.push('ПОКРЫТИЕ ЭТАЛОНА (ключи из фидбека аналитика): ' +\n  covered.length + ' из ' + Object.keys(FEEDBACK).length);\nfor (const k of missing) out.push(`— НЕ НАЙДЕН: ${k} (${FEEDBACK[k]})`);\nout.push('');\nout.push('ОТЧЁТЫ ФИДБЕКА БЕЗ КЛЮЧА ССЫЛКИ — мост их не закроет, искать по имени:');\nfor (const n of NO_KEY) out.push(`— ${n}`);\nif (collisions.length) {\n  out.push('');\n  out.push('ОДИН КЛЮЧ У НЕСКОЛЬКИХ ОБЪЕКТОВ — разобрать руками, матчинг возьмёт первый:');\n  for (const c of collisions) out.push('— ' + c);\n}\nif (noLink.length) {\n  out.push('');\n  out.push('БЕЗ ССЫЛОК (' + noLink.length + '):');\n  for (const s of noLink.slice(0, 30)) out.push('— ' + s);\n}\nif (notProteus.length) {\n  out.push('');\n  out.push('ССЫЛКИ ЕСТЬ, НО НЕ НА PROTEUS (' + notProteus.length + ') — это ноутбуки:');\n  for (const s of notProteus.slice(0, 30)) out.push('— ' + s);\n}\n\nreturn [{ json: {\n  report: out.join('\\n'),\n  rows: [...byKey].map(([key, v]) => ({ key, urn: v[0].urn, url: v[0].url })),\n  covered, missing, collisions,\n} }];\n",
         "mode": "runOnceForAllItems"
       },
       "type": "n8n-nodes-base.code",
@@ -360,6 +360,210 @@
       ],
       "id": "recon-build-bridge",
       "name": "Build bridge"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:table:hrmart.mdm_employee_attendance') + '/related' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        800
+      ],
+      "id": "recon-table-related",
+      "name": "Table related",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:1728') + '/related/source_tables' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        920,
+        800
+      ],
+      "id": "recon-report-sources",
+      "name": "Report sources",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"limit\": 5}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        940
+      ],
+      "id": "recon-search-base",
+      "name": "Search base",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"text\": \"Активность в GitLab\", \"limit\": 5}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        920,
+        940
+      ],
+      "id": "recon-search-text",
+      "name": "Search text",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"searchText\": \"Активность в GitLab\", \"limit\": 5}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        940
+      ],
+      "id": "recon-search-searchtext",
+      "name": "Search searchText",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Фаза E: разбор пяти проб. Ничего не решает — печатает, что выяснилось.\nconst body = (name) => {\n  let it;\n  try { it = $(name).first().json; } catch (e) { return { miss: 'узел не выполнялся' }; }\n  if (!it) return { miss: 'пусто' };\n  if (it.error) return { miss: 'ОТКАЗ — ' + JSON.stringify(it.error).slice(0, 300) };\n  const code = it.statusCode;\n  const b = it.body !== undefined ? it.body : it;\n  if (code !== undefined && code >= 400) return { miss: `HTTP ${code}` };\n  return { b, code };\n};\nconst out = [];\nconst say = (s) => out.push(s);\nconst short = (v) => JSON.stringify(v).slice(0, 500);\n\nsay('=== ФАЗА E: связи таблицы, источники отчёта, форма поиска ===');\n\n// --- 1. какая связь у таблицы отдаёт REPORT\nsay('');\nsay('СВЯЗИ ТАБЛИЦЫ (до сих пор брали `notes` из документации):');\nconst tr = body('Table related');\nif (tr.miss) say('  ' + tr.miss);\nelse {\n  const keys = Object.keys(tr.b || {});\n  say('  ключи: ' + keys.join(', '));\n  const reportish = keys.filter((k) => {\n    const t = ((tr.b[k] || {}).entity || {}).type || '';\n    return /REPORT|DASHBOARD/i.test(t);\n  });\n  say(reportish.length\n    ? '  ОТДАЮТ REPORT/DASHBOARD: ' + reportish.join(', ') +\n      ' ← мост строить через них'\n    : '  НИ ОДНА связь таблицы не отдаёт REPORT. Тогда от витрины к дашборду ' +\n      'пути нет, и мост собирается только со стороны отчётов — через поиск.');\n  for (const k of keys) {\n    const e = (tr.b[k] || {}).entity || {};\n    say(`  — ${k}: type=${e.type || '?'} system=${e.system || '?'}`);\n  }\n}\n\n// --- 2. отчёт → витрина\nsay('');\nsay('ИСТОЧНИКИ ОТЧЁТА (source_tables):');\nconst rs = body('Report sources');\nif (rs.miss) say('  ' + rs.miss);\nelse {\n  const arr = Array.isArray(rs.b) ? rs.b : (rs.b || {}).data || [];\n  say('  найдено: ' + arr.length);\n  for (const x of arr.slice(0, 10)) {\n    const e = x.entity || x;\n    say(`  — ${e.fqn || e.urn || short(x)}`);\n  }\n  say(arr.length\n    ? '  ← это и есть «на какой витрине построен отчёт», без git'\n    : '  пусто: связь есть, но не заполнена — тогда витрину придётся ' +\n      'держать в реестре рядом с ключом ссылки');\n}\n\n// --- 3. форма поиска\nsay('');\nsay('ПОИСК: какое поле несёт текст запроса');\nconst base = body('Search base');\nconst first = (r) => {\n  if (r.miss) return r.miss;\n  const arr = Array.isArray(r.b) ? r.b : (r.b || {}).data || [];\n  return arr.length ? (arr[0].urn || short(arr[0])) : '(пусто)';\n};\nconst fBase = first(base);\nsay('  Search base {limit}          → ' + fBase);\nfor (const nm of ['Search text', 'Search searchText']) {\n  const f = first(body(nm));\n  const field = nm.replace('Search ', '');\n  say(`  {${field}: \"<название>\"}  → ` + f);\n  if (!body(nm).miss) {\n    say(f !== fBase\n      ? `    ← ВЫДАЧА ОТЛИЧАЕТСЯ: поле «${field}» РАБОТАЕТ, тело поиска найдено`\n      : `    ← выдача та же, что без текста: поле «${field}» игнорируется`);\n  }\n}\nsay('');\nsay('Если ни одно поле не сработало — тело SearchRequest придётся смотреть');\nsay('в спецификации API, перебором его не найти: сервер отвечает 200');\nsay('на любое тело и о неизвестных полях молчит.');\n\nreturn [{ json: { probes: out.join('\\n') } }];\n",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        870
+      ],
+      "id": "recon-shape-probes",
+      "name": "Shape probes"
     },
     {
       "parameters": {
@@ -579,6 +783,72 @@
       ]
     },
     "Build bridge": {
+      "main": [
+        [
+          {
+            "node": "Table related",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Table related": {
+      "main": [
+        [
+          {
+            "node": "Report sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report sources": {
+      "main": [
+        [
+          {
+            "node": "Search base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search base": {
+      "main": [
+        [
+          {
+            "node": "Search text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search text": {
+      "main": [
+        [
+          {
+            "node": "Search searchText",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search searchText": {
+      "main": [
+        [
+          {
+            "node": "Shape probes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape probes": {
       "main": [
         [
           {

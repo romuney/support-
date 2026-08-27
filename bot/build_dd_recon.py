@@ -248,7 +248,13 @@ SHAPE_RECON_JS = r"""
 // протух бы список полей. Ответ читается глазами один раз, поэтому вывод
 // сделан текстом, а не структурой.
 const NAMES = __NAMES__;
-const OWNER_RE = /владел|owner|steward|ответствен|responsible|автор|author|куратор/i;
+// Прогон 2026-08-27: owner_hits оказался ПУСТ, хотя ответ владельца содержал.
+// В /attribute у отчёта лежат report_developer, data_team, developers_team
+// и support_channel — ни одно из них под прежний регексп не подходило,
+// и разведка отрапортовала «владельца не видно», имея его на руках.
+// Тихий отказ ровно того класса, от которого защищено всё остальное:
+// искали по угаданному списку слов и приняли промах списка за факт.
+const OWNER_RE = /владел|owner|steward|ответствен|responsible|автор|author|куратор|developer|разработ|team|команд|support|поддержк|maintain|contact|контакт/i;
 
 const lines = [];
 const owners = [];
@@ -533,8 +539,18 @@ const out = [];
 out.push('МОСТ «ключ ссылки → dd_urn»: ' + byKey.size + ' пар из ' +
   (meta._total_found ?? 0) + ' отчётов и ноутбуков, читающих витрины реестра');
 if (meta._dropped) {
-  out.push('ПО ЛИМИТУ НЕ ПРОВЕРЯЛИСЬ: ' + meta._dropped + ' объектов — ' +
-    'поднять MAX_NOTES в «Collect notes» и прогнать ещё раз');
+  out.push('ПО ЛИМИТУ НЕ ПРОВЕРЯЛИСЬ: ' + meta._dropped + ' объектов.');
+}
+// Прогон 2026-08-27: 0 пар из 1782, и все 60 проверенных оказались ноутбуками
+// Helicopter. Поднимать лимит бессмысленно — связь `notes` по построению
+// возвращает сущности типа NOTE, а дашборды Proteus это тип REPORT.
+// Мост через неё не собрать ни при каком лимите; см. фазу E.
+if (!byKey.size) {
+  out.push('');
+  out.push('НИ ОДНОЙ ПАРЫ. Если среди проверенных только ноутбуки Helicopter —');
+  out.push('дело НЕ в лимите: связь «notes» отдаёт сущности типа NOTE, а');
+  out.push('дашборды Proteus это тип REPORT. Нужна другая связь либо поиск —');
+  out.push('см. вывод ноды «Shape probes» (фаза E).');
 }
 if ((meta._problems ?? []).length) out.push('ВИТРИНЫ С ОШИБКОЙ: ' + meta._problems.join('; '));
 out.push('');
@@ -589,6 +605,156 @@ nodes.append(
 # Строго ЦЕПОЧКА, без веера. В n8n нет неявного слияния: узел за развилкой
 # выполняется по разу на каждую дошедшую ветвь, и разведённые фазы дали бы
 # два прогона моста на один запуск.
+# ------------------------------------- ФАЗА E: чего не хватило после прогона 1
+#
+# Прогон 2026-08-27 дал три результата, каждый меняет план:
+#
+#  1. ВЛАДЕЛЕЦ В КАТАЛОГЕ ЕСТЬ. В /attribute отчёта лежат report_developer,
+#     data_team, developers_team, support_channel — просто прежний регексп
+#     их не ловил. Починено выше, отдельной пробы не требует.
+#
+#  2. МОСТ ЧЕРЕЗ `notes` НЕ СОБРАТЬ. 0 пар из 1782, и все проверенные —
+#     ноутбуки Helicopter. Связь `notes` по построению отдаёт тип NOTE,
+#     а дашборды Proteus это тип REPORT: дело не в лимите. Значит надо
+#     узнать, какая связь у ТАБЛИЦЫ отдаёт REPORT — и узнать, а не угадать.
+#     Список ключей связей таблицы мы ни разу не запрашивали: он взят
+#     из документации, и `notes` оттуда же.
+#
+#  3. ПОИСК ОТВЕЧАЕТ 200 И ИГНОРИРУЕТ ПОЛЕ `query`. Вернулись колонки чужих
+#     схем — то есть выдача по умолчанию, без фильтра. Тело угадано неверно,
+#     а 400 сервер не отдаёт, значит имя поля из ошибки не узнать. Поэтому
+#     проб три: базовая без текста и две с разными именами поля. Если выдача
+#     варианта отличается от базовой — имя поля найдено.
+#
+# Плюс `source_tables` у отчёта: этот ключ виден в ответе /related прогона 1
+# и отвечает на вторую половину вопроса — на какой витрине построен отчёт.
+ENC_TABLE0 = f"encodeURIComponent('{TABLE_URNS[0]}')"
+PHASE_E_GET = [
+    # Ключи связей У ТАБЛИЦЫ. До сих пор брались из документации.
+    ("Table related", f"={{{{ '{BASE}/entity/' + {ENC_TABLE0} + '/related' }}}}"),
+    # Отчёт → витрина, на которой он построен.
+    ("Report sources",
+     f"={{{{ '{BASE}/entity/' + {ENC_RECON} + '/related/source_tables' }}}}"),
+]
+for i, (nm, url) in enumerate(PHASE_E_GET):
+    nodes.append(get(nm, url, [720 + i * 200, 800]))
+
+# Три пробы поиска. Тело JSON, поле текста — вот что выясняем.
+SEARCH_NAME = OWNER_REFERENCE[1][0]
+PHASE_E_POST = [
+    ("Search base", {"limit": 5}),
+    ("Search text", {"text": SEARCH_NAME, "limit": 5}),
+    ("Search searchText", {"searchText": SEARCH_NAME, "limit": 5}),
+]
+for i, (nm, body) in enumerate(PHASE_E_POST):
+    n = node(
+        nm, "n8n-nodes-base.httpRequest", 4.4, [720 + i * 200, 940],
+        {
+            "method": "POST",
+            "url": f"{BASE}/search/query",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "devplatformApi",
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": json.dumps(body, ensure_ascii=False),
+            "options": copy.deepcopy(DD_OPTS),
+        },
+        DP_CRED,
+    )
+    n["onError"] = "continueRegularOutput"
+    n["executeOnce"] = True
+    nodes.append(n)
+
+SHAPE_PROBES_JS = r"""
+// Фаза E: разбор пяти проб. Ничего не решает — печатает, что выяснилось.
+const body = (name) => {
+  let it;
+  try { it = $(name).first().json; } catch (e) { return { miss: 'узел не выполнялся' }; }
+  if (!it) return { miss: 'пусто' };
+  if (it.error) return { miss: 'ОТКАЗ — ' + JSON.stringify(it.error).slice(0, 300) };
+  const code = it.statusCode;
+  const b = it.body !== undefined ? it.body : it;
+  if (code !== undefined && code >= 400) return { miss: `HTTP ${code}` };
+  return { b, code };
+};
+const out = [];
+const say = (s) => out.push(s);
+const short = (v) => JSON.stringify(v).slice(0, 500);
+
+say('=== ФАЗА E: связи таблицы, источники отчёта, форма поиска ===');
+
+// --- 1. какая связь у таблицы отдаёт REPORT
+say('');
+say('СВЯЗИ ТАБЛИЦЫ (до сих пор брали `notes` из документации):');
+const tr = body('Table related');
+if (tr.miss) say('  ' + tr.miss);
+else {
+  const keys = Object.keys(tr.b || {});
+  say('  ключи: ' + keys.join(', '));
+  const reportish = keys.filter((k) => {
+    const t = ((tr.b[k] || {}).entity || {}).type || '';
+    return /REPORT|DASHBOARD/i.test(t);
+  });
+  say(reportish.length
+    ? '  ОТДАЮТ REPORT/DASHBOARD: ' + reportish.join(', ') +
+      ' ← мост строить через них'
+    : '  НИ ОДНА связь таблицы не отдаёт REPORT. Тогда от витрины к дашборду ' +
+      'пути нет, и мост собирается только со стороны отчётов — через поиск.');
+  for (const k of keys) {
+    const e = (tr.b[k] || {}).entity || {};
+    say(`  — ${k}: type=${e.type || '?'} system=${e.system || '?'}`);
+  }
+}
+
+// --- 2. отчёт → витрина
+say('');
+say('ИСТОЧНИКИ ОТЧЁТА (source_tables):');
+const rs = body('Report sources');
+if (rs.miss) say('  ' + rs.miss);
+else {
+  const arr = Array.isArray(rs.b) ? rs.b : (rs.b || {}).data || [];
+  say('  найдено: ' + arr.length);
+  for (const x of arr.slice(0, 10)) {
+    const e = x.entity || x;
+    say(`  — ${e.fqn || e.urn || short(x)}`);
+  }
+  say(arr.length
+    ? '  ← это и есть «на какой витрине построен отчёт», без git'
+    : '  пусто: связь есть, но не заполнена — тогда витрину придётся ' +
+      'держать в реестре рядом с ключом ссылки');
+}
+
+// --- 3. форма поиска
+say('');
+say('ПОИСК: какое поле несёт текст запроса');
+const base = body('Search base');
+const first = (r) => {
+  if (r.miss) return r.miss;
+  const arr = Array.isArray(r.b) ? r.b : (r.b || {}).data || [];
+  return arr.length ? (arr[0].urn || short(arr[0])) : '(пусто)';
+};
+const fBase = first(base);
+say('  Search base {limit}          → ' + fBase);
+for (const nm of ['Search text', 'Search searchText']) {
+  const f = first(body(nm));
+  const field = nm.replace('Search ', '');
+  say(`  {${field}: "<название>"}  → ` + f);
+  if (!body(nm).miss) {
+    say(f !== fBase
+      ? `    ← ВЫДАЧА ОТЛИЧАЕТСЯ: поле «${field}» РАБОТАЕТ, тело поиска найдено`
+      : `    ← выдача та же, что без текста: поле «${field}» игнорируется`);
+  }
+}
+say('');
+say('Если ни одно поле не сработало — тело SearchRequest придётся смотреть');
+say('в спецификации API, перебором его не найти: сервер отвечает 200');
+say('на любое тело и о неизвестных полях молчит.');
+
+return [{ json: { probes: out.join('\n') } }];
+"""
+
+nodes.append(code("Shape probes", [1380, 870], SHAPE_PROBES_JS))
+
 # --------------------------------------------------- ФАЗА D: значения полей
 #
 # ЗАЧЕМ. Инвентарь полей мы берём из каталога, но перечня УНИКАЛЬНЫХ ЗНАЧЕНИЙ
@@ -706,6 +872,9 @@ CHAIN = (
     + [n for n, _ in PHASE_A]
     + ["Shape recon", "Search probe", "Tables", "Notes of table",
        "Collect notes", "Note link", "Build bridge"]
+    + [n for n, _ in PHASE_E_GET]
+    + [n for n, _ in PHASE_E_POST]
+    + ["Shape probes"]
     + [n for n, _ in PHASE_D]
     + ["Shape values"]
 )
@@ -734,6 +903,7 @@ print("вручную и прочитать вывод четырёх нод:")
 print("  «Shape recon»  — где у отчёта владелец")
 print("  «Build bridge» — готовые строки моста «ключ ссылки → dd_urn»")
 print("  «Search probe» — форма тела и ответа POST /search/query")
+print("  «Shape probes» — связи таблицы, источники отчёта, форма поиска")
 print("  «Shape values» — видит ли Trino витрины, кардинальность поля")
 print("                   и чем отказ по недоступной таблице отличается")
 print("                   от пустого результата")

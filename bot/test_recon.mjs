@@ -259,6 +259,62 @@ line('5. ФАЗА D: три пробы Trino разбираются и НЕ сл
     /Probe missing: узел не выполнялся/.test(notRun));
 }
 
+// ====================================================================== 6
+line('6. ФАЗА E: связи таблицы, источники отчёта, форма поиска');
+{
+  const mk = (json) => ({ first: () => ({ json }) });
+  const runProbes = (byName) => {
+    const $ = (name) => {
+      if (!(name in byName)) throw new Error('node not executed: ' + name);
+      return mk(byName[name]);
+    };
+    return new Function('$', js('Shape probes'))($)[0].json.probes;
+  };
+  const ok200 = (body) => ({ statusCode: 200, body });
+
+  // Прогон 2026-08-27: мост через `notes` дал 0 пар из 1782, и все проверенные
+  // оказались ноутбуками Helicopter. Связь `notes` по построению отдаёт тип
+  // NOTE, а дашборды Proteus это REPORT — дело не в лимите. Какая связь
+  // отдаёт REPORT, надо УЗНАТЬ, а не угадать: ключи таблицы мы ни разу
+  // не запрашивали, они взяты из документации, и `notes` оттуда же.
+  const out = runProbes({
+    'Table related': ok200({
+      columns: { entity: { type: 'COLUMN', system: 'tables.greenplum' } },
+      notes: { entity: { type: 'NOTE', system: 'reports.helicopter' } },
+      consumers: { entity: { type: 'REPORT', system: 'reports.reports' } },
+    }),
+    'Report sources': ok200({ data: [{ entity: { fqn: 'emart.mdm_employee_structure_d' } }] }),
+    'Search base': ok200([{ urn: 'urn:a' }]),
+    'Search text': ok200([{ urn: 'urn:b' }]),
+    'Search searchText': ok200([{ urn: 'urn:a' }]),
+  });
+  check('связь, отдающая REPORT, названа', /ОТДАЮТ REPORT.*consumers/.test(out));
+  check('типы всех связей показаны', /notes: type=NOTE/.test(out));
+  check('источник отчёта показан', out.includes('mdm_employee_structure_d'));
+  // Поиск отвечает 200 на любое тело и о неизвестных полях молчит — значит
+  // рабочее поле опознаётся только тем, что выдача ОТЛИЧАЕТСЯ от базовой.
+  check('рабочее поле поиска опознано',
+    /поле «text» РАБОТАЕТ/.test(out));
+  check('нерабочее поле названо игнорируемым',
+    /поле «searchText» игнорируется/.test(out));
+
+  // Ни одна связь не отдаёт REPORT — от витрины к дашборду пути нет,
+  // и это тоже ответ, а не пустота.
+  const noRep = runProbes({
+    'Table related': ok200({ columns: { entity: { type: 'COLUMN' } } }),
+    'Report sources': ok200({ data: [] }),
+    'Search base': ok200([]), 'Search text': ok200([]), 'Search searchText': ok200([]),
+  });
+  check('отсутствие связи к REPORT названо', /НИ ОДНА связь/.test(noRep));
+  check('пустые source_tables названы', /связь есть, но не заполнена/.test(noRep));
+
+  // Переносы строк должны быть НАСТОЯЩИМИ. Дважды за сессию сборщик писал
+  // литерал \n вместо переноса, и вывод склеивался в одну строку: JS при
+  // этом парсится, тесты по подстрокам зелёные, а читать невозможно.
+  check('переносы строк настоящие, а не литерал',
+    out.includes('\n') && !out.includes('\\n'));
+}
+
 console.log(`\n${'='.repeat(70)}`);
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
