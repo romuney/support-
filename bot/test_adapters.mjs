@@ -1637,5 +1637,62 @@ line('37. ВЫГРУЗКА без инвентаря витрины: увере�
   check('признак «просят запрос» на выходе ядра', q.is_query_help === true);
 }
 
+// ===================================================================== 38
+line('38. КАТАЛОГ вызывается ПО РАЗУ НА ОБЪЕКТ, а не пачкой');
+{
+  // Живой прогон 2026-08-27: запрошено три объекта, пришёл один
+  // (dd_received: 1), а задача для базы советовала проверить URN и срок
+  // жизни Service Account — то есть чинить не то.
+  //
+  // Причина в режиме вызова субворкфлоу. У executeWorkflow значение
+  // по умолчанию — «Run once with all items», а все три шейпера внутри
+  // «DD Lookup» читают вход через .first(): при вызове пачкой разбирается
+  // ПЕРВЫЙ объект и молча возвращается один dd_meta на сколько угодно
+  // запрошенных. С одним объектом в плане отказ не проявляется вовсе,
+  // а Code-ноды тестируются на подставном .all() и до режима не достают —
+  // поэтому проверка структурная, по собранному флоу.
+  const call = core.nodes.find((n) => n.name === 'Call DD Lookup');
+  check('нода каталога есть', Boolean(call));
+  check('вызов по разу на объект', call && call.parameters.mode === 'each');
+  // Разворачивать список объектов обязательно: без Split DD на входе
+  // каталога был бы один элемент-массив, и режим «each» ничего не изменил бы.
+  check('список объектов разворачивается перед вызовом',
+    core.nodes.some((n) => n.name === 'Split DD'));
+
+  // Внутри DD Lookup вход читается через .first() — то самое, из-за чего
+  // пачка теряется. Тест держит связь: пока там .first(), режим обязан
+  // быть «each».
+  const lookup = JSON.parse(fs.readFileSync('DD Lookup.json', 'utf8'));
+  const readsFirst = lookup.nodes.some((n) =>
+    typeof n.parameters?.jsCode === 'string' &&
+    /\$\('When called by agent'\)\.first\(\)/.test(n.parameters.jsCode));
+  check('шейперы каталога читают вход через .first()', readsFirst);
+}
+
+// ===================================================================== 39
+line('39. «Не доехал до вызова» и «каталог не отдал» — разные диагнозы');
+{
+  const ANSWER = `ЧЕРНОВИК ОТВЕТА: Ответ.
+ИСТОЧНИКИ: kb/metrics/turnover.md
+УВЕРЕННОСТЬ: высокая`;
+  const A = 'urn:dd:tables:greenplum:table:emart.functional_role_d';
+
+  // Объект не доехал: чинится режим ноды в n8n, а не URN в реестре.
+  const missing = runParse(ANSWER, { question: 'вопрос', mode: 'channel' }, {},
+    { ...MAT_OK, dd_failed: [A], dd_missing: [A] });
+  const tasks = (missing.kb_tasks || []).join(' ');
+  check('назван сбой бота, а не пробел базы', /СБОЙ БОТА/.test(tasks));
+  check('названа нода и режим', /Call DD Lookup/.test(tasks) && /each item/i.test(tasks));
+  check('про URN и Service Account тут не пишем',
+    !/срок жизни Service Account/.test(tasks));
+
+  // Каталог ответил, но метаданных не дал — вот тут URN и аккаунт по делу.
+  const failed = runParse(ANSWER, { question: 'вопрос', mode: 'channel' }, {},
+    { ...MAT_OK, dd_failed: [A], dd_missing: [] });
+  const tasks2 = (failed.kb_tasks || []).join(' ');
+  check('здесь проверяем URN и аккаунт', /срок жизни Service Account/.test(tasks2));
+  check('и это не назвали сбоем бота', !/СБОЙ БОТА/.test(tasks2));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);
