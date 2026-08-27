@@ -1,0 +1,1381 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как мы ведём базу знаний поддержки</title>
+<meta name="description" content="Инструкция по работе с базой знаний поддержки: кто что пишет, как заводить кейсы и выгрузки, Git с нуля.">
+</head>
+<body>
+<style>
+  :root {
+    --bg: #F4F6F8;
+    --surface: #FFFFFF;
+    --surface-2: #EBEFF4;
+    --ink: #13161C;
+    --ink-2: #39414E;
+    --muted: #66707F;
+    --line: #DCE1E8;
+    --line-strong: #C2C9D5;
+
+    --junior: #8F540A;
+    --junior-bg: #FAEFDC;
+    --lead: #1D4685;
+    --lead-bg: #E2EAF7;
+    --bot: #0C6053;
+    --bot-bg: #DBEDE9;
+    --stop: #922B27;
+    --stop-bg: #F8E2E0;
+
+    --radius: 10px;
+    --f-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --f-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0F1218;
+      --surface: #171B22;
+      --surface-2: #1E232C;
+      --ink: #E9ECF1;
+      --ink-2: #C0C7D2;
+      --muted: #8A94A3;
+      --line: #292F39;
+      --line-strong: #39404D;
+
+      --junior: #E3A84E;
+      --junior-bg: #2E2413;
+      --lead: #7FA9E8;
+      --lead-bg: #16233A;
+      --bot: #4FBFAA;
+      --bot-bg: #102B27;
+      --stop: #E08078;
+      --stop-bg: #331A18;
+    }
+  }
+
+  :root[data-theme="light"] {
+    --bg: #F4F6F8;
+    --surface: #FFFFFF;
+    --surface-2: #EBEFF4;
+    --ink: #13161C;
+    --ink-2: #39414E;
+    --muted: #66707F;
+    --line: #DCE1E8;
+    --line-strong: #C2C9D5;
+    --junior: #8F540A;
+    --junior-bg: #FAEFDC;
+    --lead: #1D4685;
+    --lead-bg: #E2EAF7;
+    --bot: #0C6053;
+    --bot-bg: #DBEDE9;
+    --stop: #922B27;
+    --stop-bg: #F8E2E0;
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0F1218;
+    --surface: #171B22;
+    --surface-2: #1E232C;
+    --ink: #E9ECF1;
+    --ink-2: #C0C7D2;
+    --muted: #8A94A3;
+    --line: #292F39;
+    --line-strong: #39404D;
+    --junior: #E3A84E;
+    --junior-bg: #2E2413;
+    --lead: #7FA9E8;
+    --lead-bg: #16233A;
+    --bot: #4FBFAA;
+    --bot-bg: #102B27;
+    --stop: #E08078;
+    --stop-bg: #331A18;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--f-sans);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 0 20px 96px;
+  }
+
+  .prose { max-width: 72ch; }
+
+  p { margin: 0 0 1em; color: var(--ink-2); }
+  strong { color: var(--ink); font-weight: 650; }
+
+  a { color: var(--lead); text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--lead);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+
+  code, .path {
+    font-family: var(--f-mono);
+    font-size: 0.86em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 0.1em 0.36em;
+    white-space: nowrap;
+  }
+
+  /* ---------- hero ---------- */
+
+  .hero {
+    padding: 72px 0 44px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 8px;
+  }
+  .kicker {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.4vw, 3.2rem);
+    line-height: 1.06;
+    letter-spacing: -0.033em;
+    font-weight: 760;
+    margin: 0 0 20px;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  .lede {
+    font-size: clamp(1.06rem, 2.1vw, 1.2rem);
+    color: var(--ink-2);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  /* ---------- table of contents ---------- */
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    margin: 36px 0 0;
+  }
+  .toc-title {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+  .toc ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 8px 28px;
+    counter-reset: toc;
+  }
+  .toc li { counter-increment: toc; }
+  .toc a {
+    display: flex;
+    gap: 12px;
+    text-decoration: none;
+    color: var(--ink-2);
+    padding: 3px 0;
+    font-size: 15px;
+  }
+  .toc a::before {
+    content: counter(toc, decimal-leading-zero);
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--muted);
+    padding-top: 3px;
+    flex: none;
+  }
+  .toc a:hover { color: var(--lead); }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 68px; }
+
+  .sec-head { margin-bottom: 26px; }
+  .sec-num {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    letter-spacing: 0.13em;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 10px;
+  }
+  h2 {
+    font-size: clamp(1.5rem, 3.2vw, 2rem);
+    line-height: 1.16;
+    letter-spacing: -0.024em;
+    font-weight: 720;
+    margin: 0;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  h3 {
+    font-size: 1.12rem;
+    font-weight: 680;
+    letter-spacing: -0.012em;
+    margin: 34px 0 12px;
+    color: var(--ink);
+  }
+
+  /* ---------- role chips ---------- */
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 100px;
+    white-space: nowrap;
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .chip::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+  }
+  .c-junior { color: var(--junior); background: var(--junior-bg); border-color: var(--junior); }
+  .c-lead   { color: var(--lead);   background: var(--lead-bg);   border-color: var(--lead); }
+  .c-bot    { color: var(--bot);    background: var(--bot-bg);    border-color: var(--bot); }
+  .c-stop   { color: var(--stop);   background: var(--stop-bg);   border-color: var(--stop); }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+
+  /* ---------- cards ---------- */
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    margin: 20px 0;
+  }
+  .card > :last-child { margin-bottom: 0; }
+  .card-title {
+    font-weight: 680;
+    color: var(--ink);
+    margin: 0 0 10px;
+    font-size: 1rem;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 22px 0;
+  }
+  .grid-2 .card { margin: 0; }
+
+  /* ---------- steps ---------- */
+
+  .steps { counter-reset: step; margin: 24px 0 0; padding: 0; list-style: none; }
+  .step {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 30px 56px;
+    border-left: 2px solid var(--line);
+    margin-left: 17px;
+  }
+  .step:last-child { border-left-color: transparent; padding-bottom: 4px; }
+  .step::before {
+    content: counter(step);
+    position: absolute;
+    left: -18px;
+    top: -3px;
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid var(--line-strong);
+    color: var(--ink);
+    font-family: var(--f-mono);
+    font-size: 14px;
+    font-weight: 600;
+    display: grid;
+    place-items: center;
+  }
+  .step-title {
+    font-weight: 680;
+    color: var(--ink);
+    margin: 3px 0 8px;
+    font-size: 1.03rem;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .step p { margin-bottom: 0.7em; }
+  .step > :last-child { margin-bottom: 0; }
+
+  /* ---------- pipeline ---------- */
+
+  .pipe {
+    display: grid;
+    gap: 12px;
+    margin: 26px 0 8px;
+  }
+  .pipe-row {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 18px;
+    align-items: start;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+  }
+  .pipe-row.is-hand { border-left: 4px solid var(--junior); }
+  .pipe-row.is-lead { border-left: 4px solid var(--lead); }
+  .pipe-row.is-auto { border-left: 4px solid var(--bot); }
+  .pipe-row.is-out  { border-left: 4px solid var(--line-strong); background: var(--surface-2); }
+  .pipe-what {
+    font-family: var(--f-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    word-break: break-word;
+  }
+  .pipe-what .sub {
+    display: block;
+    font-family: var(--f-sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    margin-top: 4px;
+    letter-spacing: 0.02em;
+  }
+  .pipe-desc { font-size: 15px; color: var(--ink-2); }
+  .pipe-desc strong { color: var(--ink); }
+  .pipe-arrow {
+    text-align: center;
+    color: var(--line-strong);
+    font-size: 18px;
+    line-height: 1;
+    margin: -6px 0;
+  }
+
+  @media (max-width: 560px) {
+    .pipe-row { grid-template-columns: 1fr; gap: 10px; }
+  }
+
+  /* ---------- tables ---------- */
+
+  .scroll { overflow-x: auto; margin: 22px 0; border-radius: var(--radius); border: 1px solid var(--line); }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 540px;
+    background: var(--surface);
+    font-size: 14.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 11px 15px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  th {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td strong { color: var(--ink); }
+
+  /* ---------- code ---------- */
+
+  pre {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 16px 0;
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    white-space: pre;
+    color: var(--ink);
+  }
+  .cmt { color: var(--muted); }
+
+  /* ---------- callouts ---------- */
+
+  .note {
+    border-left: 3px solid var(--line-strong);
+    background: var(--surface);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 16px 20px;
+    margin: 22px 0;
+    font-size: 15.5px;
+  }
+  .note > :last-child { margin-bottom: 0; }
+  .note-stop { border-left-color: var(--stop); }
+  .note-lead { border-left-color: var(--lead); }
+  .note-label {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .note-stop .note-label { color: var(--stop); }
+  .note-lead .note-label { color: var(--lead); }
+
+  ul.plain { margin: 0 0 1em; padding-left: 1.15em; color: var(--ink-2); }
+  ul.plain li { margin-bottom: 0.45em; }
+  ul.plain li::marker { color: var(--muted); }
+
+  .check { list-style: none; padding: 0; margin: 0; }
+  .check li {
+    display: flex;
+    gap: 11px;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--line);
+    color: var(--ink-2);
+    font-size: 15.5px;
+  }
+  .check li:last-child { border-bottom: none; }
+  .check li::before {
+    content: "";
+    flex: none;
+    width: 16px; height: 16px;
+    margin-top: 4px;
+    border: 1.5px solid var(--line-strong);
+    border-radius: 4px;
+  }
+
+  .foot {
+    margin-top: 84px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a, .toc a { transition: color 0.15s ease; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">Инструкция для двоих · база знаний поддержки</p>
+    <h1>Как мы ведём базу знаний поддержки</h1>
+    <p class="lede">
+      Что делает Серёга каждый день, что делаешь ты раз в неделю, что собирается само
+      и откуда в конце берётся агент, который начнёт отвечать за нас. Плюс Git с нуля —
+      для тех, кто никогда не вёл документацию.
+    </p>
+
+    <nav class="toc" aria-label="Содержание">
+      <p class="toc-title">Содержание</p>
+      <ol>
+        <li><a href="#s1">Что это вообще такое</a></li>
+        <li><a href="#s2">Кто здесь кто</a></li>
+        <li><a href="#s3">Конвейер: что из чего берётся</a></li>
+        <li><a href="#s4">Git с нуля</a></li>
+        <li><a href="#s5">День Серёги: пришло обращение</a></li>
+        <li><a href="#s6">Запрос на выгрузку</a></li>
+        <li><a href="#s7">Пятница, 30 минут</a></li>
+        <li><a href="#s8">Где здесь агент</a></li>
+        <li><a href="#s9">С чего начать наполнение</a></li>
+        <li><a href="#s10">Первая неделя</a></li>
+      </ol>
+    </nav>
+  </header>
+
+  <!-- ============ 1 ============ -->
+  <section id="s1">
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>Что это вообще такое</h2>
+    </div>
+
+    <div class="prose">
+      <p>
+        Репозиторий — это папка с файлами, у которой есть история изменений. Файлы —
+        обычные текстовые, открываются в блокноте. Никакой магии здесь нет: мы просто
+        договорились писать в них по правилам, чтобы потом это смогла прочитать машина.
+      </p>
+      <p>
+        Смысл всей затеи в одном: <strong>каждое обращение, на которое Серёга сегодня
+        тратит час, должно стать записью, из-за которой в следующий раз этот час
+        не потребуется.</strong> Сначала не потребуется, потому что Серёга найдёт свою
+        же запись. Потом — потому что ответит агент.
+      </p>
+      <p>
+        Пока агента нет. Есть месяц, за который надо накопить материал, на котором его
+        вообще имеет смысл собирать. Агент без базы отвечает выдумками, а в нашем домене
+        уверенный неправильный ответ хуже, чем «не знаю»: почти у любого расхождения цифр
+        есть правдоподобное, но неверное объяснение.
+      </p>
+    </div>
+
+    <div class="note note-lead">
+      <span class="note-label">Главное правило всей конструкции</span>
+      <p>
+        <strong>У каждой папки ровно один автор.</strong> Не «мы все пишем куда придётся».
+        Если это нарушить, человек и бот начнут затирать правки друг друга, и доверие
+        к базе кончится за неделю. Дальше вся инструкция — по сути расшифровка этого правила.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section id="s2">
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <h2>Кто здесь кто</h2>
+    </div>
+
+    <div class="chip-row">
+      <span class="chip c-junior">Серёга — джун</span>
+      <span class="chip c-lead">Ты — руководитель</span>
+      <span class="chip c-bot">Бот — сам</span>
+      <span class="chip c-stop">Никто не трогает</span>
+    </div>
+
+    <p class="prose">
+      Эти четыре метки дальше стоят рядом с каждым шагом. Если увидел метку — значит,
+      это делает он, а не ты.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Папка</th>
+            <th>Кто пишет</th>
+            <th>Что там лежит</th>
+            <th>Как часто</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="path">cases/</span></td>
+            <td><span class="chip c-junior">Серёга</span></td>
+            <td>По файлу на каждое закрытое обращение</td>
+            <td>Каждый день, 10+ раз</td>
+          </tr>
+          <tr>
+            <td><span class="path">exports/</span></td>
+            <td><span class="chip c-junior">Серёга</span></td>
+            <td>По папке на каждую выгрузку: поля, SQL, результат</td>
+            <td>Пару раз в неделю</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/index.md</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>Реестр всех статей. <strong>Агент читает его первым</strong>. Правится руками</td>
+            <td>С каждой новой статьёй</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/metrics/</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>По файлу на метрику: определение, формула, расхождения</td>
+            <td>По пятницам</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/reports/</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>По файлу на отчёт: где открыть, что внутри, ограничения</td>
+            <td>По пятницам</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/tables/</span></td>
+            <td><span class="chip c-lead">Владелец витрины</span></td>
+            <td>По файлу на таблицу: гранулярность, ключи, ПДн</td>
+            <td>По пятницам</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/recipes/</span></td>
+            <td><span class="chip c-lead">Владелец витрины</span></td>
+            <td>Как связывать таблицы и считать типовое, чтобы не задвоить</td>
+            <td>По пятницам</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/process/</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>Плейбуки и регламенты: выгрузка, маршрутизация, ПДн</td>
+            <td>Почти никогда</td>
+          </tr>
+          <tr>
+            <td><span class="path">templates/</span></td>
+            <td><span class="chip c-stop">Никто</span></td>
+            <td>Болванки для копирования</td>
+            <td>Почти никогда</td>
+          </tr>
+          <tr>
+            <td><span class="path">docs/</span></td>
+            <td><span class="chip c-stop">Никто</span></td>
+            <td>План и архитектура</td>
+            <td>Раз в месяц</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note note-stop">
+      <span class="note-label">Запомнить дословно</span>
+      <p>
+        <strong>Одна сущность — один файл.</strong> Одна метрика, один отчёт, одна
+        таблица — отдельный файл в своей папке. Не «статья про численность и текучесть»:
+        агент отдаёт файл целиком, и на вопрос про одну метрику ему приедет определение
+        второй. <strong>Завёл статью — впиши строку в <span class="path">kb/index.md</span></strong>,
+        тем же коммитом. Статьи, которой нет в реестре, для агента не существует.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section id="s3">
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <h2>Конвейер: что из чего берётся</h2>
+    </div>
+
+    <p class="prose">
+      Вот ответ на вопрос «что из этого потом станет базой знаний». Читать сверху вниз —
+      это буквально порядок, в котором одно превращается в другое.
+    </p>
+
+    <div class="pipe">
+      <div class="pipe-row is-out">
+        <div class="pipe-what">Обращение в Teams<span class="sub">вход</span></div>
+        <div class="pipe-desc">Человек написал в канал. 10+ раз в день.</div>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">↓</div>
+
+      <div class="pipe-row is-hand">
+        <div class="pipe-what">cases/ · exports/<span class="sub">руками, Серёга</span></div>
+        <div class="pipe-desc">
+          <strong>Сырьё. Единственное, что реально пишется руками каждый день.</strong>
+          Что спросили дословно, что оказалось причиной, чего не хватило в базе.
+          Это не отчётность — это материал, из которого дальше растёт всё остальное.
+        </div>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">↓</div>
+
+      <div class="pipe-row is-lead">
+        <div class="pipe-what">Разбор по пятницам<span class="sub">руками, ты</span></div>
+        <div class="pipe-desc">
+          Смотрим, про что спрашивали на этой неделе, и какие <strong>сущности</strong>
+          за этим стоят: метрика, отчёт, таблица, способ связать таблицы.
+          Тема всплыла третий раз — заводим статью. Решение принимается здесь,
+          текст пишется после.
+        </div>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">↓</div>
+
+      <div class="pipe-row is-lead">
+        <div class="pipe-what">kb/metrics/ · reports/ · tables/ · recipes/<span class="sub">руками, ты, по пятницам</span></div>
+        <div class="pipe-desc">
+          Копируешь болванку своего типа из <span class="path">templates/</span>,
+          проверяешь определение с методологией, заполняешь.
+          <strong>Один файл — одна сущность.</strong> Это и есть «база знаний» в узком
+          смысле — то единственное, чем агент имеет право отвечать.
+        </div>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">↓</div>
+
+      <div class="pipe-row is-lead">
+        <div class="pipe-what">kb/index.md<span class="sub">руками, тем же коммитом</span></div>
+        <div class="pipe-desc">
+          Строка в реестре: <span class="path">id</span>, тип, название, путь,
+          <strong>алиасы</strong> и краткое описание. Алиасы — то, как о сущности
+          спрашивают на самом деле: «текучка», «сколько людей».
+          <strong>Без этой строки статья для агента не существует.</strong>
+        </div>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">↓</div>
+
+      <div class="pipe-row is-out">
+        <div class="pipe-what">Агент<span class="sub">выход</span></div>
+        <div class="pipe-desc">
+          Читает <span class="path">kb/index.md</span>, по алиасам находит нужные
+          <span class="path">id</span> и подтягивает только эти статьи. Готовит Серёге
+          черновик ответа. Нет статьи — говорит «не знаю» и называет, чего не хватает.
+          Круг замкнулся.
+        </div>
+      </div>
+    </div>
+
+    <div class="note note-lead">
+      <span class="note-label">Если запомнить одно предложение</span>
+      <p>
+        <strong>Серёга наполняет сырьё, ты по пятницам превращаешь сырьё в статьи,
+        агент отвечает статьями.</strong> Никто не пишет статью сразу, с первого
+        обращения — именно поэтому статей мало и они верные.
+      </p>
+    </div>
+
+    <h3>Почему Серёге нельзя сразу писать статьи</h3>
+    <div class="prose">
+      <p>
+        Это самый частый вопрос, и ответ не про недоверие. Статья в
+        <span class="path">kb/</span> — это утверждение вида «срок закрытия вакансии
+        считается вот так». Такое утверждение может подтвердить только методология или
+        владелец витрины. Джун, написавший статью по итогам одного разговора, зафиксирует
+        в базе своё понимание — и агент будет уверенно повторять его всем.
+      </p>
+      <p>
+        Поэтому разделение: <strong>Серёга фиксирует, что было. Ты фиксируешь, как правильно.</strong>
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section id="s4">
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <h2>Git с нуля</h2>
+    </div>
+
+    <div class="prose">
+      <p>
+        Git — это история изменений папки. Всё, что он делает: запоминает состояния файлов
+        и позволяет вернуться к любому. Три слова, которых достаточно на первый месяц:
+      </p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <p class="card-title">Коммит</p>
+        <p>Сохранение с подписью. Как точка сохранения в игре: записал файл — поставил
+          точку, к ней всегда можно вернуться. Подпись — одна строка о том, что сделал.</p>
+      </div>
+      <div class="card">
+        <p class="card-title">Пуш (push)</p>
+        <p>Отправить свои сохранения на сервер, чтобы их увидели остальные и агент.
+          Пока не запушил — работа только у тебя на компьютере.</p>
+      </div>
+      <div class="card">
+        <p class="card-title">Пул (pull)</p>
+        <p>Забрать себе чужие изменения. Делается перед началом работы, чтобы писать
+          поверх свежего.</p>
+      </div>
+    </div>
+
+    <h3>Способ первый: через сайт GitHub — рекомендую Серёге на старте</h3>
+    <div class="prose">
+      <p>
+        Ничего устанавливать не надо. Кейс — это текстовый файл, его спокойно можно
+        создать прямо в браузере, и это честный полноценный коммит.
+      </p>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <p class="step-title">Открыть репозиторий на GitHub <span class="chip c-junior">Серёга</span></p>
+        <p>Зайти в папку <span class="path">cases/</span>.</p>
+      </li>
+      <li class="step">
+        <p class="step-title">Add file → Create new file</p>
+        <p>Кнопка справа сверху. В поле имени вписать имя файла по правилам:
+          <span class="path">2026-08-04-dostup-k-voronke.md</span> — дата, потом короткий
+          смысл латиницей через дефисы.</p>
+      </li>
+      <li class="step">
+        <p class="step-title">Вставить содержимое</p>
+        <p>Открыть в соседней вкладке <span class="path">templates/TEMPLATE-case.md</span>,
+          нажать Raw, скопировать всё, вставить сюда и заполнить.</p>
+      </li>
+      <li class="step">
+        <p class="step-title">Commit changes</p>
+        <p>Зелёная кнопка внизу. В строку описания — <code>кейс: доступ к воронке подбора</code>.
+          Всё, это одновременно и сохранение, и пуш. Файл на сервере.</p>
+      </li>
+    </ol>
+
+    <h3>Способ второй: с компьютера, когда надоест браузер</h3>
+    <div class="prose">
+      <p>Один раз склонировать себе папку:</p>
+    </div>
+
+<pre><code>git clone &lt;адрес репозитория&gt;
+cd &lt;папка репозитория&gt;</code></pre>
+
+    <div class="prose"><p>Дальше каждый день — четыре команды, всегда одни и те же:</p></div>
+
+<pre><code><span class="cmt"># 1. забрать свежее перед работой</span>
+git pull origin main
+
+<span class="cmt"># 2. ... пишешь файл в редакторе ...</span>
+
+<span class="cmt"># 3. сказать, какие файлы сохраняем</span>
+git add cases/2026-08-04-dostup-k-voronke.md
+
+<span class="cmt"># 4. сохранить с подписью и отправить</span>
+git commit -m "кейс: доступ к воронке подбора"
+git push origin main</code></pre>
+
+    <div class="prose">
+      <p>
+        Если лень запоминать команды — поставь <strong>GitHub Desktop</strong>. Там те же
+        четыре действия кнопками: Fetch, галочки у файлов, Commit, Push.
+      </p>
+    </div>
+
+    <h3>Про ветки: нам они не нужны</h3>
+    <div class="prose">
+      <p>
+        Ветка — это отдельная линия истории, чтобы несколько человек не мешали друг другу.
+        Нас двое, и мы пишем в разные файлы: у каждого кейса своё имя, у каждой выгрузки
+        своя папка. Столкнуться физически негде.
+      </p>
+      <p>
+        <strong>Работаем прямо в <code>main</code>.</strong> Ветки заведём, когда появится
+        скрипт пересборки и код агента — вот там они понадобятся.
+      </p>
+    </div>
+
+    <div class="note note-lead">
+      <span class="note-label">Самый первый раз</span>
+      <p>
+        Если репозиторий только что создан и в нём ещё ничего нет — структуру нужно
+        один раз залить в <code>main</code>. Дальше все пишут прямо туда, и больше
+        к этому возвращаться не придётся.
+      </p>
+    </div>
+
+    <h3>Что делать, если что-то пошло не так</h3>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Ситуация</th><th>Что делать</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Написал ерунду и уже закоммитил</td>
+            <td>Ничего страшного, история для того и нужна. Просто исправь файл и сделай ещё один коммит. <strong>Кейсы задним числом не правим</strong> — ошибся в ответе, заводи новый кейс со ссылкой на старый.</td>
+          </tr>
+          <tr>
+            <td><code>push</code> ругается «rejected»</td>
+            <td>Кто-то запушил раньше. Сделай <code>git pull origin main</code>, потом <code>git push</code> снова.</td>
+          </tr>
+          <tr>
+            <td>Слово «конфликт»</td>
+            <td>Значит, вы вдвоём правили один файл. У нас так почти не бывает. Если случилось — не геройствуй, напиши мне.</td>
+          </tr>
+          <tr>
+            <td>Страшно нажать</td>
+            <td>Удалить историю случайной кнопкой нельзя. Худшее, что бывает, — лишний коммит.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section id="s5">
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <h2>День Серёги: пришло обращение</h2>
+    </div>
+
+    <div class="chip-row"><span class="chip c-junior">Весь раздел — Серёга</span></div>
+
+    <ol class="steps">
+      <li class="step">
+        <p class="step-title">Ответить человеку</p>
+        <p>Сначала работа, потом запись. База не должна мешать поддержке.</p>
+      </li>
+      <li class="step">
+        <p class="step-title">Определить тип обращения</p>
+        <p>Одно слово, от него зависит дальнейшее:</p>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Тип</th><th>Это когда</th></tr></thead>
+            <tbody>
+              <tr><td><code>report</code></td><td>«Где посмотреть», «почему цифры не сходятся»</td></tr>
+              <tr><td><code>access</code></td><td>Нужен доступ к дашборду или отчёту</td></tr>
+              <tr><td><code>question</code></td><td>Вопрос про определение показателя, методику</td></tr>
+              <tr><td><code>incident</code></td><td>Сломалось у всех: отчёт не открывается, данные не обновились</td></tr>
+              <tr><td><code>export</code></td><td>Нужен файл с данными → <strong>это не кейс, см. раздел 06</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </li>
+      <li class="step">
+        <p class="step-title">Завести файл в тот же день</p>
+        <p>
+          Копия <span class="path">templates/TEMPLATE-case.md</span> в
+          <span class="path">cases/</span>. Имя: дата плюс смысл латиницей —
+          <span class="path">2026-08-04-tekuchest-ne-shoditsya.md</span>.
+          Слаг про суть обращения, а не про того, кто спросил.
+        </p>
+        <p>
+          <strong>Именно в тот же день.</strong> К пятнице ты не вспомнишь, что оказалось
+          причиной, — а вся ценность записи именно в этом.
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Заполнить шапку</p>
+        <p>Шесть обязательных полей вверху файла. Без них файл не попадёт ни в одну сводку:</p>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Поле</th><th>Что писать</th></tr></thead>
+            <tbody>
+              <tr><td><code>date</code></td><td>Дата закрытия, вида <code>2026-08-04</code></td></tr>
+              <tr><td><code>type</code></td><td>Одно слово из таблицы выше</td></tr>
+              <tr><td><code>asker</code></td><td><strong>Команда или роль, не ФИО.</strong> «Подбор (руководитель группы)»</td></tr>
+              <tr><td><code>status</code></td><td><code>closed</code>, если ответил; <code>escalated</code>, если передал дальше</td></tr>
+              <tr><td><code>link</code></td><td>Ссылка на тред в Teams</td></tr>
+              <tr><td><code>needs_review</code></td><td><code>true</code>, если ответил с оговоркой или вопрос уже задавали</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </li>
+      <li class="step">
+        <p class="step-title">Вопрос — дословно</p>
+        <p>
+          Скопировать из треда как есть. Не пересказывать, не причёсывать, не исправлять
+          на «правильную» формулировку. Агент будет искать по тому, как люди спрашивают
+          на самом деле, а спрашивают криво. Единственная правка — убрать ФИО и телефоны,
+          заменив на роль.
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Заполнить «чего не хватило»</p>
+        <p>
+          Последний раздел файла и самый ценный. Что пришлось выяснять у людей, потому что
+          этого не было записано. <strong>Каждая такая строка автоматически попадёт
+          в список пробелов</strong> — и по пятницам мы решаем, какие из них закрывать
+          в первую очередь.
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Закоммитить</p>
+        <p>По разделу 04. Подпись коммита — <code>кейс: короткий смысл</code>.</p>
+      </li>
+    </ol>
+
+    <div class="note note-stop">
+      <span class="note-label">Никогда, ни при каких условиях</span>
+      <p>
+        ФИО, телефоны, почты, даты рождения, зарплаты конкретных людей не попадают
+        в репозиторий. Ни в кейсе, ни в SQL, ни в комментарии, ни в выдуманном примере
+        «для наглядности». Только роли и суррогатные ключи вида <code>candidate_sk</code>.
+      </p>
+    </div>
+
+    <div class="note">
+      <span class="note-label">Вопрос задали второй раз</span>
+      <p>
+        Скажи мне. <strong>Не пиши статью сам.</strong> Твоё дело — заметить повтор
+        и назвать его; статью напишу я, когда будет с кем подтвердить определение.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section id="s6">
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <h2>Запрос на выгрузку</h2>
+    </div>
+
+    <div class="chip-row"><span class="chip c-junior">Серёга</span></div>
+
+    <div class="prose">
+      <p>
+        Выгрузка живёт по другим правилам, потому что у неё другая ценность.
+        У кейса ценность в записи «что было». У выгрузки — <strong>в переиспользуемом
+        артефакте: согласованный список полей плюс готовый SQL.</strong> Через месяц
+        похожий запрос закроется правкой периода вместо трёх часов работы.
+      </p>
+      <p>
+        Поэтому выгрузка — <strong>папка из четырёх файлов</strong> в
+        <span class="path">exports/</span>, а кейс для неё вырождается в две строки
+        со ссылкой на эту папку.
+      </p>
+    </div>
+
+    <div class="note note-stop">
+      <span class="note-label">Железное правило</span>
+      <p>
+        <strong>Код не пишем, пока список полей не согласован письменно в треде.</strong>
+        Не «обсудили голосом», не «вроде договорились» — письменно, с ответом заказчика
+        текстом. SQL, написанный до согласования, — выброшенное время в 8 случаях из 10.
+      </p>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <p class="step-title">Понять задачу, а не запрос</p>
+        <p>
+          Один вопрос: <strong>что вы будете делать с этим файлом?</strong> «Пересматриваем
+          бюджет каналов» — значит нужна конверсия, значит нужен знаменатель, значит
+          отклонённые обязательны, даже если просили «только вышедших».
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Определить гранулярность</p>
+        <p>
+          <strong>Одна строка выгрузки = что?</strong> Ответить одним предложением
+          и написать это в тред до всего остального. Здесь ошибаются чаще всего: просят
+          «список кандидатов», а нужен срез кандидат × вакансия, потому что один кандидат
+          откликается на несколько вакансий.
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Собрать список полей</p>
+        <p>По каждому пункту — письменный ответ заказчика, а не твой домысел:</p>
+        <ul class="plain">
+          <li>Период — и <strong>по какой дате</strong> он фильтруется</li>
+          <li>Нужны ли отклонённые и неактивные (знаменатель нужен почти всегда)</li>
+          <li>Атрибут берём на дату события или текущий</li>
+          <li>Персональные данные — не выгружаем</li>
+          <li>Как определяется целевое событие и <strong>по какой системе</strong></li>
+        </ul>
+      </li>
+      <li class="step">
+        <p class="step-title">Согласовать письменно</p>
+        <p>
+          Таблицу полей — текстом в тред, файлом не читают. Отдельно написать,
+          <strong>чего в выгрузке не будет и почему</strong>. Дождаться ответа текстом;
+          эмодзи-реакция не годится. Только после этого открываем редактор.
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Сделать и проверить</p>
+        <p>SQL с параметрами периода, не с зашитыми датами. Три проверки, всегда:</p>
+        <ul class="plain">
+          <li>Контрольная сумма против дашборда</li>
+          <li>Гранулярность: дублей нет</li>
+          <li>Стык систем: строки не теряются и не задваиваются</li>
+        </ul>
+        <p>Результаты записать. <strong>Проверка, результат которой не записан, считается непроведённой.</strong></p>
+      </li>
+      <li class="step">
+        <p class="step-title">Закрыть</p>
+        <p>
+          Файл в тред, кейс типа <code>export</code> на две строки, заполнить результат
+          и обратную связь. Просят повторять регулярно — <strong>это не выгрузка,
+          а кандидат в регулярный отчёт</strong>, неси мне.
+        </p>
+      </li>
+    </ol>
+
+    <div class="prose">
+      <p>Папка выгрузки — всегда четыре файла:</p>
+      <ul class="plain">
+        <li><span class="path">README.md</span> — запрос дословно, гранулярность одним
+          предложением и раздел <strong>«Что выяснилось при уточнении»</strong></li>
+        <li><span class="path">fields.md</span> — таблица полей плюс блок
+          <strong>«что просили, но не включили и почему»</strong></li>
+        <li><span class="path">query.sql</span> — запрос с параметрами периода
+          и тремя проверками внизу</li>
+        <li><span class="path">result.md</span> — прогон проверок, сверка,
+          обратная связь заказчика</li>
+      </ul>
+      <p>
+        Если в разделе «Что выяснилось» меньше трёх пунктов — уточнения по-настоящему
+        не было. Почти в каждом запросе есть минимум три места, где формулировка
+        заказчика расходится с тем, что ему нужно.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 7 ============ -->
+  <section id="s7">
+    <div class="sec-head">
+      <span class="sec-num">07</span>
+      <h2>Пятница, 30 минут</h2>
+    </div>
+
+    <div class="chip-row"><span class="chip c-lead">Ты ведёшь</span><span class="chip c-junior">Серёга участвует</span></div>
+
+    <div class="prose">
+      <p>
+        Единственная регулярная встреча. Без неё конвейер встаёт: сырьё копится, статей
+        не появляется, агенту нечем отвечать. Пятницы августа: 7, 14, 21, 28.
+      </p>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <p class="step-title">Решить, какие статьи заводим — 15 минут</p>
+        <p>
+          Смотрим темы недели по кейсам и раскладываем их на сущности: это метрика,
+          это отчёт, это таблица, это способ их связать. По каждой — кто владелец
+          и кто подтверждает определение.
+        </p>
+        <p>
+          <strong>Правило: тема, всплывшая третий раз, получает статью на этой же
+          встрече.</strong> Не «возьмём в работу» — заводится файл. Если некому подтвердить
+          определение, заводим со <code>status: draft</code> и фамилией ответственного
+          за подтверждение. Каждая новая статья — строка в <span class="path">kb/index.md</span>.
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Посмотреть пробелы — 10 минут</p>
+        <p>
+          Темы, по которым обращения были, а статьи нет: что закрылось, что накопило
+          обращений, кому напомнить. Первым закрываем тот пробел, который набрал больше
+          одного обращения, — он уже доказал, что стоит нам времени.
+        </p>
+      </li>
+      <li class="step">
+        <p class="step-title">Посмотреть метрику — 5 минут</p>
+        <p>
+          Покрытие — доля обращений, на которые агент ответил бы сам. Считаем по журналу
+          обращений за неделю. Не выросло — разбираемся почему: база не пополнилась
+          или обращения ушли в новые темы.
+        </p>
+      </li>
+    </ol>
+
+    <div class="note">
+      <span class="note-label">Чего на встрече не делаем</span>
+      <p>
+        Не обсуждаем отдельные обращения и не пишем текст статей прямо на встрече.
+        Встреча — про решения. Текст пишется после, иначе тридцать минут превращаются в два часа.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 8 ============ -->
+  <section id="s8">
+    <div class="sec-head">
+      <span class="sec-num">08</span>
+      <h2>Где здесь агент</h2>
+    </div>
+
+    <div class="prose">
+      <p>
+        <strong>Сейчас — нигде.</strong> Агента не существует, в репозитории нет ни строчки
+        его кода, и это правильно: пока база пустая, ему нечем отвечать. В августе он
+        появится в n8n как три отдельных сценария.
+      </p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <p class="card-title"><span class="chip c-bot">Флоу 1</span> Ответ на обращение</p>
+        <p>
+          Сообщение в канале → агент определяет тип → ищет по базе → <strong>отдаёт
+          черновик ответа Серёге</strong>. Серёга отправляет или правит. Кейс заводится
+          с уже заполненной шапкой.
+        </p>
+        <p><strong>В августе агент не пишет в канал сам.</strong> Только черновики.</p>
+      </div>
+      <div class="card">
+        <p class="card-title"><span class="chip c-bot">Флоу 2</span> Запрос на выгрузку</p>
+        <p>
+          Обращение опознано как выгрузка → агент выдаёт чеклист согласования и находит
+          похожие прошлые выгрузки с готовым SQL. <strong>Согласование полей
+          не автоматизируется</strong> — это разговор человека с человеком.
+        </p>
+      </div>
+      <div class="card">
+        <p class="card-title"><span class="chip c-bot">Как он ищет</span> Через реестр</p>
+        <p>
+          Сначала читает <span class="path">kb/index.md</span> целиком — он для этого
+          и сделан компактным. По алиасам находит нужные <span class="path">id</span>
+          и подтягивает только эти файлы, а не всю базу.
+        </p>
+        <p><strong><span class="path">cases/</span> в контекст не подаётся</strong> — это архив.</p>
+      </div>
+      <div class="card">
+        <p class="card-title">Правила, по которым он живёт</p>
+        <p>
+          Отвечает <strong>только</strong> из <span class="path">kb/</span>.
+          Нет статьи — говорит «не знаю» и называет, чего не хватает в реестре.
+          Цифры не выдумывает: у каждой должна быть ссылка на файл.
+          ПДн не выдаёт никому и никогда.
+        </p>
+      </div>
+    </div>
+
+    <div class="note note-lead">
+      <span class="note-label">Критерий на конец августа</span>
+      <p>
+        Агент по-прежнему не отправляет ответы сам. Автоотправку включаем в сентябре
+        и только по тем темам, где черновики уходили без правок две недели подряд.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 9 ============ -->
+  <section id="s9">
+    <div class="sec-head">
+      <span class="sec-num">09</span>
+      <h2>С чего начать наполнение</h2>
+    </div>
+
+    <div class="prose">
+      <p>
+        Репозиторий сейчас <strong>пустой по содержанию и готовый по структуре</strong>.
+        Папки, шаблоны и правила на месте, реальных данных нет ни одного байта —
+        и это правильно: выдуманные кейсы засоряют базу и учат агента отвечать
+        тем, чего не было.
+      </p>
+      <p>Порядок, в котором это оживает:</p>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Что</th><th>Кто</th><th>Когда</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Заменить плейсхолдеры <code>&lt;…&gt;</code> в <span class="path">CLAUDE.md</span> и <span class="path">kb/process/routing.md</span>: настоящие системы, владельцы, SLA</td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>До первого рабочего дня</td>
+          </tr>
+          <tr>
+            <td>Вычитать <span class="path">kb/process/export-playbook.md</span> — совпадает ли с тем, как мы реально согласуем выгрузки</td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>До первого рабочего дня</td>
+          </tr>
+          <tr>
+            <td>Первый кейс в <span class="path">cases/</span></td>
+            <td><span class="chip c-junior">Серёга</span></td>
+            <td>Первое же закрытое обращение</td>
+          </tr>
+          <tr>
+            <td>Первая папка в <span class="path">exports/</span></td>
+            <td><span class="chip c-junior">Серёга</span></td>
+            <td>Первый же запрос на выгрузку</td>
+          </tr>
+          <tr>
+            <td>Первая статья в <span class="path">kb/metrics/</span> + строка в <span class="path">kb/index.md</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>Первая пятница, где пробел набрал повтор</td>
+          </tr>
+          <tr>
+            <td>Статьи по таблицам и рецептам связывания</td>
+            <td><span class="chip c-lead">Владелец витрины</span></td>
+            <td>Когда появятся отчёты, которые на них ссылаются</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note note-stop">
+      <span class="note-label">Что означают угловые скобки</span>
+      <p>
+        В <span class="path">CLAUDE.md</span> и <span class="path">kb/process/routing.md</span>
+        названия систем и сроки записаны как <code>&lt;ATS&gt;</code>, <code>&lt;роль&gt;</code>,
+        <code>&lt;N рабочих дней&gt;</code>. Это места, где нужно подставить наши настоящие
+        значения. <strong>Именно из этих двух файлов агент возьмёт картину мира</strong> —
+        неверное название системы здесь обойдётся дороже, чем кажется.
+      </p>
+    </div>
+
+    <div class="prose">
+      <h3>Пока папки <span class="path">kb/</span> пустые, а в реестре — примеры</h3>
+      <p>
+        В <span class="path">kb/metrics/</span>, <span class="path">reports/</span>,
+        <span class="path">tables/</span> и <span class="path">recipes/</span> нет ни одной
+        статьи: там только <code>.gitkeep</code>, чтобы папка попала в git.
+        В <span class="path">kb/index.md</span> лежат четыре строки-примера — они показывают
+        формат записи, файлов по ним ещё нет. Заводя первую настоящую статью, эти строки
+        замени на свою.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 10 ============ -->
+  <section id="s10">
+    <div class="sec-head">
+      <span class="sec-num">10</span>
+      <h2>Первая неделя</h2>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <p class="card-title"><span class="chip c-junior">Серёга</span></p>
+        <ul class="check">
+          <li>Открыть репозиторий и прочитать <span class="path">README.md</span> целиком — он короткий</li>
+          <li>Посмотреть болванки в <span class="path">templates/</span> — по ним всё и заполняется</li>
+          <li>Завести первый настоящий кейс сегодня же, даже если криво</li>
+          <li>Дальше — кейс на каждое закрытое обращение, в тот же день</li>
+          <li>Первый же запрос на выгрузку провести строго по шести шагам</li>
+          <li>Цель недели: 10–14 кейсов</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="card-title"><span class="chip c-lead">Ты</span></p>
+        <ul class="check">
+          <li>Вписать в <span class="path">kb/process/routing.md</span> настоящие системы, владельцев и SLA</li>
+          <li>Проверить, что плейбук выгрузки соответствует тому, как мы реально работаем</li>
+          <li>В среду посмотреть, пишутся ли кейсы вообще</li>
+          <li>В пятницу провести первый разбор — 30 минут</li>
+          <li>Заменить плейсхолдеры <code>&lt;…&gt;</code> в <span class="path">CLAUDE.md</span> и <span class="path">routing.md</span></li>
+          <li>Посмотреть, какой пробел набрался первым, и начать его закрывать</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note note-lead">
+      <span class="note-label">Главный риск первой недели</span>
+      <p>
+        Кейсы пишутся «потом» и не пишутся вообще. Проверь в среду, а не в пятницу.
+        Если к среде их меньше пяти — <strong>разбираемся, что мешает, а не требуем
+        писать больше</strong>. Обычно мешает одно из двух: непонятно, куда писать,
+        или кажется, что обращение «слишком мелкое». Мелких не бывает: два одинаковых
+        мелких вопроса — это уже статья.
+      </p>
+    </div>
+
+    <div class="prose">
+      <p>
+        Цель на конец первого месяца — 45–55 кейсов и покрытие 45%. Сейчас покрытие
+        нулевое: в базе нет ни одного кейса и ни одной статьи, отвечать агенту нечем.
+        Это нормальная стартовая точка, и растёт она ровно от того, что мы пишем.
+      </p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Инструкция лежит в <span class="path">docs/how-we-work.html</span> ·
+    вопросы по механике — в канал поддержки
+  </footer>
+
+</div>
+</body>
+</html>

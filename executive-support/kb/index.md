@@ -1,0 +1,126 @@
+<!-- Реестр всех статей базы знаний.
+     Правится вручную при добавлении или удалении статьи.
+     Агент читает этот файл первым, чтобы найти путь к нужной статье.
+
+     Файл состоит из трёх таблиц:
+     «Домены» — карта тем и мастер-сущности каждой темы;
+     «Сущности» — сам реестр статей;
+     «Самостоятельные выгрузки» — отчёты-трансформеры для режима выгрузки,
+     см. пояснение перед самой таблицей.
+
+     Колонка «домен» есть только здесь, во фронтматтере статьи её нет:
+     одно место — один источник, нечему разъезжаться. То же и с мастерством:
+     оно живёт только в таблице «Домены».
+
+     Колонка dd_urn — ключ объекта в Data Detective. Заполнена — состав полей,
+     типы и описания агент берёт онлайн из DD, а не из текста статьи.
+     Прочерк — сущности в DD нет (рецепты, метрики, регламенты).
+     Строка может существовать и без пути к статье: объект зарегистрирован
+     в DD, статья ещё не написана.
+
+     URN t-emp-structure проверен запросом. Остальные четыре собраны по той же
+     схеме urn:dd:tables:greenplum:table:<схема>.<таблица> и требуют
+     подтверждения через POST /search/query — до подтверждения возможен 404.
+     Неподтверждённые: t-attendance, t-education, t-legal-position,
+     t-functional-role. -->
+
+# Реестр базы знаний
+
+## Домены
+
+Домен — тема вопроса. Он сужает поиск: определив домен, агент выбирает сущности
+внутри него, а не по всему реестру.
+
+Колонка «мастер» — сущности, которые в этом домене читаются **первыми и всегда**,
+даже если вопрос выглядит узким. Мастер — это свойство пары «домен + сущность»,
+а не сущности самой по себе: `t-emp-structure` мастер для численности, но когда
+нужны все юридические позиции — берётся `t-legal-position` (см. `rc-structure-choice`).
+Поэтому мастерство указано здесь, а не в строке сущности.
+
+**`t-emp-structure` — мастер-витрина по сотрудникам.** Любой вопрос про людей
+идёт в неё по умолчанию, включая вопросы про основную юридическую позицию.
+Домен `legal` означает переход на `t-legal-position` только тогда, когда нужны
+**все оформления** — совместительство, ГПХ, декретные позиции, оформления
+в конкретном юрлице. Развилка «сотрудник или позиция» — шаг 0
+в [`recipes/structure-choice.md`](recipes/structure-choice.md), и она выполняется
+раньше разбора формулировок заказчика.
+
+| домен | о чём вопросы | мастер |
+|---|---|---|
+| headcount-structure | численность, штат, сколько людей, ставки в штате, подразделение, команда, департамент, уровень иерархии, руководитель, декрет, декретницы, отпуск по уходу за ребёнком | t-emp-structure, m-legal-headcount, rc-structure-choice |
+| legal | оформление, трудовой договор, юридическая позиция, структурное подразделение, юр. единица, трудоустроенные, совместительство, декретные позиции | t-legal-position, m-legal-headcount |
+| movement | найм, приёмы, увольнения, текучесть, отток, стаж, когорты, нанятые за период | t-emp-structure, rc-cohort-analysis |
+| allocation | продукт, продуктовая структура, аллокация, FTE, загрузка на продукт, функциональная роль | t-functional-role, m-fte-product |
+| attendance | табель, посещаемость, отсутствия, больничные, отпуска, отработанные дни | t-attendance |
+| education | образование, вуз, дипломы, студенты, квалификация | t-education |
+| personal-attributes | оценки, ревью, дисциплинарные взыскания, город проживания, место жительства, дети сотрудников, дополнительные чувствительные атрибуты сотрудника | t-emp-structure |
+
+Домен `*` в строке сущности означает сквозную сущность: она относится к любому
+домену и читается по релевантности вопроса, а не по совпадению домена.
+
+Домен дробится, когда сущностей в нём становится больше десяти: до этого
+дробление не сужает поиск, а только добавляет поводов ошибиться при выборе.
+Новый домен — правка этой таблицы, а не значение, придуманное в строке сущности:
+валидатор не пропустит домен, которого здесь нет.
+
+## Сущности
+
+| id | тип | домен | название | путь | dd_urn | алиасы | статус | описание |
+|---|---|---|---|---|---|---|---|---|
+| m-active-headcount | metric | headcount-structure | Активная численность | kb/metrics/active-headcount.md | — | активная численность, HC, headcount, сколько людей, численность | active | Управленческая численность: active_employee_flg = 1 и company_fire_flg = 0 |
+| m-attribute-tenure | metric | movement | Стаж в атрибуте | kb/metrics/attribute-tenure.md | — | стаж, стаж в специализации, стаж в должности, стаж в грейде, как давно в подразделении, tenure | active | Стаж внутри значения атрибута. Не путать со стажем в компании |
+| m-fte-product | metric | allocation | FTE по продукту | kb/metrics/fte-by-product.md | — | FTE, аллокация, ставки, загрузка на продукт, allocation | active | Сумма allocation_prt. Не равно численности на продукте |
+| m-hiring | metric | movement | Найм | kb/metrics/hiring.md | — | найм, hiring, приёмы, сколько наняли, набор | active | Два разных расчёта: по юридической и по активной численности |
+| m-legal-headcount | metric | headcount-structure, legal | Юридическая численность | kb/metrics/legal-headcount.md | — | юридическая численность, оформленные, трудоустроенные, списочная численность | active | Основная численность для расчётов: legal_employee_flg = 1 |
+| m-turnover | metric | movement | Текучесть | kb/metrics/turnover.md | — | текучесть, текучка, turnover, отток, уволенные, retention | active | Уволенные / средняя численность. Период нужен на месяц шире |
+| r-hr-detail-list | report | headcount-structure | HR Executive — Детальные списки | — | urn:dd:reports:reports:report:1728 | hr executive, детальные списки, executive detail employee, детальный список сотрудников | active | Отчёт-трансформер: настраиваемая выгрузка атрибутов по сотрудникам. Статьи нет: смысл и метаданные — из DD (markdown-блоки summary/how_to_read/additional_info) |
+| r-hr-executive-report | report | headcount-structure, movement | HR Executive Report | — | urn:dd:reports:reports:report:1845 | hr executive report, динамика численности, статистика найма и оттока, переводы, текучесть в динамике | active | Аналитика динамики HR-метрик: численность, найм, отток, переводы. Статьи нет: смысл — из DD (блок «Бизнес-ценность» и другие markdown-блоки) |
+| rc-attribute-tenure | recipe | movement | Стаж в атрибуте через gaps & islands | kb/recipes/attribute-tenure.md | — | gaps and islands, острова, шаблон стажа, tenure_in_attribute | active | Алгоритм и готовый SQL v2.1, рядом файл attribute-tenure.sql |
+| rc-cohort-analysis | recipe | movement | Когортный анализ | kb/recipes/cohort-analysis.md | — | когорта, нанятые в 2025, стажёры за период, атрибуты на дату события, потеряли уволенных | active | Атрибуты на дату события, иначе уволенные теряются. Валидация численности |
+| rc-field-synonyms | recipe | * | Словарь синонимов | kb/recipes/field-synonyms.md | — | словарь, синонимы, как называется поле, стрим, HQ, какое поле брать | active | Слово заказчика в имя поля, включая 13 значений active_type_nm |
+| rc-find-unit-level | recipe | headcount-structure, legal | Поиск уровня и ключа подразделения | kb/recipes/find-unit-level.md | — | найти подразделение, уровень подразделения, двухшаговый поиск, какой lvl | active | Двухшаговый алгоритм: сначала уровень и ключ, потом выгрузка |
+| rc-structure-choice | recipe | headcount-structure, legal, allocation | Выбор структуры и витрины | kb/recipes/structure-choice.md | — | какую витрину брать, юридическая или управленческая, структурное подразделение или команда | active | По формулировке заказчика определяет структуру и источник |
+| t-attendance | table | attendance | Табель посещаемости | kb/tables/mdm-employee-attendance.md | urn:dd:tables:greenplum:table:hrmart.mdm_employee_attendance | mdm_employee_attendance, табель, посещаемость, больничные, отсутствия, командировки, декреты сотрудников | active | Гранулярность: сотрудник × день. Джойн по attendance_dt = business_dt. Обязателен фильтр etl_deleted_flg = 0 |
+| t-crm-user | table | headcount-structure | Пользователи TWork | kb/tables/crm-user.md | urn:dd:tables:greenplum:table:dds.crm_user | crm_user, пользователи TWork, TWork, twork id, twork_id | active | Связь сотрудника с TWork через mdm_employee_rk. Обязателен джойн на период (valid_from_dttm/valid_to_dttm) и фильтры active_flg=1, deleted_flg=0. twork id = crm_user_id |
+| t-disciplinary-sanction | table | personal-attributes | Дисциплинарные взыскания | kb/tables/disciplinary-sanction.md | urn:dd:tables:greenplum:table:sdp_itsa_zup.disciplinary_sanction | disciplinary_sanction, дисциплинарные взыскания, дисциплинарные взыскания сотрудников | active | Дисциплинарные взыскания сотрудников. Обязателен фильтр deleted_flg = false и posted_flg = true |
+| t-dismissal-reason | table | movement | Причина увольнения от сотрудника | kb/tables/legal-position-dismissal-reason.md | urn:dd:tables:greenplum:table:hrmart.legal_position_dismissal_reason | legal_position_dismissal_reason, причины увольнения, комментарии причин увольнения | active | Причина увольнения со слов сотрудника. Джойн с t-emp-structure по legal_position_rk = legal_position_rk и legal_fire_dt = fire_dt |
+| t-education | table | education | Образование сотрудников | kb/tables/mdm-employee-education.md | urn:dd:tables:greenplum:table:hrmart.mdm_employee_education | mdm_employee_education, образование, дипломы, вуз, студенты | active | N записей на сотрудника, не подневная. Джойн без business_dt |
+| t-emp-structure | table | headcount-structure, movement, personal-attributes | Ультраширокая витрина сотрудников | kb/tables/mdm-employee-structure-d.md | urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d | mdm_employee_structure_d, ультраширокая, витрина сотрудников, основная витрина | active | Гранулярность: сотрудник × день, непрерывная. Основной источник |
+| t-employee-children | table | personal-attributes | Данные о детях сотрудников | kb/tables/employee-children.md | urn:dd:tables:greenplum:table:chrono_peoplehub_masterid.individualchildren_public | individualchildren_public, дети сотрудников, данные о детях сотрудников | active | ПДн высокой чувствительности. Обязателен фильтр isdeleted = false и birthdate <= fire_dt |
+| t-employee-client | table | headcount-structure | Связь сотрудника и клиента | kb/tables/mdm-employee-x-person-party.md | urn:dd:tables:greenplum:table:emart.mdm_employee_x_person_party | mdm_employee_x_person_party, employee_x_person_party, связь сотрудника и клиента, сотрудник-клиент, Siebel, Зибель | active | Связь между сотрудником и клиентом ФЛ. Фильтры: deleted_flg = 0, fire_flg = 0 |
+| t-employee-profession | table | headcount-structure | Профессии сотрудников | kb/tables/employee-profession.md | urn:dd:tables:greenplum:table:dds_dic.employee_profession | employee_profession, профессия, профессии, классификатор профессий | active | Справочник профессий. Джойн только через мост employee_specialization, обязателен фильтр valid_to_dttm='5999-01-01' и deleted_flg=0 |
+| t-employee-residence | table | personal-attributes | Город проживания сотрудника | kb/tables/employee-residence.md | urn:dd:tables:greenplum:table:sse_crossdata.employee_residence | employee_residence, город проживания, пребывание сотрудника | active | Джойн с t-emp-structure по mdm_employee_rk, срез на дату по valid_from_dttm/valid_to_dttm. Доступ закрыт группами, требуется согласование |
+| t-employee-x-profession | table | headcount-structure | Прямая связь сотрудник-профессия | kb/tables/mdm-employee-x-profession.md | urn:dd:tables:greenplum:table:dds.mdm_employee_x_profession | mdm_employee_x_profession, лидеры профессий, наименование профессии | active | Обязателен фильтр last_day_flg = 1 при джойне с t-emp-structure. Возможное пересечение с t-employee-profession — не подтверждено |
+| t-functional-role | table | allocation | Функциональные роли и аллокации | — | urn:dd:tables:greenplum:table:emart.functional_role_d | functional_role_d, продуктовая структура, аллокации, роли на продукте | active | Статьи нет: состав полей из DD. N строк на сотрудника, численность через count(distinct) |
+| t-legal-position | table | legal | Юридические позиции сотрудников | kb/tables/legal-position-d.md | urn:dd:tables:greenplum:table:emart.legal_position_d | legal_position_d, юридическая структура, оформления, структурное подразделение | active | Несколько оформлений на сотрудника — count(distinct) обязателен |
+| t-summary-evaluation | table | personal-attributes | Итоговые годовые оценки сотрудников | kb/tables/summary-evaluation.md | urn:dd:tables:greenplum:table:hrmart.summary_evaluation | summary_evaluation, ревью, годовые оценки, оценки сотрудников | active | Годовые оценки сотрудников. Обязателен фильтр valid_to_dttm='5999-01-01' и deleted_flg=0 |
+| t-vacation-plan | table | attendance | Запланированные отпуска сотрудников | kb/tables/vacation-plan.md | urn:dd:tables:greenplum:table:hrmart.statement_vacation | statement_vacation, запланированные отпуска, будущие отпуска сотрудников, график отпусков, план отпусков | active | Плановые отпуска: ежегодный основной, дополнительный и др., с датами начала/окончания. Обязателен фильтр etl_deleted_flg = 0 |
+
+## Самостоятельные выгрузки
+
+Отчёты-трансформеры: коллега настраивает нужные атрибуты и фильтры сам,
+без обращения в поддержку. Строка здесь не заменяет строку в «Сущности» —
+это дополнительная разметка поверх уже зарегистрированного отчёта, только
+для режима выгрузки (`is_export`).
+
+Ключевые слова матчатся кодом по тексту обращения, а не промптом:
+совпадение — сигнал «предложить отчёт», а не гарантия, что там есть все
+нужные атрибуты.
+
+Матчинг идёт по тому, что написал **человек**: подписи полей формы и всё
+в круглых скобках из текста выбрасываются. Это важно при правке списка —
+слова из служебного текста формы сюда писать бессмысленно, они не совпадут
+никогда. И наоборот: слово, которое стоит в подписи поля или в варианте
+выпадающего списка, совпадёт не с запросом, а со шаблоном, то есть отчёт
+будет предлагаться всем подряд. Так «ФИО» из варианта «Персональные данные
+сотрудников (неполное ФИО, логин, раб. почта…)» однажды оказалось
+единственным совпадением на обращении, которое было совсем про другое. Список полей и фильтров отчёта бот не проверяет — это
+и так видно самому коллеге при открытии отчёта, автор лишь предлагает
+попробовать и явно оговаривает, что не найдётся — оформляем выгрузку
+обычным путём.
+
+`id отчёта` обязан существовать в таблице «Сущности» с типом `report`.
+
+| id отчёта | ключевые слова |
+|---|---|
+| r-hr-detail-list | детальные списки, атрибуты сотрудника, контакты сотрудников, MasterID, ФИО, табельный номер, грейд, стаж, руководитель, HRBP, управленческая структура, юридическая структура, логин, ad_login, юнит, состав команды, список сотрудников, my.tbank.ru/structure |
