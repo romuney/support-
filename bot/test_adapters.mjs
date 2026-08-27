@@ -1757,5 +1757,33 @@ line('40. ЭКСПЕРТ, КОТОРОГО НЕ ПОДБИРАЛИ, назван
   check('без имён тревоги нет', clean.experts_invented.length === 0);
 }
 
+// ===================================================================== 41
+line('41. КАЖДАЯ Code-нода всех флоу парсится как JavaScript');
+{
+  // Проверка тупая и потому надёжная: скормить new Function КАЖДУЮ Code-ноду
+  // каждого собранного флоу. Сборщик пишет JS питоновскими строками, и там
+  // легко потерять экранирование — за одну сессию это случилось четырежды:
+  // в JS уезжал литерал \\n вместо переноса, а один раз нода вовсе
+  // переставала парситься. Ловилось только случайным прогоном именно этой
+  // ноды: отдельные тесты есть не у всех, и нода уезжала в n8n сломанной.
+  //
+  // Синтаксис здесь ловится целиком и независимо от того, покрыта ли нода
+  // своим тестом. Поведение — по-прежнему на совести остальных групп.
+  const flows = ['Support Bot Core.json', 'DD Lookup.json', 'Adapter Channel.json',
+                 'Adapter DM.json', 'Adapter Chat.json'];
+  let total = 0;
+  for (const f of flows) {
+    const wf = JSON.parse(fs.readFileSync(f, 'utf8'));
+    for (const n of wf.nodes.filter((x) => x.type.endsWith('.code'))) {
+      total++;
+      let err = '';
+      try { new Function('$', '$input', '$json', n.parameters.jsCode); }
+      catch (e) { err = e.message; }
+      check(`${f.replace('.json', '')} · ${n.name}${err ? ' — ' + err : ''}`, !err);
+    }
+  }
+  check('Code-ноды найдены во всех флоу', total > 10);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

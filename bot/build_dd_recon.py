@@ -78,6 +78,41 @@ if _probe is None:
 DP_CRED = copy.deepcopy(_probe["credentials"])
 DD_OPTS = copy.deepcopy(_probe["parameters"]["options"])
 
+# Общий пролог обеих фаз моста: эталон из фидбека плюс разбор ссылки.
+# Один на две фазы намеренно — копия разъехалась бы молча, а разбор ключа
+# обязан совпадать с reportSlug() в «Plan» ядра до символа.
+COMMON_RECON_JS = """
+const FEEDBACK = __FEEDBACK__;
+const NO_KEY = __NO_KEY__;
+
+const reportSlug = (url) => {
+  const path = String(url ?? '').split('?')[0].split('#')[0];
+  const segs = path.split('/').filter(Boolean).filter((s) => !/^https?:$/.test(s));
+  const skip = new Set(['superset', 'dashboard', 'dashboards', 'p', 'list', 'view']);
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (!skip.has(segs[i].toLowerCase()) && !segs[i].includes('.')) return segs[i];
+  }
+  return '';
+};
+
+const urlsOf = (v, out) => {
+  if (v === null || v === undefined) return out;
+  if (typeof v === 'string') {
+    for (const m of v.match(/https?:\\/\\/\\S+/g) || []) out.push(m.replace(/[),.;"']+$/, ''));
+    return out;
+  }
+  if (typeof v === 'object') for (const x of Object.values(v)) urlsOf(x, out);
+  return out;
+};
+"""
+
+
+def with_common(js):
+    """Подставляет общий пролог и эталон. Один вызов на обе фазы моста."""
+    return (js.replace("__COMMON__", COMMON_RECON_JS)
+              .replace("__FEEDBACK__", json.dumps(FEEDBACK_KEYS, ensure_ascii=False))
+              .replace("__NO_KEY__", json.dumps(FEEDBACK_NO_KEY, ensure_ascii=False)))
+
 BASE = "https://dd.t-tech.team/api/v3"
 
 # ------------------------------------------------------- Trino для ФАЗЫ D
@@ -470,32 +505,10 @@ BRIDGE_JS = r"""
 // ни владельца: они приезжают из карточки DD в момент ответа и в git
 // протухли бы молча — то же правило, по которому в статье не дублируется
 // состав полей.
-const FEEDBACK = __FEEDBACK__;
-const NO_KEY = __NO_KEY__;
-
+__COMMON__
 // Ключ ссылки Proteus — тот же разбор, что в «Plan» ядра (reportSlug):
 // /dashboard/23466/, /dashboard/p/el8AZBZX5Zv/, /dashboard/employee_ambassadorship/.
 // Служебные сегменты пропускаем, иначе ключом стало бы слово «p».
-const reportSlug = (url) => {
-  const path = String(url ?? '').split('?')[0].split('#')[0];
-  const segs = path.split('/').filter(Boolean).filter((s) => !/^https?:$/.test(s));
-  const skip = new Set(['superset', 'dashboard', 'dashboards', 'p', 'list', 'view']);
-  for (let i = segs.length - 1; i >= 0; i--) {
-    if (!skip.has(segs[i].toLowerCase()) && !segs[i].includes('.')) return segs[i];
-  }
-  return '';
-};
-
-const urlsOf = (v, out) => {
-  if (v === null || v === undefined) return out;
-  if (typeof v === 'string') {
-    for (const m of v.match(/https?:\/\/\S+/g) || []) out.push(m.replace(/[),.;"']+$/, ''));
-    return out;
-  }
-  if (typeof v === 'object') for (const x of Object.values(v)) urlsOf(x, out);
-  return out;
-};
-
 const notes = $('Collect notes').all().map((i) => i.json);
 const links = $input.all().map((i) => i.json);
 
@@ -594,9 +607,7 @@ nodes.append(
     code(
         "Build bridge",
         [740, 460],
-        BRIDGE_JS
-        .replace("__FEEDBACK__", json.dumps(FEEDBACK_KEYS, ensure_ascii=False))
-        .replace("__NO_KEY__", json.dumps(FEEDBACK_NO_KEY, ensure_ascii=False)),
+        with_common(BRIDGE_JS),
     )
 )
 
@@ -840,6 +851,187 @@ return [{ json: { probes: out.join('\n') } }];
 
 nodes.append(code("Shape probes", [1380, 870], SHAPE_PROBES_JS))
 
+# ------------------------------------------ ФАЗА F: мост со стороны отчётов
+#
+# Прогон 2026-08-27 (второй) закрыл последний вопрос, и ответ отрицательный:
+# по ключу ссылки отчёт НЕ ищется. `{text: "hr-executive-detail-employee"}`
+# вернул пусто, `{text: "35005"}` — чужую таблицу. Значит мост нужен.
+#
+# Зато он теперь СОБИРАЕТСЯ, чего не было в фазе B: фильтр по
+# systemType/systemName/type отдал 100 дашбордов из 100, а offset дал вторую
+# страницу целиком из новых. То есть отчёты перечисляются пагинацией,
+# у каждого берётся /link, и мост получается за один прогон.
+#
+# Почему это не повтор фазы B: там шли ОТ ВИТРИН через связь `notes`, и это
+# было обречено — ни одна из двенадцати связей таблицы не отдаёт REPORT.
+# Здесь идём от самих отчётов, минуя витрины вовсе.
+MAX_PAGES = 10          # 10 × 100 = 1000 отчётов
+PAGE_SIZE = 100
+REPORT_FILTERS = {"systemType": ["reports"],
+                  "systemName": ["reports"],
+                  "type": ["REPORT"]}
+
+PAGES_JS = """
+// По элементу на страницу: следующая нода выполнится по разу на каждый.
+return Array.from({ length: __MAX_PAGES__ }, (_, i) => ({
+  json: { offset: i * __PAGE_SIZE__, limit: __PAGE_SIZE__ },
+}));
+"""
+nodes.append(
+    code(
+        "Report pages",
+        [-60, 1100],
+        PAGES_JS.replace("__MAX_PAGES__", str(MAX_PAGES))
+                .replace("__PAGE_SIZE__", str(PAGE_SIZE)),
+    )
+)
+
+_search_page = node(
+    "Search page", "n8n-nodes-base.httpRequest", 4.4, [160, 1100],
+    {
+        "method": "POST",
+        "url": f"{BASE}/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": True,
+        "specifyBody": "json",
+        # Тело собирается выражением: offset приходит из «Report pages».
+        "jsonBody": "={{ JSON.stringify({ text: '', limit: $json.limit, "
+                    "offset: $json.offset, filters: "
+                    + json.dumps(REPORT_FILTERS, ensure_ascii=False)
+                    + " }) }}",
+        "options": copy.deepcopy(DD_OPTS),
+    },
+    DP_CRED,
+)
+_search_page["onError"] = "continueRegularOutput"
+nodes.append(_search_page)
+
+COLLECT_REPORTS_JS = """
+// Склейка страниц в один список отчётов.
+//
+// Дубли между страницами возможны, если выдача не стабильна между запросами,
+// — схлопываем по urn и называем числом. Молча схлопнутый дубль означал бы,
+// что пагинация врёт, а мы этого не заметили.
+const pages = $input.all().map((i) => i.json);
+const seen = new Map();
+let dropped = 0;
+let lastPageSize = 0;
+let failed = 0;
+
+for (const p of pages) {
+  const status = p.statusCode ?? 0;
+  if (status && status !== 200) { failed++; continue; }
+  const arr = Array.isArray(p.body) ? p.body : (p.body || {}).data || [];
+  lastPageSize = arr.length;
+  for (const c of arr) {
+    const urn = String(c.urn || '');
+    if (!urn) continue;
+    if (seen.has(urn)) { dropped++; continue; }
+    seen.set(urn, { urn, fqn: c.fqn || '', name: c.displayName || '' });
+  }
+}
+
+const all = [...seen.values()];
+// Последняя страница пришла полной — значит отчётов больше, чем мы забрали.
+// Сказать об этом обязательно: иначе неполный мост читается как полный.
+const truncated = lastPageSize >= __PAGE_SIZE__;
+return all.map((r, i) => ({
+  json: { ...r, _total: all.length, _dropped: dropped,
+          _failed: failed, _truncated: truncated && i === 0 },
+}));
+"""
+nodes.append(
+    code("Collect reports", [360, 1100],
+         COLLECT_REPORTS_JS.replace("__PAGE_SIZE__", str(PAGE_SIZE)))
+)
+
+nodes.append(
+    get("Report link2",
+        f"={{{{ '{BASE}/entity/' + encodeURIComponent($json.urn) + '/link' }}}}",
+        [560, 1100])
+)
+
+BRIDGE2_JS = "__COMMON__\n" + r"""
+const reports = $('Collect reports').all().map((i) => i.json);
+const links = $input.all().map((i) => i.json);
+const meta = reports[0] || {};
+
+const rows = [];
+const noLink = [];
+const notProteus = [];
+
+// Пара «отчёт ↔ его ссылки» держится ИНДЕКСОМ, как и в фазе B: оба списка
+// идут по одному порядку элементов, и порядок n8n сохраняет.
+reports.forEach((r, idx) => {
+  const res = links[idx] ?? {};
+  const status = res.statusCode ?? 0;
+  const body = res.body ?? res;
+  if (status && status !== 200) { noLink.push(`${r.urn}: HTTP ${status}`); return; }
+  const urls = urlsOf(body, []);
+  const proteus = urls.filter((u) => /proteus|superset/i.test(u));
+  if (!proteus.length) { notProteus.push(`${r.urn}: ${urls[0] || 'ссылок нет'}`); return; }
+  const key = reportSlug(proteus[0]);
+  if (!key) { notProteus.push(`${r.urn}: ключ не выделился — ${proteus[0]}`); return; }
+  rows.push({ key, urn: r.urn, name: r.name, url: proteus[0] });
+});
+
+// Один ключ у двух отчётов — развилка, а не мост: матчинг в «Plan» взял бы
+// первый попавшийся. Называем, а не схлопываем молча.
+const byKey = new Map();
+for (const r of rows) {
+  if (!byKey.has(r.key)) byKey.set(r.key, []);
+  byKey.get(r.key).push(r);
+}
+const collisions = [...byKey].filter(([, v]) => v.length > 1);
+
+const out = [];
+out.push('МОСТ СО СТОРОНЫ ОТЧЁТОВ (фаза F)');
+out.push(`отчётов перечислено: ${meta._total ?? 0}` +
+  (meta._dropped ? `, дублей между страницами: ${meta._dropped}` : '') +
+  (meta._failed ? `, страниц с ошибкой: ${meta._failed}` : ''));
+if (meta._truncated) {
+  out.push('ПОСЛЕДНЯЯ СТРАНИЦА ПРИШЛА ПОЛНОЙ — отчётов больше, чем забрали.');
+  out.push('Поднять MAX_PAGES в build_dd_recon.py и прогнать ещё раз;');
+  out.push('иначе мост неполный, а выглядит полным.');
+}
+out.push(`пар «ключ → urn»: ${byKey.size}`);
+if (noLink.length) out.push(`без ссылки: ${noLink.length}`);
+if (notProteus.length) out.push(`ссылка не на Proteus: ${notProteus.length}`);
+if (collisions.length) {
+  out.push('');
+  out.push('ОДИН КЛЮЧ У НЕСКОЛЬКИХ ОТЧЁТОВ — разобрать руками:');
+  for (const [k, v] of collisions) out.push(`— ${k}: ${v.map((x) => x.urn).join(', ')}`);
+}
+
+out.push('');
+out.push('ПОКРЫТИЕ ЭТАЛОНА (ключи из фидбека аналитика):');
+const covered = [];
+const missing = [];
+for (const [k, title] of Object.entries(FEEDBACK)) {
+  (byKey.has(k) ? covered : missing).push(`${k} (${title})`);
+}
+out.push(`  нашлось ${covered.length} из ${covered.length + missing.length}`);
+for (const c of covered) out.push('  + ' + c);
+for (const m of missing) out.push('  — НЕ НАЙДЕН: ' + m);
+
+out.push('');
+out.push('ВСТАВИТЬ В kb/index.md, таблица «Отчёты Proteus»:');
+out.push('');
+out.push('| ключ ссылки | dd_urn |');
+out.push('|---|---|');
+for (const [key, v] of [...byKey].sort((a, b) => a[0].localeCompare(b[0]))) {
+  out.push(`| ${key} | ${v[0].urn} |`);
+}
+
+return [{ json: {
+  report: out.join('\n'),
+  rows: [...byKey].map(([key, v]) => ({ key, urn: v[0].urn, name: v[0].name })),
+  covered, missing, collisions: collisions.length,
+} }];
+"""
+nodes.append(code("Build bridge2", [760, 1100], with_common(BRIDGE2_JS)))
+
 # --------------------------------------------------- ФАЗА D: значения полей
 #
 # ЗАЧЕМ. Инвентарь полей мы берём из каталога, но перечня УНИКАЛЬНЫХ ЗНАЧЕНИЙ
@@ -960,6 +1152,8 @@ CHAIN = (
     + [n for n, _ in PHASE_E_GET]
     + [n for n, _ in PHASE_E_POST]
     + ["Shape probes"]
+    + ["Report pages", "Search page", "Collect reports", "Report link2",
+       "Build bridge2"]
     + [n for n, _ in PHASE_D]
     + ["Shape values"]
 )

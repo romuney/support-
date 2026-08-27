@@ -349,7 +349,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\n// Готовые строки таблицы «Отчёты Proteus» для kb/index.md.\n//\n// Мост — это ДВЕ колонки и только они: ключ ссылки и dd_urn. Ни названия,\n// ни владельца: они приезжают из карточки DD в момент ответа и в git\n// протухли бы молча — то же правило, по которому в статье не дублируется\n// состав полей.\nconst FEEDBACK = {\"23466\": \"[CrossData] Центр развития Аватар\", \"28227\": \"[C&B] Выгрузка заявлений на компенсацию\", \"23003\": \"[CrossData] Лидерский снепшот\", \"14586\": \"[CROSS SD] Поддержка программы Приведи друга\", \"35005\": \"Активность в GitLab\", \"employee_ambassadorship\": \"Амбассадорство сотрудников\", \"YApDgAlG5gQ\": \"[CrossData] Центр развития «Крепкие лиды»\", \"DKpqdNQa51J\": \"Путь лида\", \"jQpM212k30X\": \"Календарь присутствия сотрудников\", \"mb5bg1qzp1l\": \"Мониторинг аллокаций\"};\nconst NO_KEY = [\"Квоты и вакансии\", \"Юридические позиции сотрудника за период\", \"Справки и заявления (статистика)\", \"HR Executive Report\"];\n\n// Ключ ссылки Proteus — тот же разбор, что в «Plan» ядра (reportSlug):\n// /dashboard/23466/, /dashboard/p/el8AZBZX5Zv/, /dashboard/employee_ambassadorship/.\n// Служебные сегменты пропускаем, иначе ключом стало бы слово «p».\nconst reportSlug = (url) => {\n  const path = String(url ?? '').split('?')[0].split('#')[0];\n  const segs = path.split('/').filter(Boolean).filter((s) => !/^https?:$/.test(s));\n  const skip = new Set(['superset', 'dashboard', 'dashboards', 'p', 'list', 'view']);\n  for (let i = segs.length - 1; i >= 0; i--) {\n    if (!skip.has(segs[i].toLowerCase()) && !segs[i].includes('.')) return segs[i];\n  }\n  return '';\n};\n\nconst urlsOf = (v, out) => {\n  if (v === null || v === undefined) return out;\n  if (typeof v === 'string') {\n    for (const m of v.match(/https?:\\/\\/\\S+/g) || []) out.push(m.replace(/[),.;\"']+$/, ''));\n    return out;\n  }\n  if (typeof v === 'object') for (const x of Object.values(v)) urlsOf(x, out);\n  return out;\n};\n\nconst notes = $('Collect notes').all().map((i) => i.json);\nconst links = $input.all().map((i) => i.json);\n\nconst rows = [];      // { key, urn, url }\nconst noLink = [];\nconst notProteus = [];\n\n// Пара «отчёт ↔ его ссылки» держится ИНДЕКСОМ: оба списка идут по одному\n// и тому же порядку элементов, порядок n8n сохраняет. Ровно так же имя\n// колонки берётся из «Pick columns» в DD Lookup — ни один из ответов\n// каталога имени объекта не несёт.\nnotes.forEach((n, idx) => {\n  const res = links[idx] ?? {};\n  const status = res.statusCode ?? 0;\n  const body = res.body ?? res;\n  if (status && status !== 200) { noLink.push(`${n.urn}: HTTP ${status}`); return; }\n  const urls = urlsOf(body, []);\n  const proteus = urls.filter((u) => /proteus|superset/i.test(u));\n  if (!urls.length) { noLink.push(`${n.urn}: ссылок нет`); return; }\n  if (!proteus.length) { notProteus.push(`${n.urn}: ${urls[0]}`); return; }\n  const key = reportSlug(proteus[0]);\n  if (!key) { notProteus.push(`${n.urn}: ключ из ссылки не выделился — ${proteus[0]}`); return; }\n  rows.push({ key, urn: n.urn, url: proteus[0], fqn: n.fqn });\n});\n\n// Один ключ у двух отчётов — это не мост, а развилка: матчинг в «Plan» взял бы\n// первый попавшийся. Называем, а не схлопываем молча.\nconst byKey = new Map();\nfor (const r of rows) {\n  if (!byKey.has(r.key)) byKey.set(r.key, []);\n  byKey.get(r.key).push(r);\n}\nconst collisions = [...byKey].filter(([, v]) => v.length > 1)\n  .map(([k, v]) => `${k} → ${v.map((r) => r.urn).join(' и ')}`);\n\nconst meta = notes[0] ?? {};\nconst covered = Object.keys(FEEDBACK).filter((k) => byKey.has(k));\nconst missing = Object.keys(FEEDBACK).filter((k) => !byKey.has(k));\n\nconst out = [];\nout.push('МОСТ «ключ ссылки → dd_urn»: ' + byKey.size + ' пар из ' +\n  (meta._total_found ?? 0) + ' отчётов и ноутбуков, читающих витрины реестра');\nif (meta._dropped) {\n  out.push('ПО ЛИМИТУ НЕ ПРОВЕРЯЛИСЬ: ' + meta._dropped + ' объектов.');\n}\n// Прогон 2026-08-27: 0 пар из 1782, и все 60 проверенных оказались ноутбуками\n// Helicopter. Поднимать лимит бессмысленно — связь `notes` по построению\n// возвращает сущности типа NOTE, а дашборды Proteus это тип REPORT.\n// Мост через неё не собрать ни при каком лимите; см. фазу E.\nif (!byKey.size) {\n  out.push('');\n  out.push('НИ ОДНОЙ ПАРЫ. Если среди проверенных только ноутбуки Helicopter —');\n  out.push('дело НЕ в лимите: связь «notes» отдаёт сущности типа NOTE, а');\n  out.push('дашборды Proteus это тип REPORT. Нужна другая связь либо поиск —');\n  out.push('см. вывод ноды «Shape probes» (фаза E).');\n}\nif ((meta._problems ?? []).length) out.push('ВИТРИНЫ С ОШИБКОЙ: ' + meta._problems.join('; '));\nout.push('');\nout.push('ВСТАВИТЬ В kb/index.md, таблица «Отчёты Proteus»:');\nout.push('');\nout.push('| ключ ссылки | dd_urn |');\nout.push('|---|---|');\nfor (const [key, v] of [...byKey].sort((a, b) => a[0].localeCompare(b[0]))) {\n  out.push(`| ${key} | ${v[0].urn} |`);\n}\nout.push('');\nout.push('ПОКРЫТИЕ ЭТАЛОНА (ключи из фидбека аналитика): ' +\n  covered.length + ' из ' + Object.keys(FEEDBACK).length);\nfor (const k of missing) out.push(`— НЕ НАЙДЕН: ${k} (${FEEDBACK[k]})`);\nout.push('');\nout.push('ОТЧЁТЫ ФИДБЕКА БЕЗ КЛЮЧА ССЫЛКИ — мост их не закроет, искать по имени:');\nfor (const n of NO_KEY) out.push(`— ${n}`);\nif (collisions.length) {\n  out.push('');\n  out.push('ОДИН КЛЮЧ У НЕСКОЛЬКИХ ОБЪЕКТОВ — разобрать руками, матчинг возьмёт первый:');\n  for (const c of collisions) out.push('— ' + c);\n}\nif (noLink.length) {\n  out.push('');\n  out.push('БЕЗ ССЫЛОК (' + noLink.length + '):');\n  for (const s of noLink.slice(0, 30)) out.push('— ' + s);\n}\nif (notProteus.length) {\n  out.push('');\n  out.push('ССЫЛКИ ЕСТЬ, НО НЕ НА PROTEUS (' + notProteus.length + ') — это ноутбуки:');\n  for (const s of notProteus.slice(0, 30)) out.push('— ' + s);\n}\n\nreturn [{ json: {\n  report: out.join('\\n'),\n  rows: [...byKey].map(([key, v]) => ({ key, urn: v[0].urn, url: v[0].url })),\n  covered, missing, collisions,\n} }];\n",
+        "jsCode": "\n// Готовые строки таблицы «Отчёты Proteus» для kb/index.md.\n//\n// Мост — это ДВЕ колонки и только они: ключ ссылки и dd_urn. Ни названия,\n// ни владельца: они приезжают из карточки DD в момент ответа и в git\n// протухли бы молча — то же правило, по которому в статье не дублируется\n// состав полей.\n\nconst FEEDBACK = {\"23466\": \"[CrossData] Центр развития Аватар\", \"28227\": \"[C&B] Выгрузка заявлений на компенсацию\", \"23003\": \"[CrossData] Лидерский снепшот\", \"14586\": \"[CROSS SD] Поддержка программы Приведи друга\", \"35005\": \"Активность в GitLab\", \"employee_ambassadorship\": \"Амбассадорство сотрудников\", \"YApDgAlG5gQ\": \"[CrossData] Центр развития «Крепкие лиды»\", \"DKpqdNQa51J\": \"Путь лида\", \"jQpM212k30X\": \"Календарь присутствия сотрудников\", \"mb5bg1qzp1l\": \"Мониторинг аллокаций\"};\nconst NO_KEY = [\"Квоты и вакансии\", \"Юридические позиции сотрудника за период\", \"Справки и заявления (статистика)\", \"HR Executive Report\"];\n\nconst reportSlug = (url) => {\n  const path = String(url ?? '').split('?')[0].split('#')[0];\n  const segs = path.split('/').filter(Boolean).filter((s) => !/^https?:$/.test(s));\n  const skip = new Set(['superset', 'dashboard', 'dashboards', 'p', 'list', 'view']);\n  for (let i = segs.length - 1; i >= 0; i--) {\n    if (!skip.has(segs[i].toLowerCase()) && !segs[i].includes('.')) return segs[i];\n  }\n  return '';\n};\n\nconst urlsOf = (v, out) => {\n  if (v === null || v === undefined) return out;\n  if (typeof v === 'string') {\n    for (const m of v.match(/https?:\\/\\/\\S+/g) || []) out.push(m.replace(/[),.;\"']+$/, ''));\n    return out;\n  }\n  if (typeof v === 'object') for (const x of Object.values(v)) urlsOf(x, out);\n  return out;\n};\n\n// Ключ ссылки Proteus — тот же разбор, что в «Plan» ядра (reportSlug):\n// /dashboard/23466/, /dashboard/p/el8AZBZX5Zv/, /dashboard/employee_ambassadorship/.\n// Служебные сегменты пропускаем, иначе ключом стало бы слово «p».\nconst notes = $('Collect notes').all().map((i) => i.json);\nconst links = $input.all().map((i) => i.json);\n\nconst rows = [];      // { key, urn, url }\nconst noLink = [];\nconst notProteus = [];\n\n// Пара «отчёт ↔ его ссылки» держится ИНДЕКСОМ: оба списка идут по одному\n// и тому же порядку элементов, порядок n8n сохраняет. Ровно так же имя\n// колонки берётся из «Pick columns» в DD Lookup — ни один из ответов\n// каталога имени объекта не несёт.\nnotes.forEach((n, idx) => {\n  const res = links[idx] ?? {};\n  const status = res.statusCode ?? 0;\n  const body = res.body ?? res;\n  if (status && status !== 200) { noLink.push(`${n.urn}: HTTP ${status}`); return; }\n  const urls = urlsOf(body, []);\n  const proteus = urls.filter((u) => /proteus|superset/i.test(u));\n  if (!urls.length) { noLink.push(`${n.urn}: ссылок нет`); return; }\n  if (!proteus.length) { notProteus.push(`${n.urn}: ${urls[0]}`); return; }\n  const key = reportSlug(proteus[0]);\n  if (!key) { notProteus.push(`${n.urn}: ключ из ссылки не выделился — ${proteus[0]}`); return; }\n  rows.push({ key, urn: n.urn, url: proteus[0], fqn: n.fqn });\n});\n\n// Один ключ у двух отчётов — это не мост, а развилка: матчинг в «Plan» взял бы\n// первый попавшийся. Называем, а не схлопываем молча.\nconst byKey = new Map();\nfor (const r of rows) {\n  if (!byKey.has(r.key)) byKey.set(r.key, []);\n  byKey.get(r.key).push(r);\n}\nconst collisions = [...byKey].filter(([, v]) => v.length > 1)\n  .map(([k, v]) => `${k} → ${v.map((r) => r.urn).join(' и ')}`);\n\nconst meta = notes[0] ?? {};\nconst covered = Object.keys(FEEDBACK).filter((k) => byKey.has(k));\nconst missing = Object.keys(FEEDBACK).filter((k) => !byKey.has(k));\n\nconst out = [];\nout.push('МОСТ «ключ ссылки → dd_urn»: ' + byKey.size + ' пар из ' +\n  (meta._total_found ?? 0) + ' отчётов и ноутбуков, читающих витрины реестра');\nif (meta._dropped) {\n  out.push('ПО ЛИМИТУ НЕ ПРОВЕРЯЛИСЬ: ' + meta._dropped + ' объектов.');\n}\n// Прогон 2026-08-27: 0 пар из 1782, и все 60 проверенных оказались ноутбуками\n// Helicopter. Поднимать лимит бессмысленно — связь `notes` по построению\n// возвращает сущности типа NOTE, а дашборды Proteus это тип REPORT.\n// Мост через неё не собрать ни при каком лимите; см. фазу E.\nif (!byKey.size) {\n  out.push('');\n  out.push('НИ ОДНОЙ ПАРЫ. Если среди проверенных только ноутбуки Helicopter —');\n  out.push('дело НЕ в лимите: связь «notes» отдаёт сущности типа NOTE, а');\n  out.push('дашборды Proteus это тип REPORT. Нужна другая связь либо поиск —');\n  out.push('см. вывод ноды «Shape probes» (фаза E).');\n}\nif ((meta._problems ?? []).length) out.push('ВИТРИНЫ С ОШИБКОЙ: ' + meta._problems.join('; '));\nout.push('');\nout.push('ВСТАВИТЬ В kb/index.md, таблица «Отчёты Proteus»:');\nout.push('');\nout.push('| ключ ссылки | dd_urn |');\nout.push('|---|---|');\nfor (const [key, v] of [...byKey].sort((a, b) => a[0].localeCompare(b[0]))) {\n  out.push(`| ${key} | ${v[0].urn} |`);\n}\nout.push('');\nout.push('ПОКРЫТИЕ ЭТАЛОНА (ключи из фидбека аналитика): ' +\n  covered.length + ' из ' + Object.keys(FEEDBACK).length);\nfor (const k of missing) out.push(`— НЕ НАЙДЕН: ${k} (${FEEDBACK[k]})`);\nout.push('');\nout.push('ОТЧЁТЫ ФИДБЕКА БЕЗ КЛЮЧА ССЫЛКИ — мост их не закроет, искать по имени:');\nfor (const n of NO_KEY) out.push(`— ${n}`);\nif (collisions.length) {\n  out.push('');\n  out.push('ОДИН КЛЮЧ У НЕСКОЛЬКИХ ОБЪЕКТОВ — разобрать руками, матчинг возьмёт первый:');\n  for (const c of collisions) out.push('— ' + c);\n}\nif (noLink.length) {\n  out.push('');\n  out.push('БЕЗ ССЫЛОК (' + noLink.length + '):');\n  for (const s of noLink.slice(0, 30)) out.push('— ' + s);\n}\nif (notProteus.length) {\n  out.push('');\n  out.push('ССЫЛКИ ЕСТЬ, НО НЕ НА PROTEUS (' + notProteus.length + ') — это ноутбуки:');\n  for (const s of notProteus.slice(0, 30)) out.push('— ' + s);\n}\n\nreturn [{ json: {\n  report: out.join('\\n'),\n  rows: [...byKey].map(([key, v]) => ({ key, urn: v[0].urn, url: v[0].url })),\n  covered, missing, collisions,\n} }];\n",
         "mode": "runOnceForAllItems"
       },
       "type": "n8n-nodes-base.code",
@@ -727,6 +727,122 @@
     },
     {
       "parameters": {
+        "jsCode": "\n// По элементу на страницу: следующая нода выполнится по разу на каждый.\nreturn Array.from({ length: 10 }, (_, i) => ({\n  json: { offset: i * 100, limit: 100 },\n}));\n",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -60,
+        1100
+      ],
+      "id": "recon-report-pages",
+      "name": "Report pages"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '', limit: $json.limit, offset: $json.offset, filters: {\"systemType\": [\"reports\"], \"systemName\": [\"reports\"], \"type\": [\"REPORT\"]} }) }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        1100
+      ],
+      "id": "recon-search-page",
+      "name": "Search page",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Склейка страниц в один список отчётов.\n//\n// Дубли между страницами возможны, если выдача не стабильна между запросами,\n// — схлопываем по urn и называем числом. Молча схлопнутый дубль означал бы,\n// что пагинация врёт, а мы этого не заметили.\nconst pages = $input.all().map((i) => i.json);\nconst seen = new Map();\nlet dropped = 0;\nlet lastPageSize = 0;\nlet failed = 0;\n\nfor (const p of pages) {\n  const status = p.statusCode ?? 0;\n  if (status && status !== 200) { failed++; continue; }\n  const arr = Array.isArray(p.body) ? p.body : (p.body || {}).data || [];\n  lastPageSize = arr.length;\n  for (const c of arr) {\n    const urn = String(c.urn || '');\n    if (!urn) continue;\n    if (seen.has(urn)) { dropped++; continue; }\n    seen.set(urn, { urn, fqn: c.fqn || '', name: c.displayName || '' });\n  }\n}\n\nconst all = [...seen.values()];\n// Последняя страница пришла полной — значит отчётов больше, чем мы забрали.\n// Сказать об этом обязательно: иначе неполный мост читается как полный.\nconst truncated = lastPageSize >= 100;\nreturn all.map((r, i) => ({\n  json: { ...r, _total: all.length, _dropped: dropped,\n          _failed: failed, _truncated: truncated && i === 0 },\n}));\n",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        1100
+      ],
+      "id": "recon-collect-reports",
+      "name": "Collect reports"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent($json.urn) + '/link' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        560,
+        1100
+      ],
+      "id": "recon-report-link2",
+      "name": "Report link2",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst FEEDBACK = {\"23466\": \"[CrossData] Центр развития Аватар\", \"28227\": \"[C&B] Выгрузка заявлений на компенсацию\", \"23003\": \"[CrossData] Лидерский снепшот\", \"14586\": \"[CROSS SD] Поддержка программы Приведи друга\", \"35005\": \"Активность в GitLab\", \"employee_ambassadorship\": \"Амбассадорство сотрудников\", \"YApDgAlG5gQ\": \"[CrossData] Центр развития «Крепкие лиды»\", \"DKpqdNQa51J\": \"Путь лида\", \"jQpM212k30X\": \"Календарь присутствия сотрудников\", \"mb5bg1qzp1l\": \"Мониторинг аллокаций\"};\nconst NO_KEY = [\"Квоты и вакансии\", \"Юридические позиции сотрудника за период\", \"Справки и заявления (статистика)\", \"HR Executive Report\"];\n\nconst reportSlug = (url) => {\n  const path = String(url ?? '').split('?')[0].split('#')[0];\n  const segs = path.split('/').filter(Boolean).filter((s) => !/^https?:$/.test(s));\n  const skip = new Set(['superset', 'dashboard', 'dashboards', 'p', 'list', 'view']);\n  for (let i = segs.length - 1; i >= 0; i--) {\n    if (!skip.has(segs[i].toLowerCase()) && !segs[i].includes('.')) return segs[i];\n  }\n  return '';\n};\n\nconst urlsOf = (v, out) => {\n  if (v === null || v === undefined) return out;\n  if (typeof v === 'string') {\n    for (const m of v.match(/https?:\\/\\/\\S+/g) || []) out.push(m.replace(/[),.;\"']+$/, ''));\n    return out;\n  }\n  if (typeof v === 'object') for (const x of Object.values(v)) urlsOf(x, out);\n  return out;\n};\n\n\nconst reports = $('Collect reports').all().map((i) => i.json);\nconst links = $input.all().map((i) => i.json);\nconst meta = reports[0] || {};\n\nconst rows = [];\nconst noLink = [];\nconst notProteus = [];\n\n// Пара «отчёт ↔ его ссылки» держится ИНДЕКСОМ, как и в фазе B: оба списка\n// идут по одному порядку элементов, и порядок n8n сохраняет.\nreports.forEach((r, idx) => {\n  const res = links[idx] ?? {};\n  const status = res.statusCode ?? 0;\n  const body = res.body ?? res;\n  if (status && status !== 200) { noLink.push(`${r.urn}: HTTP ${status}`); return; }\n  const urls = urlsOf(body, []);\n  const proteus = urls.filter((u) => /proteus|superset/i.test(u));\n  if (!proteus.length) { notProteus.push(`${r.urn}: ${urls[0] || 'ссылок нет'}`); return; }\n  const key = reportSlug(proteus[0]);\n  if (!key) { notProteus.push(`${r.urn}: ключ не выделился — ${proteus[0]}`); return; }\n  rows.push({ key, urn: r.urn, name: r.name, url: proteus[0] });\n});\n\n// Один ключ у двух отчётов — развилка, а не мост: матчинг в «Plan» взял бы\n// первый попавшийся. Называем, а не схлопываем молча.\nconst byKey = new Map();\nfor (const r of rows) {\n  if (!byKey.has(r.key)) byKey.set(r.key, []);\n  byKey.get(r.key).push(r);\n}\nconst collisions = [...byKey].filter(([, v]) => v.length > 1);\n\nconst out = [];\nout.push('МОСТ СО СТОРОНЫ ОТЧЁТОВ (фаза F)');\nout.push(`отчётов перечислено: ${meta._total ?? 0}` +\n  (meta._dropped ? `, дублей между страницами: ${meta._dropped}` : '') +\n  (meta._failed ? `, страниц с ошибкой: ${meta._failed}` : ''));\nif (meta._truncated) {\n  out.push('ПОСЛЕДНЯЯ СТРАНИЦА ПРИШЛА ПОЛНОЙ — отчётов больше, чем забрали.');\n  out.push('Поднять MAX_PAGES в build_dd_recon.py и прогнать ещё раз;');\n  out.push('иначе мост неполный, а выглядит полным.');\n}\nout.push(`пар «ключ → urn»: ${byKey.size}`);\nif (noLink.length) out.push(`без ссылки: ${noLink.length}`);\nif (notProteus.length) out.push(`ссылка не на Proteus: ${notProteus.length}`);\nif (collisions.length) {\n  out.push('');\n  out.push('ОДИН КЛЮЧ У НЕСКОЛЬКИХ ОТЧЁТОВ — разобрать руками:');\n  for (const [k, v] of collisions) out.push(`— ${k}: ${v.map((x) => x.urn).join(', ')}`);\n}\n\nout.push('');\nout.push('ПОКРЫТИЕ ЭТАЛОНА (ключи из фидбека аналитика):');\nconst covered = [];\nconst missing = [];\nfor (const [k, title] of Object.entries(FEEDBACK)) {\n  (byKey.has(k) ? covered : missing).push(`${k} (${title})`);\n}\nout.push(`  нашлось ${covered.length} из ${covered.length + missing.length}`);\nfor (const c of covered) out.push('  + ' + c);\nfor (const m of missing) out.push('  — НЕ НАЙДЕН: ' + m);\n\nout.push('');\nout.push('ВСТАВИТЬ В kb/index.md, таблица «Отчёты Proteus»:');\nout.push('');\nout.push('| ключ ссылки | dd_urn |');\nout.push('|---|---|');\nfor (const [key, v] of [...byKey].sort((a, b) => a[0].localeCompare(b[0]))) {\n  out.push(`| ${key} | ${v[0].urn} |`);\n}\n\nreturn [{ json: {\n  report: out.join('\\n'),\n  rows: [...byKey].map(([key, v]) => ({ key, urn: v[0].urn, name: v[0].name })),\n  covered, missing, collisions: collisions.length,\n} }];\n",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        1100
+      ],
+      "id": "recon-build-bridge2",
+      "name": "Build bridge2"
+    },
+    {
+      "parameters": {
         "query": "SHOW CATALOGS",
         "timeout": 900,
         "timeZone": "Europe/Moscow"
@@ -1053,6 +1169,61 @@
       ]
     },
     "Shape probes": {
+      "main": [
+        [
+          {
+            "node": "Report pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report pages": {
+      "main": [
+        [
+          {
+            "node": "Search page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search page": {
+      "main": [
+        [
+          {
+            "node": "Collect reports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect reports": {
+      "main": [
+        [
+          {
+            "node": "Report link2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report link2": {
+      "main": [
+        [
+          {
+            "node": "Build bridge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build bridge2": {
       "main": [
         [
           {
