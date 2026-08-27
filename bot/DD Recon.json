@@ -381,7 +381,8 @@
           "name": "DWH (Trino DLH) account 128"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -403,7 +404,8 @@
           "name": "DWH (Trino DLH) account 128"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -425,11 +427,12 @@
           "name": "DWH (Trino DLH) account 128"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
-        "jsCode": "\n// Разбор трёх проб Trino. Ничего не решает — печатает, что удалось узнать,\n// чтобы решение принял человек.\nconst look = (name) => {\n  try { return $(name).all().map((x) => x.json); } catch (e) { return null; }\n};\nconst out = [];\nconst say = (s) => out.push(s);\n\nconst describe = (name) => {\n  const items = look(name);\n  if (items === null) return `${name}: узел не выполнялся`;\n  if (!items.length) return `${name}: ноль элементов`;\n  const first = items[0] || {};\n  // n8n при onError кладёт текст отказа в поле error элемента.\n  const err = first.error || first.message || (first.json && first.json.error);\n  if (err) return `${name}: ОТКАЗ — ${JSON.stringify(err).slice(0, 600)}`;\n  return `${name}: ${items.length} строк, ключи первой: ` +\n    Object.keys(first).join(', ') + '\\n  первая строка: ' +\n    JSON.stringify(first).slice(0, 400);\n};\n\nsay('=== ФАЗА D: значения полей через Trino ===');\nsay('');\nfor (const n of ['Probe catalogs', 'Probe values', 'Probe missing']) say(describe(n));\n\nsay('');\nsay('ЧТО С ЭТИМ ДЕЛАТЬ:');\nsay('— «Probe values» вернул строки → аккаунт видит витрину, и значения');\nsay('  можно тянуть. Посмотрите число разных значений: от него зависит,');\nsay('  нужен ли потолок в шейпере и какой.');\nsay('— «Probe values» отказал, а «Probe catalogs» вернул список → дело');\nsay('  в префиксе каталога. Возьмите нужный из списка и перепишите');\nsay('  VALUES_TABLE в build_dd_recon.py, прогон повторить.');\nsay('— Сравните текст отказа «Probe values» с «Probe missing». Если они');\nsay('  РАЗНЫЕ — значит недоступную витрину можно отличить от пустого');\nsay('  результата, и это то, на чём будет стоять диагностика в DD Lookup.');\nsay('  Если ОДИНАКОВЫЕ — отличить нельзя, и тогда список доступных витрин');\nsay('  придётся держать явно, со всеми издержками копии.');\n\nreturn [{ json: { values_recon: out.join('\\n') } }];\n",
+        "jsCode": "\n// Разбор трёх проб Trino. Ничего не решает — печатает, что удалось узнать,\n// чтобы решение принял человек.\nconst look = (name) => {\n  try { return $(name).all().map((x) => x.json); } catch (e) { return null; }\n};\nconst out = [];\nconst say = (s) => out.push(s);\n\nconst describe = (name) => {\n  const items = look(name);\n  if (items === null) return `${name}: узел не выполнялся`;\n  if (!items.length) return `${name}: ноль элементов`;\n  const first = items[0] || {};\n  // n8n при onError кладёт текст отказа в поле error элемента.\n  const err = first.error || first.message || (first.json && first.json.error);\n  if (err) return `${name}: ОТКАЗ — ${JSON.stringify(err).slice(0, 600)}`;\n  return `${name}: ${items.length} строк, ключи первой: ` +\n    Object.keys(first).join(', ') + '\\n  первая строка: ' +\n    JSON.stringify(first).slice(0, 400);\n};\n\nsay('=== ФАЗА D: значения полей через Trino ===');\nsay('');\nfor (const n of ['Probe catalogs', 'Probe values', 'Probe missing']) say(describe(n));\n\nsay('');\nsay('');\nsay('ВНИМАНИЕ: число строк «Probe values» упирается в LIMIT запроса и НЕ равно');\nsay('числу разных значений поля. Кардинальность этим прогоном не измеряется —');\nsay('если строк ровно столько, сколько в LIMIT, значений может быть больше.');\nsay('');\nsay('ЧТО С ЭТИМ ДЕЛАТЬ:');\nsay('— «Probe values» вернул строки → аккаунт видит витрину, и значения');\nsay('  можно тянуть. Посмотрите число разных значений: от него зависит,');\nsay('  нужен ли потолок в шейпере и какой.');\nsay('— «Probe values» отказал, а «Probe catalogs» вернул список → дело');\nsay('  в префиксе каталога. Возьмите нужный из списка и перепишите');\nsay('  VALUES_TABLE в build_dd_recon.py, прогон повторить.');\nsay('— Сравните текст отказа «Probe values» с «Probe missing». Если они');\nsay('  РАЗНЫЕ — значит недоступную витрину можно отличить от пустого');\nsay('  результата, и это то, на чём будет стоять диагностика в DD Lookup.');\nsay('  Если ОДИНАКОВЫЕ — отличить нельзя, и тогда список доступных витрин');\nsay('  придётся держать явно, со всеми издержками копии.');\n\nreturn [{ json: { values_recon: out.join('\\n') } }];\n",
         "mode": "runOnceForAllItems"
       },
       "type": "n8n-nodes-base.code",
