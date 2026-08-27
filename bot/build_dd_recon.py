@@ -641,10 +641,29 @@ for i, (nm, url) in enumerate(PHASE_E_GET):
 
 # Три пробы поиска. Тело JSON, поле текста — вот что выясняем.
 SEARCH_NAME = OWNER_REFERENCE[1][0]
+# Прогон 2026-08-27 (второй): поле найдено — `text`. Осталось ОДНО:
+# ищется ли отчёт по КЛЮЧУ ССЫЛКИ Proteus. Это решает, нужен ли мост вообще.
+#
+# Вывести URN из ссылки нельзя: у «Активности в GitLab» URN
+# report:aktivnost-v-gitlab, а ключ ссылки 35005; у отчёта 1728 наоборот —
+# URN числовой, ключ ссылки hr-executive-detail-employee. Связи между ними
+# нет никакой, и подобрать её нечем.
+#
+# Поэтому две пробы по ключам двух РАЗНЫХ форм. Совпало — моста не нужно
+# вовсе, бот ищет отчёт по ссылке из формы прямо в момент ответа. Не совпало —
+# мост нужен, и собирается он перечислением отчётов через поиск.
 PHASE_E_POST = [
     ("Search base", {"limit": 5}),
     ("Search text", {"text": SEARCH_NAME, "limit": 5}),
     ("Search searchText", {"searchText": SEARCH_NAME, "limit": 5}),
+    # Ключ-слаг: так выглядит ссылка отчёта 1728.
+    ("Search by slug", {"text": "hr-executive-detail-employee", "limit": 5}),
+    # Ключ-число: так выглядит ссылка «Активности в GitLab».
+    ("Search by id", {"text": "35005", "limit": 5}),
+    # Перечисление: можно ли получить СПИСОК отчётов, а не одну карточку.
+    # От этого зависит, собирается ли мост одним прогоном или руками.
+    ("Search reports", {"text": "", "limit": 100,
+                        "filters": {"system": "reports", "type": "REPORT"}}),
 ]
 for i, (nm, body) in enumerate(PHASE_E_POST):
     n = node(
@@ -745,6 +764,44 @@ for (const nm of ['Search text', 'Search searchText']) {
       : `    ← выдача та же, что без текста: поле «${field}» игнорируется`);
   }
 }
+
+// --- 4. ищется ли отчёт по ключу ссылки: от этого зависит, нужен ли мост
+say('');
+say('ПОИСК ПО КЛЮЧУ ССЫЛКИ (нужен ли мост вообще):');
+const urns = (name) => {
+  const r = body(name);
+  if (r.miss) return null;
+  const arr = Array.isArray(r.b) ? r.b : (r.b || {}).data || [];
+  return arr.map((x) => String(x.urn || (x.entity || {}).urn || ''));
+};
+for (const [nm, key, want] of [
+  ['Search by slug', 'hr-executive-detail-employee', 'report:1728'],
+  ['Search by id', '35005', 'aktivnost-v-gitlab'],
+]) {
+  const u = urns(nm);
+  if (!u) { say(`  {text: "${key}"} → ` + body(nm).miss); continue; }
+  const hit = u.find((x) => x.includes(want));
+  say(`  {text: "${key}"} → ` + (u[0] || '(пусто)'));
+  say(hit
+    ? `    ← НАЙДЕН нужный отчёт (${hit}). Мост не нужен: бот ищет отчёт `
+      + 'по ссылке из формы прямо в момент ответа'
+    : '    ← нужного отчёта в выдаче НЕТ. Значит по ключу ссылки не ищется, '
+      + 'и мост нужен: перечислить отчёты поиском, у каждого взять /link');
+}
+
+const rep = urns('Search reports');
+say('');
+say('ПЕРЕЧИСЛЕНИЕ ОТЧЁТОВ (собирается ли мост одним прогоном):');
+if (!rep) say('  ' + body('Search reports').miss);
+else {
+  const onlyReports = rep.filter((x) => /:reports:reports:report:/.test(x));
+  say(`  вернулось ${rep.length}, из них дашбордов Proteus: ${onlyReports.length}`);
+  say(onlyReports.length >= rep.length && rep.length > 5
+    ? '  ← фильтр по системе и типу РАБОТАЕТ, список перечисляется'
+    : '  ← фильтр не сработал: в выдаче не только отчёты. Тогда отсекать '
+      + 'придётся на нашей стороне, по полям system и type каждой записи');
+}
+
 say('');
 say('Если ни одно поле не сработало — тело SearchRequest придётся смотреть');
 say('в спецификации API, перебором его не найти: сервер отвечает 200');

@@ -235,6 +235,19 @@ column_attrs = http(
 report_markdown = http("dd_report_markdown", f"={BASE}{ENC}/markdown", [], [260, 380])
 report_attrs = http("dd_report_attrs", f"={BASE}{ENC}/attribute", [], [260, 440])
 report_links = http("dd_report_links", f"={BASE}{ENC}/link", [], [260, 500])
+# Витрины, на которых построен отчёт. Ключ связи `source_tables` подтверждён
+# живым прогоном 2026-08-27: на report:1728 вернул три витрины
+# (usr_cross_data.functional_role_d_br, emart.mdm_employee_structure_d,
+# hrmart.summary_evaluation).
+#
+# Это половина того, ради чего затевался реестр отчётов: «на какой витрине
+# построен» приезжает ОНЛАЙН и в git не дублируется — то же правило, что
+# для состава полей и владельца. Обратный путь, от витрины к отчёту, при этом
+# закрыт: ни одна из двенадцати связей таблицы не отдаёт REPORT, проверено
+# тем же прогоном.
+report_sources = http(
+    "dd_report_sources", f"={BASE}{ENC}/related/source_tables", [], [260, 560]
+)
 
 # --------------------------------------------------------- 4. код-шейперы
 COMMON_JS = r"""
@@ -888,7 +901,35 @@ if (linkLines.length) {
   for (const [k, url] of linkLines) out.push(`— ${oneLine(k)}: ${url}`);
 }
 
-const problems = [mdProblem, attrProblem, linkProblem].filter(Boolean);
+// Витрины, на которых построен отчёт. Печатаются ПОСЛЕ ссылок и перед
+// проблемами: автор читает материалы сверху вниз, и «где открыть» ему нужнее,
+// чем «из чего считается», — но второе он обязан увидеть до того, как начнёт
+// предлагать считать то же самое руками.
+const srcRes = $('dd_report_sources').first().json;
+const srcProblem = httpFail(srcRes, 'витрины отчёта');
+const srcBody = (srcRes && srcRes.body) || srcRes || {};
+const srcNodes = nodesOf(srcBody);
+if (srcNodes.length) {
+  out.push('');
+  out.push('ПОСТРОЕН НА ВИТРИНАХ:');
+  for (const n of srcNodes) {
+    const fqn = String(n.fqn || n.urn || '').trim();
+    if (fqn) out.push(`— ${fqn}`);
+  }
+  out.push(
+    'Это витрины-источники отчёта из каталога. Если заказчику нужен разрез, ' +
+      'которого в отчёте нет, считать его надо из них — но правила среза ' +
+      'и запреты бери из статьи витрины, а не отсюда.',
+  );
+} else if (!srcProblem) {
+  out.push('');
+  out.push(
+    '— витрины-источники у отчёта в каталоге не указаны. Не додумывай, ' +
+      'на чём он построен: этого не знает ни блок, ни ты.',
+  );
+}
+
+const problems = [mdProblem, attrProblem, linkProblem, srcProblem].filter(Boolean);
 if (problems.length) {
   out.push('');
   out.push(`ОШИБКИ DD: ${problems.join('; ')}`);
@@ -960,6 +1001,7 @@ sub = {
         report_markdown,
         report_attrs,
         report_links,
+        report_sources,
         shape_report,
     ],
     "connections": {
@@ -1005,6 +1047,9 @@ sub = {
             "main": [[{"node": "dd_report_links", "type": "main", "index": 0}]]
         },
         "dd_report_links": {
+            "main": [[{"node": "dd_report_sources", "type": "main", "index": 0}]]
+        },
+        "dd_report_sources": {
             "main": [[{"node": "Shape report meta", "type": "main", "index": 0}]]
         },
     },

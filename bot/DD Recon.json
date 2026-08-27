@@ -553,7 +553,127 @@
     },
     {
       "parameters": {
-        "jsCode": "\n// Фаза E: разбор пяти проб. Ничего не решает — печатает, что выяснилось.\nconst body = (name) => {\n  let it;\n  try { it = $(name).first().json; } catch (e) { return { miss: 'узел не выполнялся' }; }\n  if (!it) return { miss: 'пусто' };\n  if (it.error) return { miss: 'ОТКАЗ — ' + JSON.stringify(it.error).slice(0, 300) };\n  const code = it.statusCode;\n  const b = it.body !== undefined ? it.body : it;\n  if (code !== undefined && code >= 400) return { miss: `HTTP ${code}` };\n  return { b, code };\n};\nconst out = [];\nconst say = (s) => out.push(s);\nconst short = (v) => JSON.stringify(v).slice(0, 500);\n\nsay('=== ФАЗА E: связи таблицы, источники отчёта, форма поиска ===');\n\n// --- 1. какая связь у таблицы отдаёт REPORT\nsay('');\nsay('СВЯЗИ ТАБЛИЦЫ (до сих пор брали `notes` из документации):');\nconst tr = body('Table related');\nif (tr.miss) say('  ' + tr.miss);\nelse {\n  const keys = Object.keys(tr.b || {});\n  say('  ключи: ' + keys.join(', '));\n  const reportish = keys.filter((k) => {\n    const t = ((tr.b[k] || {}).entity || {}).type || '';\n    return /REPORT|DASHBOARD/i.test(t);\n  });\n  say(reportish.length\n    ? '  ОТДАЮТ REPORT/DASHBOARD: ' + reportish.join(', ') +\n      ' ← мост строить через них'\n    : '  НИ ОДНА связь таблицы не отдаёт REPORT. Тогда от витрины к дашборду ' +\n      'пути нет, и мост собирается только со стороны отчётов — через поиск.');\n  for (const k of keys) {\n    const e = (tr.b[k] || {}).entity || {};\n    say(`  — ${k}: type=${e.type || '?'} system=${e.system || '?'}`);\n  }\n}\n\n// --- 2. отчёт → витрина\nsay('');\nsay('ИСТОЧНИКИ ОТЧЁТА (source_tables):');\nconst rs = body('Report sources');\nif (rs.miss) say('  ' + rs.miss);\nelse {\n  const arr = Array.isArray(rs.b) ? rs.b : (rs.b || {}).data || [];\n  say('  найдено: ' + arr.length);\n  for (const x of arr.slice(0, 10)) {\n    const e = x.entity || x;\n    say(`  — ${e.fqn || e.urn || short(x)}`);\n  }\n  say(arr.length\n    ? '  ← это и есть «на какой витрине построен отчёт», без git'\n    : '  пусто: связь есть, но не заполнена — тогда витрину придётся ' +\n      'держать в реестре рядом с ключом ссылки');\n}\n\n// --- 3. форма поиска\nsay('');\nsay('ПОИСК: какое поле несёт текст запроса');\nconst base = body('Search base');\nconst first = (r) => {\n  if (r.miss) return r.miss;\n  const arr = Array.isArray(r.b) ? r.b : (r.b || {}).data || [];\n  return arr.length ? (arr[0].urn || short(arr[0])) : '(пусто)';\n};\nconst fBase = first(base);\nsay('  Search base {limit}          → ' + fBase);\nfor (const nm of ['Search text', 'Search searchText']) {\n  const f = first(body(nm));\n  const field = nm.replace('Search ', '');\n  say(`  {${field}: \"<название>\"}  → ` + f);\n  if (!body(nm).miss) {\n    say(f !== fBase\n      ? `    ← ВЫДАЧА ОТЛИЧАЕТСЯ: поле «${field}» РАБОТАЕТ, тело поиска найдено`\n      : `    ← выдача та же, что без текста: поле «${field}» игнорируется`);\n  }\n}\nsay('');\nsay('Если ни одно поле не сработало — тело SearchRequest придётся смотреть');\nsay('в спецификации API, перебором его не найти: сервер отвечает 200');\nsay('на любое тело и о неизвестных полях молчит.');\n\nreturn [{ json: { probes: out.join('\\n') } }];\n",
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"text\": \"hr-executive-detail-employee\", \"limit\": 5}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1320,
+        940
+      ],
+      "id": "recon-search-by-slug",
+      "name": "Search by slug",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"text\": \"35005\", \"limit\": 5}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1520,
+        940
+      ],
+      "id": "recon-search-by-id",
+      "name": "Search by id",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"text\": \"\", \"limit\": 100, \"filters\": {\"system\": \"reports\", \"type\": \"REPORT\"}}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1720,
+        940
+      ],
+      "id": "recon-search-reports",
+      "name": "Search reports",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Фаза E: разбор пяти проб. Ничего не решает — печатает, что выяснилось.\nconst body = (name) => {\n  let it;\n  try { it = $(name).first().json; } catch (e) { return { miss: 'узел не выполнялся' }; }\n  if (!it) return { miss: 'пусто' };\n  if (it.error) return { miss: 'ОТКАЗ — ' + JSON.stringify(it.error).slice(0, 300) };\n  const code = it.statusCode;\n  const b = it.body !== undefined ? it.body : it;\n  if (code !== undefined && code >= 400) return { miss: `HTTP ${code}` };\n  return { b, code };\n};\nconst out = [];\nconst say = (s) => out.push(s);\nconst short = (v) => JSON.stringify(v).slice(0, 500);\n\nsay('=== ФАЗА E: связи таблицы, источники отчёта, форма поиска ===');\n\n// --- 1. какая связь у таблицы отдаёт REPORT\nsay('');\nsay('СВЯЗИ ТАБЛИЦЫ (до сих пор брали `notes` из документации):');\nconst tr = body('Table related');\nif (tr.miss) say('  ' + tr.miss);\nelse {\n  const keys = Object.keys(tr.b || {});\n  say('  ключи: ' + keys.join(', '));\n  const reportish = keys.filter((k) => {\n    const t = ((tr.b[k] || {}).entity || {}).type || '';\n    return /REPORT|DASHBOARD/i.test(t);\n  });\n  say(reportish.length\n    ? '  ОТДАЮТ REPORT/DASHBOARD: ' + reportish.join(', ') +\n      ' ← мост строить через них'\n    : '  НИ ОДНА связь таблицы не отдаёт REPORT. Тогда от витрины к дашборду ' +\n      'пути нет, и мост собирается только со стороны отчётов — через поиск.');\n  for (const k of keys) {\n    const e = (tr.b[k] || {}).entity || {};\n    say(`  — ${k}: type=${e.type || '?'} system=${e.system || '?'}`);\n  }\n}\n\n// --- 2. отчёт → витрина\nsay('');\nsay('ИСТОЧНИКИ ОТЧЁТА (source_tables):');\nconst rs = body('Report sources');\nif (rs.miss) say('  ' + rs.miss);\nelse {\n  const arr = Array.isArray(rs.b) ? rs.b : (rs.b || {}).data || [];\n  say('  найдено: ' + arr.length);\n  for (const x of arr.slice(0, 10)) {\n    const e = x.entity || x;\n    say(`  — ${e.fqn || e.urn || short(x)}`);\n  }\n  say(arr.length\n    ? '  ← это и есть «на какой витрине построен отчёт», без git'\n    : '  пусто: связь есть, но не заполнена — тогда витрину придётся ' +\n      'держать в реестре рядом с ключом ссылки');\n}\n\n// --- 3. форма поиска\nsay('');\nsay('ПОИСК: какое поле несёт текст запроса');\nconst base = body('Search base');\nconst first = (r) => {\n  if (r.miss) return r.miss;\n  const arr = Array.isArray(r.b) ? r.b : (r.b || {}).data || [];\n  return arr.length ? (arr[0].urn || short(arr[0])) : '(пусто)';\n};\nconst fBase = first(base);\nsay('  Search base {limit}          → ' + fBase);\nfor (const nm of ['Search text', 'Search searchText']) {\n  const f = first(body(nm));\n  const field = nm.replace('Search ', '');\n  say(`  {${field}: \"<название>\"}  → ` + f);\n  if (!body(nm).miss) {\n    say(f !== fBase\n      ? `    ← ВЫДАЧА ОТЛИЧАЕТСЯ: поле «${field}» РАБОТАЕТ, тело поиска найдено`\n      : `    ← выдача та же, что без текста: поле «${field}» игнорируется`);\n  }\n}\n\n// --- 4. ищется ли отчёт по ключу ссылки: от этого зависит, нужен ли мост\nsay('');\nsay('ПОИСК ПО КЛЮЧУ ССЫЛКИ (нужен ли мост вообще):');\nconst urns = (name) => {\n  const r = body(name);\n  if (r.miss) return null;\n  const arr = Array.isArray(r.b) ? r.b : (r.b || {}).data || [];\n  return arr.map((x) => String(x.urn || (x.entity || {}).urn || ''));\n};\nfor (const [nm, key, want] of [\n  ['Search by slug', 'hr-executive-detail-employee', 'report:1728'],\n  ['Search by id', '35005', 'aktivnost-v-gitlab'],\n]) {\n  const u = urns(nm);\n  if (!u) { say(`  {text: \"${key}\"} → ` + body(nm).miss); continue; }\n  const hit = u.find((x) => x.includes(want));\n  say(`  {text: \"${key}\"} → ` + (u[0] || '(пусто)'));\n  say(hit\n    ? `    ← НАЙДЕН нужный отчёт (${hit}). Мост не нужен: бот ищет отчёт `\n      + 'по ссылке из формы прямо в момент ответа'\n    : '    ← нужного отчёта в выдаче НЕТ. Значит по ключу ссылки не ищется, '\n      + 'и мост нужен: перечислить отчёты поиском, у каждого взять /link');\n}\n\nconst rep = urns('Search reports');\nsay('');\nsay('ПЕРЕЧИСЛЕНИЕ ОТЧЁТОВ (собирается ли мост одним прогоном):');\nif (!rep) say('  ' + body('Search reports').miss);\nelse {\n  const onlyReports = rep.filter((x) => /:reports:reports:report:/.test(x));\n  say(`  вернулось ${rep.length}, из них дашбордов Proteus: ${onlyReports.length}`);\n  say(onlyReports.length >= rep.length && rep.length > 5\n    ? '  ← фильтр по системе и типу РАБОТАЕТ, список перечисляется'\n    : '  ← фильтр не сработал: в выдаче не только отчёты. Тогда отсекать '\n      + 'придётся на нашей стороне, по полям system и type каждой записи');\n}\n\nsay('');\nsay('Если ни одно поле не сработало — тело SearchRequest придётся смотреть');\nsay('в спецификации API, перебором его не найти: сервер отвечает 200');\nsay('на любое тело и о неизвестных полях молчит.');\n\nreturn [{ json: { probes: out.join('\\n') } }];\n",
         "mode": "runOnceForAllItems"
       },
       "type": "n8n-nodes-base.code",
@@ -838,6 +958,39 @@
       ]
     },
     "Search searchText": {
+      "main": [
+        [
+          {
+            "node": "Search by slug",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search by slug": {
+      "main": [
+        [
+          {
+            "node": "Search by id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search by id": {
+      "main": [
+        [
+          {
+            "node": "Search reports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search reports": {
       "main": [
         [
           {

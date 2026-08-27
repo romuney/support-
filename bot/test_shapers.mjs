@@ -82,7 +82,7 @@ function runPick(inputs, cols) {
   return new Function('$', js('Pick columns'))($).map((i) => i.json);
 }
 
-function runReport(inputs, markdown, attrs, links) {
+function runReport(inputs, markdown, attrs, links, sources = { statusCode: 200, body: { data: [] } }) {
   const $ = (name) => ({
     first: () => ({
       json: {
@@ -90,6 +90,7 @@ function runReport(inputs, markdown, attrs, links) {
         dd_report_markdown: markdown,
         dd_report_attrs: attrs,
         dd_report_links: links,
+        dd_report_sources: sources,
       }[name],
     }),
   });
@@ -624,6 +625,37 @@ line('11. ГРУППЫ ДОСТУПА');
 }
 
 console.log(`\n${'='.repeat(70)}`);
+// ===================================================================== 9б
+line('9б. ОТЧЁТ — витрины-источники приходят из каталога, а не из git');
+{
+  // Ключ связи source_tables подтверждён живым прогоном 2026-08-27:
+  // на report:1728 вернул три витрины. Это половина того, ради чего затевался
+  // реестр отчётов, и в git оно не дублируется — как владелец и состав полей.
+  const srcOk = { statusCode: 200, body: { data: [
+    { entity: { fqn: 'emart.mdm_employee_structure_d', urn: 'urn:t:1' } },
+    { entity: { fqn: 'hrmart.summary_evaluation', urn: 'urn:t:2' } },
+  ] } };
+  const out = runReport({ urn: REPORT_URN }, mdFull, attrsFull, linksFull, srcOk);
+  checkS('витрины названы', out.includes('ПОСТРОЕН НА ВИТРИНАХ'));
+  checkS('первая витрина в списке', out.includes('emart.mdm_employee_structure_d'));
+  checkS('вторая тоже', out.includes('hrmart.summary_evaluation'));
+  // Инвентарь оттуда, смысл — из статьи витрины. Иначе автор начнёт брать
+  // правила среза из карточки отчёта, где их нет и не будет.
+  checkS('правила среза отправлены в статью витрины',
+    /правила среза.*из статьи витрины/.test(out));
+
+  // Пусто — сказать вслух. Молчание читается как «отчёт ни на чём не построен».
+  const srcEmpty = runReport({ urn: REPORT_URN }, mdFull, attrsFull, linksFull);
+  checkS('пусто — сказано прямо', /витрины-источники.*не указаны/.test(srcEmpty));
+  checkS('и запрещено додумывать', /Не додумывай/.test(srcEmpty));
+
+  // Отказ ручки — это не «витрин нет», а «спросить не удалось».
+  const srcFail = runReport({ urn: REPORT_URN }, mdFull, attrsFull, linksFull,
+    { statusCode: 401, body: {} });
+  checkS('401 назван отказом, а не пустотой',
+    /истёк Service Account/.test(srcFail) && !/не указаны/.test(srcFail));
+}
+
 console.log(ddFails ? `ПРОВАЛОВ: ${ddFails}` : 'ПРОВЕРКИ ГРУПП ДОСТУПА ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(ddFails ? 1 : 0);
