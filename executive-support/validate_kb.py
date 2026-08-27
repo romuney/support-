@@ -106,7 +106,7 @@ def read_index():
         else:
             cur = None
 
-    domains, entities, self_service = None, None, None
+    domains, entities, self_service, routes = None, None, None, None
     for header, rows in tables:
         if header and header[0] == "домен":
             domains = (header, rows)
@@ -114,12 +114,14 @@ def read_index():
             entities = (header, rows)
         elif header and header[0] == "id отчёта":
             self_service = (header, rows)
+        elif header and header[0] == "маршрут":
+            routes = (header, rows)
 
     if domains is None:
         err("index.md: не найдена таблица доменов (первая колонка «домен»)")
     if entities is None:
         err("index.md: не найдена таблица сущностей (первая колонка «id»)")
-    return domains, entities, self_service
+    return domains, entities, self_service, routes
 
 
 def as_dicts(table, name, required):
@@ -312,6 +314,42 @@ def check_self_service(ss_rows, ent_rows):
                 f"строка никогда не сработает")
 
 
+def check_routes(rt_rows):
+    """Проверка таблицы «Маршруты»: адресат, слова и срок годности.
+
+    Маршрут — утверждение про человека, и протухает оно молча: владельца
+    отчёта мы для этого и не дублируем в git, а берём онлайн из DD. Здесь
+    взять неоткуда — объекта «кто ведёт квоты» в каталоге нет, — поэтому
+    у строки обязана быть ДАТА подтверждения, и валидатор её требует.
+    Строка без даты выглядит такой же рабочей, как свежая.
+    """
+    seen = {}
+    for r in rt_rows:
+        line, rid = r["_line"], r["маршрут"]
+        if rid in seen:
+            err(f"index.md:{line}: маршрут «{rid}» уже встречался "
+                f"в строке {seen[rid]}")
+        seen[rid] = line
+
+        if not r.get("ключевые слова"):
+            err(f"index.md:{line}: у маршрута «{rid}» пустые «ключевые слова» — "
+                f"строка никогда не сработает")
+
+        # Адресат — или человек, или канал. Пусто в обоих значит строку,
+        # которая срабатывает и ничего не называет: джун всё равно идёт
+        # выяснять, к кому идти, а бот при этом выглядит ответившим.
+        who, where = r.get("кому", DASH), r.get("где", DASH)
+        if who in ("", DASH) and where in ("", DASH):
+            err(f"index.md:{line}: у маршрута «{rid}» пусты и «кому», и «где» — "
+                f"маршрут никуда не ведёт")
+
+        checked = r.get("проверено", "")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", checked):
+            err(f"index.md:{line}: у маршрута «{rid}» «проверено» = «{checked}», "
+                f"ожидается дата ГГГГ-ММ-ДД: без неё протухший маршрут "
+                f"неотличим от свежего")
+
+
 def check_articles(ent_rows):
     """Проверки 1 и 2: файл существует, фронтматтер совпадает с реестром, ссылки живы."""
     in_index = {}
@@ -385,13 +423,15 @@ def main():
         print(f"не найден {INDEX} — запускать из корня репозитория", file=sys.stderr)
         return 1
 
-    domains, entities, self_service = read_index()
+    domains, entities, self_service, routes = read_index()
     dom_rows = as_dicts(domains, "Домены", ["домен", "о чём вопросы", "мастер"])
     ent_rows = as_dicts(entities, "Сущности",
                         ["id", "тип", "домен", "название", "путь",
                          "dd_urn", "алиасы", "статус", "описание"])
     ss_rows = as_dicts(self_service, "Самостоятельные выгрузки",
                        ["id отчёта", "ключевые слова"])
+    rt_rows = as_dicts(routes, "Маршруты",
+                       ["маршрут", "ключевые слова", "кому", "где", "проверено"])
 
     if ent_rows:
         check_entities(ent_rows)
@@ -401,6 +441,8 @@ def main():
             check_domains(dom_rows, ent_rows)
         if ss_rows:
             check_self_service(ss_rows, ent_rows)
+    if rt_rows:
+        check_routes(rt_rows)
 
     for w in warnings:
         print(f"ПРЕДУПРЕЖДЕНИЕ: {w}")
