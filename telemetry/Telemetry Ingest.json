@@ -1,0 +1,93 @@
+{
+  "name": "Telemetry · Ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -40,
+        300
+      ],
+      "id": "when-called",
+      "name": "When called"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Вход: { event, data, post } — сырое событие mattermostTrigger плюс, для\n// реакций, догоняющий GET /posts/{id} (в событии реакции треда нет).\n// Выход: канонические события лога, 0..2 штуки на вход.\n\nconst TOPICS = [{\"title\": \"Cross Data | Запрос на подключение к Warden (RLS для HR данных)\", \"kind\": \"warden_access\", \"ours\": true}, {\"title\": \"Cross Data | Нет доступа к пользовательским данным в хранилище\", \"kind\": \"user_data_access\", \"ours\": true}, {\"title\": \"Cross Data | Вопрос по пользовательским данным в хранилище\", \"kind\": \"user_data_question\", \"ours\": true}, {\"title\": \"Cross Data | Получить сведения о трудоустройстве ФЛ\", \"kind\": \"employment_info\", \"ours\": true}, {\"title\": \"Вопрос команде HC Data (ex. DWH HR) |\", \"kind\": \"dwh_hr_replica\", \"ours\": false}, {\"title\": \"Вопрос команде HC Data (ex. DWH HR)\", \"kind\": \"dwh_hr\", \"ours\": false}, {\"title\": \"Cross Data | Нет доступа к отчету\", \"kind\": \"report_access\", \"ours\": true}, {\"title\": \"Cross Data | Мне только спросить\", \"kind\": \"just_ask\", \"ours\": true}, {\"title\": \"Cross Data | Вопрос по отчетам\", \"kind\": \"report_question\", \"ours\": true}, {\"title\": \"Cross Data | Выгрузка данных\", \"kind\": \"export\", \"ours\": true}, {\"title\": \"Вопрос команде DWH HR |\", \"kind\": \"dwh_hr_replica\", \"ours\": false}, {\"title\": \"Вопрос команде DWH HR\", \"kind\": \"dwh_hr\", \"ours\": false}, {\"title\": \"Cross Data | Другое\", \"kind\": \"other\", \"ours\": true}];\nconst EMOJI = {\"loading\": {\"kind\": \"taken\", \"resets_on_remove\": false}, \"done_checkmark\": {\"kind\": \"closed\", \"resolved\": true, \"resets_on_remove\": true}, \"im_red_cross\": {\"kind\": \"closed\", \"resolved\": false, \"resets_on_remove\": true}};\nconst BOT_USER_IDS = [];\n\nconst src = $json || {};\n\n// Тело реакции в WebSocket Mattermost приходит JSON-СТРОКОЙ, а не объектом.\n// Без разбора emoji_name был бы undefined, и все реакции молча стали бы\n// неизвестными — то есть дежурный размечает, а метрики пустые.\nconst asObj = (v) => {\n  if (!v) return {};\n  if (typeof v === 'string') { try { return JSON.parse(v); } catch (e) { return {}; } }\n  return v;\n};\n\nconst data = asObj(src.data);\nconst post = asObj(src.post ?? data.post);\nconst reaction0 = asObj(data.reaction ?? src.reaction);\n\n// ИМЯ СОБЫТИЯ ВЫВОДИТСЯ ПО ФОРМЕ, а не берётся из поля `event`.\n//\n// Первый живой прогон 2026-08-11 дал сплошные unsupported_event с пустым\n// `event`: поле было взято из документации Mattermost WebSocket, а нода\n// mattermostTrigger его не отдаёт. Показательно, что рядом лежал рабочий\n// пример — guard бота читает только `$json.post.*` и на `event` не смотрит\n// вовсе. Схему события надо было брать оттуда, а не из документации.\n//\n// Имя, если оно всё-таки есть, имеет приоритет: только оно различает\n// добавление и снятие реакции.\nfunction resolveEvent() {\n  const named = String(\n    src.event ?? data.event ?? src.type ?? data.type ?? ''\n  ).trim();\n  // Guard коллектора уже вывел тип по форме и честно помечает это флагом.\n  // Без учёта флага домысленное имя выглядело бы здесь как пришедшее\n  // от Mattermost, и признак приблизительности терялся бы на границе узлов.\n  if (named) return { event: named, inferred: src.event_inferred === true };\n  // Реакция узнаётся по emoji_name, сообщение — по id поста. Порядок важен:\n  // у события реакции догоняющий пост тоже присутствует.\n  if (reaction0.emoji_name) return { event: 'reaction_added', inferred: true };\n  if (post.id) return { event: 'posted', inferred: true };\n  return { event: '', inferred: false };\n}\nconst resolved = resolveEvent();\nconst event = resolved.event;\n// Снятие реакции без имени события от добавления НЕ отличить: объект\n// reaction у них одинаковый. Пока имя не появилось, снятия будут приходить\n// как добавления — поэтому факт домысливания пишется в payload, а не\n// замалчивается: по нему видно, каким метрикам доверять.\nconst eventInferred = resolved.inferred;\n\n// Тема обращения из первой строки. Первое совпадение по префиксу: список\n// отсортирован от длинных к коротким, иначе короткая тема съест свою же\n// уточнённую версию.\nfunction classify(message) {\n  // Markdown с краёв снимается ДО сравнения с темами. Intake-воркфлоу\n  // выделяет тему жирным, и тогда первая строка начинается со звёздочек:\n  // `**Cross Data | Выгрузка данных от пользователя @A**`. Без снятия\n  // ни одна тема не совпадёт — kind уедет `unknown`, а `ours` станет false,\n  // то есть наше обращение посчитается обращением к чужой команде.\n  // Guard бота снимает ту же обвязку и по той же причине; правило одно,\n  // но живёт в двух сборщиках — здесь оно про лог, там про то, отвечать или нет.\n  const head = String(message || '').split('\\n')[0]\n    .replace(/^[\\s>*_#`~]+/, '').replace(/[\\s*_`~]+$/, '').trim();\n  for (const t of TOPICS) {\n    if (head === t.title || head.startsWith(t.title)) {\n      return { kind: t.kind, ours: t.ours, topic: t.title };\n    }\n  }\n  // Тему не узнали — это не ошибка и не повод промолчать: форму расширят\n  // новой темой, и телеметрия должна это показать, а не проглотить.\n  const guess = head.includes('|') ? head.split('|').slice(0, 2).join('|').trim() : head;\n  return { kind: 'unknown', ours: head.startsWith('Cross Data'), topic: guess.slice(0, 120) };\n}\n\n// Ключ задачи трекера из текста: BIGLETTERS-NUMBER. Ссылку тоже забираем —\n// по ней потом открывать задачу руками.\n// Ключ задачи ищется в ССЫЛКЕ, а не по всему тексту. Сообщение дежурного\n// или заказчика может содержать что угодно похожее на ключ — «HR-2», «Q1-25»,\n// имя таблицы вида `MDM-1` — и связать тред с несуществующей задачей значит\n// потерять cycle time там, где он есть.\n//\n// Формы ссылок, которые считаем: T-Tracker (`tracker.t-tech.team/tasks/KEY`\n// и `/task/KEY`) и jira3 (`/browse/KEY`) — вторая нужна для истории, задачи\n// за июль-август лежат в jira3.\nfunction taskFromText(message) {\n  const text = String(message || '');\n  const m = text.match(\n    /https?:\\/\\/[^\\s)\\]]*?\\/(?:browse|tasks?)\\/([A-Z][A-Z0-9]{1,15}-\\d+)/);\n  if (m) {\n    return { key: m[1], url: m[0], tracker: /tracker\\./.test(m[0]) ? 'tracker' : 'jira' };\n  }\n  // Ссылки нет — берём голый ключ, но ТОЛЬКО из сообщения бота: intake-бот\n  // пишет ключ по шаблону, человек — как получится. У вызывающего это\n  // проверяется через from_bot.\n  const bare = (text.match(/\\b([A-Z][A-Z0-9]{1,15}-\\d+)\\b/) || [])[1] || '';\n  return bare ? { key: bare, url: '', tracker: 'unknown' } : null;\n}\n\nconst out = [];\nconst push = (o) => out.push({ json: o });\n\nif (event === 'posted') {\n  const threadId = post.root_id || post.id || '';\n  const isRoot = !post.root_id;\n  const actor = post.user_id || '';\n  const fromBot = BOT_USER_IDS.includes(actor) || String(post.props?.from_bot ?? '') === 'true';\n\n  if (isRoot) {\n    // Корневое сообщение = обращение. Даже чужое (DWH HR) и даже с\n    // неузнанной темой: считать их отдельно можно, а вот задним числом\n    // добрать пропущенное — нельзя.\n    const c = classify(post.message);\n    push({\n      event_id: 'posted:' + post.id,\n      thread_id: threadId,\n      event_type: 'request_created',\n      event_ts: post.create_at || null,\n      actor,\n      source: 'channel',\n      payload: {\n        kind: c.kind,\n        kind_source: 'intake',\n        topic: c.topic,\n        ours: c.ours,\n        from_bot: fromBot,\n        channel_id: post.channel_id || '',\n        text_len: String(post.message || '').length,\n        permalink: post.id ? 'https://time.tbank.ru/tinkoff/pl/' + post.id : '',\n      },\n    });\n  } else {\n    // Ответ в треде. Тему здесь не разбираем: она есть в request_created,\n    // а треды без него отбрасывает пересчёт витрины. Так реплики из чужих\n    // тредов самоочищаются без лишнего запроса к API на каждый ответ.\n    push({\n      event_id: 'posted:' + post.id,\n      thread_id: threadId,\n      event_type: fromBot ? 'bot_replied' : 'human_replied',\n      event_ts: post.create_at || null,\n      actor,\n      source: 'channel',\n      payload: {\n        from_bot: fromBot,\n        text_len: String(post.message || '').length,\n        channel_id: post.channel_id || '',\n      },\n    });\n\n    // Связка треда с трекером. Дежурный нажимает «завести задачу», бот\n    // отвечает в тред сообщением со ссылкой — связь ставит МАШИНА, а не\n    // человек, поэтому регулярка по забытому ключу не нужна.\n    const task = taskFromText(post.message);\n    // Голый ключ без ссылки принимаем только от бота: он пишет по шаблону,\n    // а в сообщении человека «HR-2» или имя таблицы `MDM-1` дали бы связь\n    // с несуществующей задачей — и cycle time потерялся бы там, где он есть.\n    if (task && (task.url || fromBot)) {\n      push({\n        event_id: 'task:' + post.id + ':' + task.key,\n        thread_id: threadId,\n        event_type: 'task_linked',\n        event_ts: post.create_at || null,\n        actor,\n        source: 'channel',\n        payload: {\n          task_key: task.key,\n          task_url: task.url,\n          // По tracker/jira видно, куда идти за статусом: коллектор трекера\n          // умеет только T-Tracker, задачи в jira3 остаются историей.\n          tracker: task.tracker,\n          from_bot: fromBot,\n        },\n      });\n    }\n  }\n} else if (event === 'reaction_added' || event === 'reaction_removed') {\n  const reaction = asObj(data.reaction ?? src.reaction ?? data);\n  const emoji = reaction.emoji_name || '';\n  const actor = reaction.user_id || '';\n  const removed = event === 'reaction_removed';\n\n  // Реакция не знает про тред: в событии есть post_id и нет root_id.\n  // Ставят её на любое сообщение внутри треда, поэтому thread_id берётся\n  // с догоняющего GET /posts/{id}. Без этого одно обращение размажется\n  // на несколько.\n  const postId = reaction.post_id || post.id || '';\n  const threadId = post.root_id || post.id || postId;\n\n  const known = EMOJI[emoji] || null;\n  const fromBot = BOT_USER_IDS.includes(actor);\n\n  // Реакции бота — не действие дежурного. Считать их за «взято в работу»\n  // значит получить reaction time в секунды и не заметить проблему.\n  if (!fromBot) {\n    push({\n      event_id: 'react:' + (removed ? 'del' : 'add') + ':' + postId + ':' + actor +\n                ':' + emoji + ':' + (reaction.create_at || reaction.remove_at || 0),\n      thread_id: threadId,\n      event_type: known\n        ? (known.kind + (removed ? '_removed' : ''))\n        : (removed ? 'reaction_removed' : 'reaction_added'),\n      event_ts: reaction.create_at || reaction.remove_at || null,\n      actor,\n      source: 'reaction',\n      payload: {\n        emoji,\n        known: Boolean(known),\n        removed,\n        resolved: known && 'resolved' in known ? known.resolved : null,\n        resets_on_remove: known ? known.resets_on_remove : null,\n        post_id: postId,\n        on_root: !post.root_id,\n        // true — тип события домыслен по форме, и СНЯТИЕ реакции пришло бы\n        // сюда как добавление. Пересчёт витрины должен это видеть, иначе\n        // снятое «взято в работу» останется в метриках навсегда.\n        event_inferred: eventInferred,\n      },\n    });\n  }\n} else if (event === 'bot_answered' || event === 'bot_feedback' ||\n           event === 'feedback_text' || event === 'feedback_detail_opened' ||\n           event === 'task_status_changed') {\n  // События не из канала: ядро бота, вебхук кнопок, коллектор трекера.\n  //\n  // Список закрытый, и это не формальность: имя события, которого здесь нет,\n  // уедет в `unsupported_event` при зелёном флоу у вызывающего. Добавляя\n  // событие в вебхуке или в ядре, добавлять его И сюда.\n  // Ключ идемпотентности задаёт вызывающий — он знает естественный ключ\n  // своего события лучше, чем нормализатор.\n  push({\n    event_id: src.event_id || (event + ':' + (src.thread_id || '') + ':' + (src.event_ts || '')),\n    thread_id: src.thread_id || '',\n    event_type: event,\n    event_ts: src.event_ts || null,\n    actor: src.actor || '',\n    source: src.source || event,\n    payload: src.payload || {},\n  });\n} else {\n  // Сюда попадает только то, у чего не нашлось ни имени события, ни узнаваемой\n  // формы. Раньше запись говорила «проверить настройки триггера» и не давала\n  // ничего для проверки — при первом прогоне это дало таблицу пустых строк,\n  // по которым нельзя было понять форму события.\n  //\n  // Поэтому теперь пишутся КЛЮЧИ payload: одной такой строки достаточно,\n  // чтобы увидеть, как устроено событие, и не гадать по документации.\n  const keys = (o) => { try { return Object.keys(o || {}).join(','); } catch (e) { return ''; } };\n  push({\n    event_id: 'unknown:' + (post.id || keys(src) || 'empty') + ':' + event,\n    thread_id: post.root_id || post.id || '',\n    event_type: 'unsupported_event',\n    event_ts: post.create_at || null,\n    actor: '',\n    source: 'normalize',\n    payload: {\n      event,\n      note: 'не удалось определить тип события ни по имени, ни по форме',\n      // Диагностика формы события: по ней правится resolveEvent().\n      top_keys: keys(src),\n      data_keys: keys(data),\n      post_keys: keys(post),\n      reaction_keys: keys(reaction0),\n    },\n  });\n}\n\n// Пустой выход означал бы «событий не было». Здесь это всегда следствие\n// фильтра (реакция бота), и молчать о нём нельзя.\nif (!out.length) {\n  push({\n    event_id: 'skipped:' + (post.id || '') + ':' + event,\n    thread_id: post.root_id || post.id || '',\n    event_type: 'skipped',\n    event_ts: null,\n    actor: '',\n    source: 'normalize',\n    payload: { event, reason: 'отфильтровано как действие бота' },\n  });\n}\n\n// Приведение к КОЛОНКАМ таблицы. Data Tables принимает string/number/boolean/\n// date, вложенных объектов не бывает — payload уезжает строкой JSON.\n//\n// Дробить payload на колонки нельзя: у разных типов событий разные поля,\n// и таблица ехала бы на каждом новом типе. Наверх вынесено только то, по чему\n// группируют витрину: kind и domains.\nreturn out.map((e) => {\n  const p = e.json.payload || {};\n  return { json: {\n    event_id: e.json.event_id,\n    thread_id: e.json.thread_id || '',\n    event_type: e.json.event_type,\n    event_ts: Number(e.json.event_ts) || 0,\n    ingested_at: Date.now(),\n    actor: e.json.actor || '',\n    source: e.json.source || '',\n    // kind живёт только на request_created: у реакции темы нет, а выдумывать\n    // её из треда значило бы запрос к API на каждое событие. Пересчёт витрины\n    // берёт kind с корневого события треда.\n    kind: p.kind || '',\n    // Домены роутера бота приходят с bot_answered — это готовая\n    // кластеризация, отдельная LLM не нужна.\n    domains: Array.isArray(p.domains) ? p.domains.join(',') : (p.domains || ''),\n    payload: JSON.stringify(p),\n  } };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "id": "normalize",
+      "name": "Normalize"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "support_event",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.event_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "event_id"
+          ],
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ],
+      "id": "write-event",
+      "name": "Write event"
+    }
+  ],
+  "connections": {
+    "When called": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Write event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

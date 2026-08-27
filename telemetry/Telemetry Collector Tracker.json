@@ -1,0 +1,243 @@
+{
+  "name": "Telemetry · Collector Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -260,
+        300
+      ],
+      "id": "every-15-min",
+      "name": "Every 15 min"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "support_event",
+          "mode": "name"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "condition": "eq",
+              "keyValue": "channel"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        300
+      ],
+      "id": "read-log",
+      "name": "Read log"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Собирает список задач для опроса из лога: task_linked минус те, что уже\n// закрыты. Закрытые не опрашиваем — их статус больше не изменится, а список\n// иначе растёт бесконечно и запрос упирается в лимит.\nconst rows = $input.all().map((x) => x.json);\n\nconst linked = new Map();     // task_key → thread_id\nconst closed = new Set();     // task_key, по которым уже видели finish\nconst lastStatus = new Map(); // task_key → последний записанный статус\n\nfor (const r of rows) {\n  let p = {};\n  try { p = typeof r.payload === 'string' ? JSON.parse(r.payload) : (r.payload || {}); }\n  catch (e) { p = {}; }\n\n  if (r.event_type === 'task_linked' && p.task_key) {\n    // Задачи из jira3 пропускаем: коллектор умеет только T-Tracker, и\n    // запрос по чужому ключу вернул бы пустоту, которую легко прочитать\n    // как «задача исчезла».\n    if (p.tracker === 'jira') continue;\n    linked.set(p.task_key, r.thread_id);\n  }\n  if (r.event_type === 'task_status_changed' && p.task_key) {\n    lastStatus.set(p.task_key, p.status || '');\n    if (p.is_final) closed.add(p.task_key);\n  }\n}\n\nconst keys = [...linked.keys()].filter((k) => !closed.has(k));\n\n// Пустой список — не повод отправлять запрос с пустым IN (): TQL на нём\n// вернёт ошибку либо ВСЕ задачи трекера, а это 68 тысяч строк в лог.\nif (!keys.length) {\n  return [{ json: { keys: [], tql: '', nothing_to_poll: true,\n                    note: 'нет открытых задач для опроса' } }];\n}\n\n// Предохранитель на объём запроса. Резать молча нельзя: обрезанные задачи\n// перестали бы опрашиваться, и их cycle time замер бы навсегда.\nconst MAX = 200;\nconst poll = keys.slice(0, MAX);\nconst dropped = keys.slice(MAX);\n\nreturn [{ json: {\n  keys: poll,\n  dropped,\n  tql: 'taskKey IN (' + poll.map((k) => '\"' + k + '\"').join(', ') + ')',\n  threads: Object.fromEntries(poll.map((k) => [k, linked.get(k)])),\n  known: Object.fromEntries(poll.map((k) => [k, lastStatus.get(k) || ''])),\n  nothing_to_poll: false,\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "id": "collect-task-keys",
+      "name": "Collect task keys"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-keys",
+              "leftValue": "={{ $json.nothing_to_poll }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        300
+      ],
+      "id": "any-tasks",
+      "name": "Any tasks"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://tracker.t-tech.team/api/public/v1/tasks/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tql: $json.tql, limit: 200, fields: ['task_key','status','create_at','finish_at','status_update_at','type','space_key'] }) }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        240
+      ],
+      "id": "search-tasks",
+      "name": "Search tasks",
+      "credentials": {
+        "devplatformApi": {
+          "id": "RBgLA1Lw8UGBMCU3",
+          "name": "Spirit (Devplatform) Service Account account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Сравнение снимка с последним известным статусом. Событие пишется ТОЛЬКО\n// на изменение: иначе каждый прогон крона добавлял бы строку на задачу, и\n// лог рос бы на сотни записей в день без новой информации.\nconst plan = $('Collect task keys').first().json;\nconst res = $json || {};\nconst items = Array.isArray(res.items) ? res.items : [];\n\n// Статусы, означающие «работа закончена». Список НЕ захардкожен полностью:\n// в T-Tracker 76 статусов на инстанс, и какие из них будет использовать\n// воркфлоу выгрузок — заранее не известно. Поэтому финальность определяется\n// в первую очередь по finish_at, который трекер заполняет сам.\nconst FINAL_HINTS = ['done', 'closed', 'completed', 'resolved', 'released',\n                     'cancel', 'trashed', 'выполнено', 'закрыт'];\n\nconst out = [];\nfor (const it of items) {\n  const f = it.fields || {};\n  const key = it.key || '';\n  if (!key) continue;\n\n  const status = String(f.status || '');\n  const known = plan.known?.[key] ?? '';\n  const threadId = plan.threads?.[key] || '';\n\n  // finish_at заполняется трекером по статусу с aux.type = finish —\n  // это надёжнее, чем угадывать по названию.\n  const isFinal = Boolean(f.finish_at) ||\n    FINAL_HINTS.some((h) => status.toLowerCase().includes(h));\n\n  if (status === known) continue;   // ничего не изменилось\n\n  out.push({ json: {\n    event: 'task_status_changed',\n    // Ключ идемпотентности — по времени перехода, а не по времени опроса:\n    // повторный прогон крона на том же состоянии не создаст новой строки.\n    event_id: 'task_status:' + key + ':' + (f.status_update_at || '') + ':' + status,\n    thread_id: threadId,\n    // ВРЕМЯ ПЕРЕХОДА, а не момент опроса — иначе метрики поехали бы\n    // на величину интервала крона.\n    event_ts: f.status_update_at ? Date.parse(f.status_update_at) : Date.now(),\n    actor: 'tracker',\n    source: 'tracker',\n    payload: {\n      task_key: key,\n      status,\n      status_from: known,     // пустой на первом снимке — это не ошибка\n      is_final: isFinal,\n      task_created_at: f.create_at ? Date.parse(f.create_at) : null,\n      task_finished_at: f.finish_at ? Date.parse(f.finish_at) : null,\n      // Времена промежуточных переходов приблизительны: в T-Tracker нет\n      // истории, видны только те смены статуса, что застал крон.\n      snapshot: true,\n    },\n  } });\n}\n\n// Задачи, которые опрашивали, но трекер не вернул: нет доступа к спейсу\n// (403 на чужой спейс) или задачу удалили. Молчать нельзя — иначе выглядит\n// как «статус не менялся», и cycle time тихо замрёт.\nconst got = new Set(items.map((i) => i.key));\nfor (const key of plan.keys || []) {\n  if (got.has(key)) continue;\n  out.push({ json: {\n    event: 'task_status_changed',\n    event_id: 'task_missing:' + key,\n    thread_id: plan.threads?.[key] || '',\n    event_ts: Date.now(),\n    actor: 'tracker',\n    source: 'tracker',\n    payload: { task_key: key, status: '', is_final: false,\n               error: 'трекер не вернул задачу: нет доступа к спейсу или удалена' },\n  } });\n}\n\n// Обрезка списка по лимиту называется: обрезанные задачи перестают\n// опрашиваться, и это должно быть видно в логе, а не только в коде.\nfor (const key of plan.dropped || []) {\n  out.push({ json: {\n    event: 'task_status_changed',\n    event_id: 'task_skipped:' + key,\n    thread_id: plan.threads?.[key] || '',\n    event_ts: Date.now(),\n    actor: 'tracker',\n    source: 'tracker',\n    payload: { task_key: key, status: '', is_final: false,\n               error: 'задача не опрошена: список открытых задач превысил лимит 200' },\n  } });\n}\n\nif (!out.length) {\n  // Пустой выход законен: статусы не менялись. Но n8n на пустом массиве\n  // не выполнит следующий узел, а нам это и нужно — писать нечего.\n  return [];\n}\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        240
+      ],
+      "id": "diff-statuses",
+      "name": "Diff statuses"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "28ExyYBVz53J1bMu",
+          "mode": "id",
+          "cachedResultName": "Telemetry · Ingest"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1180,
+        240
+      ],
+      "id": "to-ingest",
+      "name": "To Ingest"
+    }
+  ],
+  "connections": {
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Read log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read log": {
+      "main": [
+        [
+          {
+            "node": "Collect task keys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect task keys": {
+      "main": [
+        [
+          {
+            "node": "Any tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any tasks": {
+      "main": [
+        [
+          {
+            "node": "Search tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Search tasks": {
+      "main": [
+        [
+          {
+            "node": "Diff statuses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diff statuses": {
+      "main": [
+        [
+          {
+            "node": "To Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

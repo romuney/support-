@@ -1,0 +1,113 @@
+{
+  "name": "Telemetry · Report",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        300
+      ],
+      "id": "run-manually",
+      "name": "Run manually"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "days",
+              "name": "days",
+              "type": "number",
+              "value": 30
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        200,
+        300
+      ],
+      "id": "period",
+      "name": "Period"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "support_event",
+          "mode": "name"
+        },
+        "returnAll": true,
+        "filters": {
+          "conditions": []
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        440,
+        300
+      ],
+      "id": "read-log",
+      "name": "Read log"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Пересчёт лога в разбивку по темам.\n//\n// Вход: все строки support_event. Выход: строка на тему + строка «итого»\n// плюс готовая markdown-таблица в отдельном элементе.\n\nconst TOPIC_TITLES = {\"export\": \"Cross Data · Выгрузка данных\", \"report_question\": \"Cross Data · Вопрос по отчетам\", \"report_access\": \"Cross Data · Нет доступа к отчету\", \"other\": \"Cross Data · Другое\", \"dwh_hr_replica\": \"Вопрос команде HC Data (ex. DWH HR)\", \"dwh_hr\": \"Вопрос команде HC Data (ex. DWH HR)\", \"user_data_question\": \"Cross Data · Вопрос по пользовательским данным в хранилище\", \"just_ask\": \"Cross Data · Мне только спросить\", \"user_data_access\": \"Cross Data · Нет доступа к пользовательским данным в хранилище\", \"warden_access\": \"Cross Data · Запрос на подключение к Warden (RLS для HR данных)\", \"employment_info\": \"Cross Data · Получить сведения о трудоустройстве ФЛ\", \"unknown\": \"Тема не распознана\"};\n\nconst rows = $input.all().map((x) => x.json ?? {});\n\n// Пустой вход — это не «обращений не было», а почти наверняка не сработавший\n// фильтр чтения таблицы. Молчать нельзя: пустой отчёт читается как факт.\nif (!rows.length) {\n  return [{ json: {\n    ok: false,\n    reason: 'лог пуст: проверить имя таблицы и то, что нода чтения вернула все строки',\n    markdown: '**Разбивка по темам:** лог пуст — проверить чтение таблицы.',\n  } }];\n}\n\nconst num = (v) => (typeof v === 'number' ? v : Number(v) || 0);\nconst parse = (v) => {\n  if (!v) return {};\n  if (typeof v === 'object') return v;\n  try { return JSON.parse(String(v)); } catch (e) { return {}; }\n};\n\n// Период: обращения, СОЗДАННЫЕ за последние N дней. Фильтр по дате создания\n// треда, а не по дате события: иначе обращение прошлого месяца, закрытое\n// вчера, попало бы в отчёт половиной своей жизни.\nconst DAYS = num($('Period').first().json.days) || 30;\nconst since = Date.now() - DAYS * 86400000;\n\nconst threads = new Map();\nconst th = (id) => {\n  if (!threads.has(id)) {\n    threads.set(id, {\n      id, kind: '', kind_fallback: '', ours: null, created_at: 0,\n      taken_at: 0, closed_at: 0, resolved: null, closes: 0,\n      answered: false, confidence: '', prompt_version: '',\n      helpful: 0, not_helpful: 0, texts: 0, detail_opened: 0,\n      replies_human: 0, replies_bot: 0, task_key: '',\n    });\n  }\n  return threads.get(id);\n};\n\n// Порядок событий в таблице произвольный (Data Tables не гарантирует\n// сортировку, а backfill вообще приезжает задним числом), поэтому время\n// берётся минимумом/максимумом, а не «последним увиденным».\nconst sorted = rows.slice().sort((a, b) => num(a.event_ts) - num(b.event_ts));\n\nfor (const r of sorted) {\n  const id = String(r.thread_id ?? '');\n  if (!id || id === 'sample-thread') continue;   // строки-образцы схемы\n  const p = parse(r.payload);\n  const t = th(id);\n  const ts = num(r.event_ts);\n  const type = String(r.event_type ?? '');\n\n  if (type === 'request_created') {\n    // Тема — с корневого события: её проставил человек в форме.\n    t.kind = p.kind || t.kind;\n    t.ours = p.ours === true;\n    t.created_at = t.created_at ? Math.min(t.created_at, ts) : ts;\n  } else if (type === 'taken') {\n    // Первое взятие за историю треда: дежурный снимает :loading:, когда\n    // ставит закрывающую реакцию, и «последнее» обнулило бы время реакции\n    // у всех закрытых обращений.\n    if (!t.taken_at || ts < t.taken_at) t.taken_at = ts;\n  } else if (type === 'closed') {\n    t.closed_at = Math.max(t.closed_at, ts);\n    t.resolved = p.resolved === null ? t.resolved : p.resolved;\n    t.closes++;\n  } else if (type === 'closed_removed') {\n    // Снятие закрывающей реакции ПЕРЕОТКРЫВАЕТ обращение: там это\n    // исправление ошибки, а не часть процесса.\n    t.closes--;\n    if (t.closes <= 0) { t.closed_at = 0; t.resolved = null; t.closes = 0; }\n  } else if (type === 'bot_answered') {\n    t.answered = true;\n    t.confidence = p.confidence_key || t.confidence;\n    t.prompt_version = p.prompt_version || t.prompt_version;\n  } else if (type === 'bot_feedback') {\n    if (p.helpful === true) t.helpful++;\n    else if (p.helpful === false) t.not_helpful++;\n    // Оценка знает тему из контекста кнопки — это запасной источник для\n    // тредов, чьё корневое событие в лог не попало (бот отвечает в канал\n    // черновиков, а обращение живёт в канале обращений).\n    if (p.kind && p.kind !== 'unknown') t.kind_fallback = p.kind;\n    if (!t.created_at) t.created_at = ts;\n  } else if (type === 'feedback_text') {\n    t.texts++;\n    if (p.kind && p.kind !== 'unknown') t.kind_fallback = p.kind;\n    if (!t.created_at) t.created_at = ts;\n  } else if (type === 'feedback_detail_opened') {\n    t.detail_opened++;\n    if (p.kind && p.kind !== 'unknown') t.kind_fallback = p.kind;\n  } else if (type === 'human_replied') {\n    t.replies_human++;\n  } else if (type === 'bot_replied') {\n    t.replies_bot++;\n  } else if (type === 'task_linked') {\n    t.task_key = p.task_key || t.task_key;\n  }\n}\n\nconst median = (xs) => {\n  if (!xs.length) return null;\n  const s = xs.slice().sort((a, b) => a - b);\n  const m = Math.floor(s.length / 2);\n  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);\n};\nconst hours = (ms) => (ms === null ? null : Math.round(ms / 3600000 * 10) / 10);\n\nconst buckets = new Map();\nconst bucket = (kind) => {\n  if (!buckets.has(kind)) {\n    buckets.set(kind, {\n      kind,\n      topic: TOPIC_TITLES[kind] || kind,\n      requests: 0, ours: 0, taken: 0, closed: 0, unresolved: 0,\n      answered: 0, helpful: 0, not_helpful: 0, texts: 0, detail_opened: 0,\n      tasks: 0, reaction_ms: [], cycle_ms: [],\n    });\n  }\n  return buckets.get(kind);\n};\n\nlet skippedOld = 0;\nfor (const t of threads.values()) {\n  if (t.created_at && t.created_at < since) { skippedOld++; continue; }\n  // Тема с корневого события; если его нет — из контекста кнопки; если нет\n  // и его — `unknown`, и это видно в отчёте отдельной строкой, а не молча\n  // размазано по остальным.\n  const b = bucket(t.kind || t.kind_fallback || 'unknown');\n  b.requests++;\n  if (t.ours !== false) b.ours++;\n  if (t.taken_at) { b.taken++; if (t.created_at) b.reaction_ms.push(t.taken_at - t.created_at); }\n  if (t.closed_at) {\n    b.closed++;\n    if (t.resolved === false) b.unresolved++;\n    if (t.created_at) b.cycle_ms.push(t.closed_at - t.created_at);\n  }\n  if (t.answered) b.answered++;\n  b.helpful += t.helpful;\n  b.not_helpful += t.not_helpful;\n  b.texts += t.texts;\n  b.detail_opened += t.detail_opened;\n  if (t.task_key) b.tasks++;\n}\n\nconst out = [...buckets.values()].map((b) => ({\n  kind: b.kind,\n  topic: b.topic,\n  requests: b.requests,\n  ours: b.ours,\n  taken: b.taken,\n  closed: b.closed,\n  open: b.requests - b.closed,\n  unresolved: b.unresolved,\n  bot_answered: b.answered,\n  helpful: b.helpful,\n  not_helpful: b.not_helpful,\n  // Доля «помогло» среди оценивших. Считается только когда оценки есть:\n  // 0 % при нуле оценок читается как «бот всех разочаровал», а это «никто\n  // не нажимал».\n  helpful_pct: (b.helpful + b.not_helpful)\n    ? Math.round(b.helpful * 100 / (b.helpful + b.not_helpful)) : null,\n  feedback_texts: b.texts,\n  detail_opened: b.detail_opened,\n  tasks: b.tasks,\n  reaction_h: hours(median(b.reaction_ms)),\n  cycle_h: hours(median(b.cycle_ms)),\n})).sort((a, b) => b.requests - a.requests);\n\nconst total = out.reduce((acc, r) => {\n  for (const k of ['requests', 'ours', 'taken', 'closed', 'open', 'unresolved',\n                   'bot_answered', 'helpful', 'not_helpful', 'feedback_texts',\n                   'detail_opened', 'tasks']) acc[k] += r[k];\n  return acc;\n}, { kind: 'ИТОГО', topic: 'ИТОГО', requests: 0, ours: 0, taken: 0, closed: 0,\n     open: 0, unresolved: 0, bot_answered: 0, helpful: 0, not_helpful: 0,\n     feedback_texts: 0, detail_opened: 0, tasks: 0 });\ntotal.helpful_pct = (total.helpful + total.not_helpful)\n  ? Math.round(total.helpful * 100 / (total.helpful + total.not_helpful)) : null;\ntotal.reaction_h = hours(median([...buckets.values()].flatMap((b) => b.reaction_ms)));\ntotal.cycle_h = hours(median([...buckets.values()].flatMap((b) => b.cycle_ms)));\n\n// Готовая markdown-таблица: отчёт смотрят люди, а не BI. Копируется в канал\n// как есть.\nconst cell = (v) => (v === null || v === undefined || v === '' ? '—' : String(v));\nconst head = ['Тема', 'Обращений', 'Взято', 'Закрыто', 'Открыто', 'Бот ответил',\n              '👍', '👎', '% помогло', 'Отзывов', 'Реакция, ч', 'Цикл, ч'];\nconst line = (r) => '| ' + [\n  r.topic, r.requests, r.taken, r.closed, r.open, r.bot_answered,\n  r.helpful, r.not_helpful, r.helpful_pct === null ? '—' : r.helpful_pct + '%',\n  r.feedback_texts, cell(r.reaction_h), cell(r.cycle_h),\n].map(cell).join(' | ') + ' |';\n\n// Обращения к HC Data лежат в том же канале и в той же таблице, но\n// адресованы не нам. В отчёте они отдельными строками — а в «итого» попадают\n// вместе со всеми, поэтому доля наших называется явно: иначе «обращений\n// за месяц» тихо включало бы чужие.\nconst foreign = total.requests - total.ours;\n\nconst markdown = [\n  '**Обращения по темам за ' + DAYS + ' дн.**',\n  '',\n  '| ' + head.join(' | ') + ' |',\n  '|' + head.map(() => '---').join('|') + '|',\n  ...out.map(line),\n  line(total),\n  '',\n  foreign ? '_Из них адресовано команде HC Data: ' + foreign +\n    ' — в наши метрики времени решения они не идут._' : '',\n  '_Реакция — медиана от обращения до :loading:. Цикл — до закрывающей ' +\n  'реакции. «% помогло» — из нажатых кнопок под ответом бота._',\n].filter(Boolean).join('\\n');\n\nreturn [\n  ...out.map((json) => ({ json })),\n  { json: { ...total, is_total: true } },\n  { json: {\n    ok: true,\n    markdown,\n    days: DAYS,\n    rows_read: rows.length,\n    threads: threads.size,\n    threads_in_period: out.reduce((a, r) => a + r.requests, 0),\n    threads_older: skippedOld,\n  } },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "id": "rollup-by-topic",
+      "name": "Rollup by topic"
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Period",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period": {
+      "main": [
+        [
+          {
+            "node": "Read log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read log": {
+      "main": [
+        [
+          {
+            "node": "Rollup by topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

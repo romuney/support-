@@ -1,0 +1,255 @@
+{
+  "name": "Telemetry · Collector Channel",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "posted",
+          "reaction_added",
+          "reaction_removed"
+        ],
+        "postedFilters": {
+          "channels": [
+            {
+              "nameAuto": {
+                "__rl": true,
+                "mode": "name",
+                "value": "hr-report-ask"
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.mattermostTrigger",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        300
+      ],
+      "id": "time-trigger",
+      "name": "Time Trigger",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Отсев чужих каналов и приведение события к общей форме.\n//\n// `postedFilters` в mattermostTrigger относится ТОЛЬКО к событию posted:\n// на reaction_added он не действует, и реакции приходят из ВСЕХ каналов, где\n// состоит бот, включая канал черновиков. Поэтому фильтр по channel_id здесь,\n// а не в настройках триггера.\nconst CHANNEL_ID = \"piyu3cs9xpdwie7nwxje5cwm8r\";\n\nconst src = $json || {};\nconst asObj = (v) => {\n  if (!v) return {};\n  if (typeof v === 'string') { try { return JSON.parse(v); } catch (e) { return {}; } }\n  return v;\n};\n\n// Форма события зависит от типа: у posted пост лежит в data.post (строкой),\n// у реакции — только data.reaction с post_id, самого поста нет.\nconst data = asObj(src.data ?? src);\nconst post = asObj(src.post ?? data.post);\nconst reaction = asObj(data.reaction ?? src.reaction);\n\n// Тип события выводится ПО ФОРМЕ, а не берётся из поля `event`: живой прогон\n// 2026-08-11 показал, что mattermostTrigger его не отдаёт (поле было взято\n// из документации Mattermost WebSocket). Имя, если оно есть, приоритетнее —\n// только оно различает добавление и снятие реакции.\nconst named = String(src.event ?? data.event ?? src.type ?? data.type ?? '').trim();\nconst event = named ||\n  (reaction.emoji_name ? 'reaction_added' : (post.id ? 'posted' : ''));\n\nconst channelId = post.channel_id || reaction.channel_id ||\n                  src.broadcast?.channel_id || data.channel_id || '';\n\n// Пустой CHANNEL_ID — не «пропускать всё молча»: в лог поедут реакции из\n// канала черновиков и разборы из лички. Помечаем, чтобы это было видно\n// в самих данных, а не только в предупреждении сборщика.\nconst filtered = CHANNEL_ID ? channelId === CHANNEL_ID : true;\n\nreturn [{ json: {\n  event,\n  data,\n  post,\n  reaction,\n  channel_id: channelId,\n  pass: filtered,\n  channel_unfiltered: !CHANNEL_ID,\n  // Признак домысливания едет дальше: иначе нормализатор увидит готовое имя\n  // события и решит, что оно пришло от Mattermost. А от домысленного имени\n  // зависит доверие к снятиям реакций — их от добавлений не отличить.\n  event_inferred: !named,\n  // Реакция не знает про тред: в событии есть post_id и нет root_id.\n  // Догоняющий GET /posts/{id} нужен ТОЛЬКО для реакций — на posted это был бы\n  // лишний запрос к API на каждое сообщение канала.\n  needs_post: event.startsWith('reaction') && !post.id,\n  post_id: reaction.post_id || post.id || '',\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        300
+      ],
+      "id": "guard-channel",
+      "name": "Guard channel"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pass",
+              "leftValue": "={{ $json.pass }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        300
+      ],
+      "id": "our-channel",
+      "name": "Our channel"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "needs",
+              "leftValue": "={{ $json.needs_post }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        240
+      ],
+      "id": "reaction-needs-post",
+      "name": "Reaction needs post"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "get",
+        "postId": "={{ $json.post_id }}"
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        700,
+        160
+      ],
+      "id": "get-post",
+      "name": "Get post",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Событие берём из Guard, догоняющий пост — из Get post. Порядок важен:\n// в $json сейчас ответ API, а не событие.\nconst ev = $('Guard channel').first().json;\nlet post = {};\ntry {\n  const got = $('Get post').first().json;\n  // Пост могли удалить: тогда в ответе будет ошибка, а не пост. thread_id\n  // тогда останется равным post_id — обращение не потеряется, просто\n  // не склеится с тредом, и это видно по on_root.\n  if (got && got.id) post = got;\n} catch (e) { /* ветка не выполнялась */ }\n\nreturn [{ json: { event: ev.event, data: ev.data, post: Object.keys(post).length ? post : ev.post } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        160
+      ],
+      "id": "merge-reaction",
+      "name": "Merge reaction"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "28ExyYBVz53J1bMu",
+          "mode": "id",
+          "cachedResultName": "Telemetry · Ingest"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1180,
+        300
+      ],
+      "id": "to-ingest",
+      "name": "To Ingest"
+    }
+  ],
+  "connections": {
+    "Time Trigger": {
+      "main": [
+        [
+          {
+            "node": "Guard channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard channel": {
+      "main": [
+        [
+          {
+            "node": "Our channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Our channel": {
+      "main": [
+        [
+          {
+            "node": "Reaction needs post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Reaction needs post": {
+      "main": [
+        [
+          {
+            "node": "Get post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge reaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get post": {
+      "main": [
+        [
+          {
+            "node": "Merge reaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge reaction": {
+      "main": [
+        [
+          {
+            "node": "To Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

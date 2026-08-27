@@ -1,0 +1,34 @@
+{
+  "plugins": {
+    "gitlab": {
+      "version": "1.11.0",
+      "file_path": "plugins/gitlab",
+      "installed": "2026-08-07T17:34:35.27557+03:00"
+    },
+    "jira": {
+      "version": "1.20.1",
+      "file_path": "plugins/jira",
+      "installed": "2026-08-07T17:34:38.830743+03:00"
+    },
+    "kube": {
+      "version": "1.5.6",
+      "file_path": "plugins/kube",
+      "installed": "2026-08-07T17:34:46.02123+03:00"
+    },
+    "sage": {
+      "version": "3.3.3",
+      "file_path": "plugins/sage",
+      "installed": "2026-08-07T17:34:49.713837+03:00"
+    },
+    "tihon": {
+      "version": "0.0.8",
+      "file_path": "plugins/tihon",
+      "installed": "2026-08-13T09:29:35.334288+03:00"
+    },
+    "wixie": {
+      "version": "3.7.0",
+      "file_path": "plugins/wixie",
+      "installed": "2026-08-04T13:07:51.409461+03:00"
+    }
+  }
+}

@@ -1,0 +1,427 @@
+{
+  "name": "Support Bot · Feedback Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bot-feedback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        300
+      ],
+      "id": "webhook",
+      "name": "Webhook",
+      "webhookId": "bot-feedback-hook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "bot-feedback-ping",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        620
+      ],
+      "id": "ping",
+      "name": "Ping",
+      "webhookId": "bot-feedback-ping"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, hook: \"bot-feedback\", ts: Date.now() }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        620
+      ],
+      "id": "respond-ping",
+      "name": "Respond ping"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Разбор нажатия кнопки и присланной формы.\n//\n// На этот вебхук приходят ДВА разных тела, и различать их обязательно:\n//\n//   кнопка   { user_id, post_id, channel_id, trigger_id,\n//              context: { action, thread_id, topic, confidence, prompt_version } }\n//   форма    { type: 'dialog_submission', submission: { text }, state,\n//              user_id, channel_id, callback_id }\n//\n// Контекст кнопки Mattermost возвращает КАК ОТПРАВИЛИ — это единственное\n// место, где известно, к какому обращению и к какой версии промптов\n// относится оценка. Через месяц по логу иначе не разобрать, на что ругались.\n\n// Темы — тот же список, что у нормализатора: он подставляется сборщиком\n// из одного места (CURRENT_TOPICS + ARCHIVE_TOPICS).\n//\n// ЗАЧЕМ КЛАССИФИКАЦИЯ ЗДЕСЬ. Бот про список тем не знает вовсе и не должен:\n// он проверяет префикс `Cross Data |`, поэтому правка формы его не касается.\n// В контексте кнопки едет ЗАГОЛОВОК темы («Cross Data | Выгрузка данных»),\n// а в колонку `kind` таблицы обязан лечь аналитический ключ (`export`) —\n// тот же, что пишет `request_created`. Иначе в одной колонке оказались бы\n// два словаря сразу, и разбивка по темам разъехалась бы на «обращения»\n// и «оценки» как на разные темы. Ровно это и было до 2026-08-13.\nconst TOPICS = [{\"title\": \"Cross Data | Запрос на подключение к Warden (RLS для HR данных)\", \"kind\": \"warden_access\", \"ours\": true}, {\"title\": \"Cross Data | Нет доступа к пользовательским данным в хранилище\", \"kind\": \"user_data_access\", \"ours\": true}, {\"title\": \"Cross Data | Вопрос по пользовательским данным в хранилище\", \"kind\": \"user_data_question\", \"ours\": true}, {\"title\": \"Cross Data | Получить сведения о трудоустройстве ФЛ\", \"kind\": \"employment_info\", \"ours\": true}, {\"title\": \"Вопрос команде HC Data (ex. DWH HR) |\", \"kind\": \"dwh_hr_replica\", \"ours\": false}, {\"title\": \"Вопрос команде HC Data (ex. DWH HR)\", \"kind\": \"dwh_hr\", \"ours\": false}, {\"title\": \"Cross Data | Нет доступа к отчету\", \"kind\": \"report_access\", \"ours\": true}, {\"title\": \"Cross Data | Мне только спросить\", \"kind\": \"just_ask\", \"ours\": true}, {\"title\": \"Cross Data | Вопрос по отчетам\", \"kind\": \"report_question\", \"ours\": true}, {\"title\": \"Cross Data | Выгрузка данных\", \"kind\": \"export\", \"ours\": true}, {\"title\": \"Вопрос команде DWH HR |\", \"kind\": \"dwh_hr_replica\", \"ours\": false}, {\"title\": \"Вопрос команде DWH HR\", \"kind\": \"dwh_hr\", \"ours\": false}, {\"title\": \"Cross Data | Другое\", \"kind\": \"other\", \"ours\": true}];\nconst KINDS = [\"dwh_hr\", \"dwh_hr_replica\", \"employment_info\", \"export\", \"just_ask\", \"other\", \"report_access\", \"report_question\", \"user_data_access\", \"user_data_question\", \"warden_access\"];\n\n// Заголовок темы → аналитический ключ. Принимает три формы, потому что\n// нажать могут на кнопку под СТАРЫМ постом, собранным прежней версией бота:\n//   1) готовый ключ (`export`) — новые кнопки, ничего делать не надо;\n//   2) полный заголовок («Cross Data | Выгрузка данных»);\n//   3) хвост без префикса («Выгрузка данных») — так тему отдавали кнопки\n//      до 2026-08-13; посты с ними живут в канале и нажимаются до сих пор.\n// Неузнанное не выдумывается: kind='unknown', а сырой заголовок остаётся\n// в payload — по нему видно, что именно приехало.\nfunction tail(title) {\n  const parts = String(title).split('|');\n  const rest = parts.slice(1).join('|').trim();\n  return rest || String(title).trim();\n}\nfunction classifyTopic(topicRaw, kindRaw) {\n  const clean = (v) => String(v ?? '')\n    .replace(/^[\\s>*_#`~]+/, '').replace(/[\\s*_`~]+$/, '').trim();\n  const topic = clean(topicRaw);\n  const asKind = clean(kindRaw);\n\n  if (KINDS.indexOf(asKind) !== -1) return { kind: asKind, topic: topic || asKind };\n\n  for (const candidate of [topic, asKind]) {\n    if (!candidate) continue;\n    for (const t of TOPICS) {\n      if (candidate === t.title || candidate.startsWith(t.title)) {\n        return { kind: t.kind, topic: candidate };\n      }\n    }\n    for (const t of TOPICS) {\n      const suffix = tail(t.title);\n      if (suffix && (candidate === suffix || candidate.startsWith(suffix))) {\n        return { kind: t.kind, topic: candidate };\n      }\n    }\n  }\n  return { kind: 'unknown', topic: topic || asKind };\n}\n\nconst body = $json.body ?? $json ?? {};\nconst ctx = body.context ?? {};\n\nconst isDialog = String(body.type ?? '') === 'dialog_submission';\n\n// state диалога — сериализованный контекст кнопки: диалог не наследует\n// context, и без него оценка приехала бы без обращения и без версии.\nlet state = {};\nif (isDialog) {\n  try { state = JSON.parse(String(body.state ?? '{}')); } catch (e) { state = {}; }\n}\nconst from = (name) => (isDialog ? state[name] : ctx[name]);\n\nconst action = isDialog ? 'detail_submitted' : String(ctx.action ?? '');\nconst threadId = String(from('thread_id') ?? '');\nconst actor = String(body.user_id ?? '');\nconst ts = Date.now();\n\nconst topic = classifyTopic(from('topic'), from('kind'));\n\nconst meta = {\n  confidence: String(from('confidence') ?? ''),\n  // kind — аналитический ключ для колонки таблицы, topic — то, что реально\n  // приехало кнопкой. Второе не выбрасываем: по нему чинится классификация,\n  // если форму расширят темой, которой нет в списке.\n  kind: topic.kind,\n  topic: topic.topic,\n  prompt_version: String(from('prompt_version') ?? ''),\n  answer_post_id: String((isDialog ? state.answer_post_id : body.post_id) ?? ''),\n};\n\n// helpful — булево, а не строка: по строке «false» витрина посчитает\n// половину оценок положительными, и заметить это будет нечем.\nconst HELPFUL = { helpful: true, not_helpful: false };\n\nconst out = {\n  action,\n  is_dialog: isDialog,\n  thread_id: threadId,\n  actor,\n  channel_id: String(body.channel_id ?? ''),\n  trigger_id: String(body.trigger_id ?? ''),\n  // post_id поста С КНОПКАМИ — по нему добирается исходный текст шапки\n  // перед тем, как заменить кнопки отметкой (см. Get post).\n  post_id: String(body.post_id ?? ''),\n  needs_dialog: action === 'detail',\n  // Пост правим только у оценки: у формы и у незнакомой кнопки править\n  // нечего, а лишний GET по пустому post_id — это красная нода на каждом\n  // отзыве, к которой быстро привыкают и перестают смотреть.\n  needs_post: !isDialog && (action in HELPFUL),\n  // Неизвестное действие не молчит: кнопку могли переименовать в шапке,\n  // и тогда оценки перестали бы писаться, а флоу остался бы зелёным.\n  unknown: !isDialog && !(action in HELPFUL) && action !== 'detail',\n};\n\nif (isDialog) {\n  const text = String(body.submission?.text ?? '').trim();\n  out.event = {\n    event: 'feedback_text',\n    event_id: 'feedback_text:' + threadId + ':' + actor + ':' + ts,\n    thread_id: threadId,\n    event_ts: ts,\n    actor,\n    source: 'webhook',\n    payload: { ...meta, text, text_len: text.length },\n  };\n  // Mattermost закрывает форму сам; ephemeral_text — подтверждение человеку,\n  // что текст не улетел в никуда.\n  out.response = { ephemeral_text: 'Спасибо, записал. Это попадёт в разбор качества ответов.' };\n} else if (action === 'detail') {\n  out.dialog = {\n    trigger_id: String(body.trigger_id ?? ''),\n    url: \"https://n8n.t-tech.team/webhook/bot-feedback\",\n    dialog: {\n      callback_id: 'bot-feedback:' + threadId,\n      title: 'Обратная связь по ответу бота',\n      introduction_text: 'Что было не так или чего не хватило? Пишите как есть — ' +\n        'это читает тот, кто правит промпты и базу знаний.',\n      submit_label: 'Отправить',\n      // state — единственный способ донести контекст до отправки формы.\n      state: JSON.stringify({ thread_id: threadId, ...meta }),\n      elements: [{\n        display_name: 'Что не так с ответом',\n        name: 'text',\n        type: 'textarea',\n        optional: false,\n        max_length: 3000,\n      }],\n    },\n  };\n  // САМО НАЖАТИЕ ТОЖЕ ПИШЕТСЯ, отдельным типом события.\n  //\n  // Раньше не писалось — по правилу «нажатие без отправки не обратная связь».\n  // Правило верное для метрики качества и вредное для отладки: пока в логе\n  // не было ни строки, «кнопки не работают» и «кнопки работают, но никто\n  // не дописывает текст» выглядели одинаково. Разные типы событий разводят\n  // эти два случая, а витрина считает оценки по bot_feedback и на открытие\n  // формы не смотрит. Ключ без времени: повторное открытие той же формы\n  // тем же человеком — та же строка, а не вторая.\n  out.event = {\n    event: 'feedback_detail_opened',\n    event_id: 'feedback_detail_opened:' + threadId + ':' + actor,\n    thread_id: threadId,\n    event_ts: ts,\n    actor,\n    source: 'webhook',\n    payload: { ...meta },\n  };\n  // Тело ответа собирается после попытки открыть форму: см. Dialog reply.\n  out.response = {};\n} else if (action in HELPFUL) {\n  const helpful = HELPFUL[action];\n  out.event = {\n    event: 'bot_feedback',\n    // Ключ идемпотентности БЕЗ времени: повторное нажатие переписывает\n    // оценку того же человека по тому же обращению, а не добавляет вторую.\n    // Иначе один передумавший джун весит столько же, сколько десять разных.\n    event_id: 'bot_feedback:' + threadId + ':' + actor,\n    thread_id: threadId,\n    event_ts: ts,\n    actor,\n    source: 'webhook',\n    payload: { ...meta, helpful },\n  };\n  // Отметка вместо кнопок. Собирается в Build reply — там есть исходный пост,\n  // без которого его нельзя обновлять (см. комментарий там же).\n  out.verdict = {\n    helpful,\n    text: (helpful ? '👍 Помогло' : '👎 Не помогло') + ' — записано, спасибо.',\n    color: helpful ? '#3db887' : '#d24b4e',\n  };\n  out.response = { ephemeral_text: 'Записал: ' + (helpful ? 'помогло' : 'не помогло') + '.' };\n} else {\n  // Неизвестное действие: человеку — честный ответ, в лог — событие,\n  // по которому видно, что кнопка и вебхук разъехались.\n  out.event = {\n    event: 'bot_feedback',\n    event_id: 'bot_feedback:unknown:' + threadId + ':' + actor + ':' + ts,\n    thread_id: threadId,\n    event_ts: ts,\n    actor,\n    source: 'webhook',\n    payload: { ...meta, helpful: null, unknown_action: action },\n  };\n  out.response = { ephemeral_text: 'Не понял, какая это кнопка. Записал как есть.' };\n}\n\nreturn [{ json: out }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "id": "parse-action",
+      "name": "Parse action"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "needs_dialog",
+              "leftValue": "={{ $json.needs_dialog }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ],
+      "id": "needs-dialog",
+      "name": "Needs dialog"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://time.tbank.ru/api/v4/actions/dialogs/open",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mattermostApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.dialog) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        680,
+        160
+      ],
+      "id": "open-dialog",
+      "name": "Open dialog",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst parsed = $('Parse action').first().json;\nconst src = $json ?? {};\n\n// Нода открытия формы стоит с onError=continue: при отказе в элементе\n// лежит error, а не ответ Mattermost.\nconst failed = Boolean(src && (src.error || src.status_code >= 400));\n\n// Успех: тело ПУСТОЕ. Форма уже открыта отдельным вызовом, и любой текст\n// здесь встанет вторым сообщением поверх неё.\nconst response = failed\n  ? { ephemeral_text: 'Форма не открылась — Time не принял запрос (обычно это ' +\n      'истёкшая кнопка). Нажмите ещё раз или напишите в тред: прочитаю там.' }\n  : {};\n\nreturn [{ json: { response, event: parsed.event ?? null } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        160
+      ],
+      "id": "dialog-reply",
+      "name": "Dialog reply"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1160,
+        160
+      ],
+      "id": "respond-dialog",
+      "name": "Respond dialog"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "needs_post",
+              "leftValue": "={{ $json.needs_post }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        440
+      ],
+      "id": "needs-post",
+      "name": "Needs post"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://time.tbank.ru/api/v4/posts/' + $json.post_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mattermostApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        920,
+        380
+      ],
+      "id": "get-post",
+      "name": "Get post",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst parsed = $('Parse action').first().json;\n\n// На входе либо ответ Mattermost на GET /posts/{id}, либо разбор целиком —\n// когда ветка обошла GET (форма, незнакомая кнопка) или когда GET упал\n// с onError=continue. Настоящий пост узнаётся по паре id+message: у разбора\n// поля id нет вовсе.\nconst src = $json ?? {};\nconst fetched = (src && typeof src.id === 'string' && src.id &&\n                 typeof src.message === 'string') ? src : null;\n\nconst response = { ...(parsed.response ?? {}) };\nconst verdict = parsed.verdict;\n\nif (verdict && fetched) {\n  const props = { ...(fetched.props ?? {}) };\n  props.attachments = [{ text: verdict.text, color: verdict.color }];\n  response.update = {\n    // Текст шапки переносится как есть: без него Mattermost затрёт пост.\n    message: String(fetched.message ?? ''),\n    props,\n  };\n  // Пост изменится у всех, эфемерное подтверждение станет дублем.\n  delete response.ephemeral_text;\n  response.ephemeral_text = verdict.helpful\n    ? 'Спасибо! Если есть что добавить — кнопка «Написать подробнее» под соседними ответами.'\n    : 'Записал. Если опишете, что было не так, — починим быстрее: кнопка «Написать подробнее».';\n}\n\nreturn [{ json: { response, event: parsed.event ?? null } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        440
+      ],
+      "id": "build-reply",
+      "name": "Build reply"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1400,
+        440
+      ],
+      "id": "respond-feedback",
+      "name": "Respond feedback"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $json.event }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        300
+      ],
+      "id": "event-for-log",
+      "name": "Event for log"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "28ExyYBVz53J1bMu",
+          "mode": "id",
+          "cachedResultName": "Telemetry · Ingest"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1880,
+        300
+      ],
+      "id": "to-ingest",
+      "name": "To Ingest"
+    }
+  ],
+  "connections": {
+    "Ping": {
+      "main": [
+        [
+          {
+            "node": "Respond ping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse action": {
+      "main": [
+        [
+          {
+            "node": "Needs dialog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs dialog": {
+      "main": [
+        [
+          {
+            "node": "Open dialog",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Needs post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open dialog": {
+      "main": [
+        [
+          {
+            "node": "Dialog reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dialog reply": {
+      "main": [
+        [
+          {
+            "node": "Respond dialog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond dialog": {
+      "main": [
+        [
+          {
+            "node": "Event for log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs post": {
+      "main": [
+        [
+          {
+            "node": "Get post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get post": {
+      "main": [
+        [
+          {
+            "node": "Build reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build reply": {
+      "main": [
+        [
+          {
+            "node": "Respond feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond feedback": {
+      "main": [
+        [
+          {
+            "node": "Event for log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Event for log": {
+      "main": [
+        [
+          {
+            "node": "To Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

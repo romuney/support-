@@ -1,0 +1,118 @@
+{
+  "name": "Telemetry · Review Export",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        300
+      ],
+      "id": "run-manually",
+      "name": "Run manually"
+    },
+    {
+      "parameters": {
+        "query": "SELECT\n    request_id,\n    created_date,\n    permalink,\n    kind,\n    topic,\n    domains,\n    confidence_claimed,\n    confidence_key,\n    confidence_downgraded,\n    articles_read,\n    dd_count,\n    router_error,\n    parse_error,\n    prompt_version,\n    draft_useful,\n    feedback_text\nFROM dl.usr_cross_data.support_request\nWHERE feedback_text IS NOT NULL\nORDER BY created_at DESC",
+        "timeout": 900,
+        "timeZone": "Europe/Moscow"
+      },
+      "type": "CUSTOM.trino",
+      "typeVersion": 3,
+      "position": [
+        -260,
+        300
+      ],
+      "id": "read-reviewed-requests",
+      "name": "Read reviewed requests",
+      "credentials": {
+        "trinoApi": {
+          "id": "82c1YyhkiBGT25Ag",
+          "name": "DWH (Trino DLH) account 128"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://time.tbank.ru/api/v4/posts/{{ $json.request_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mattermostApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        300
+      ],
+      "id": "get-original-post",
+      "name": "Get original post",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rows = $('Read reviewed requests').all().map((x) => x.json || {});\nconst posts = $input.all().map((x) => x.json || {});\n\nif (!rows.length) {\n  return [{ json: {\n    ok: true,\n    note: 'нет строк с заполненным feedback_text — обогащать нечего',\n    rows: 0,\n  } }];\n}\n\nif (rows.length !== posts.length) {\n  throw new Error(\n    'Число строк с фидбеком (' + rows.length + ') не совпадает с числом '\n    + 'ответов Time (' + posts.length + ') — соответствие по индексу '\n    + 'нарушено, склеивать нельзя'\n  );\n}\n\n// Явный список полей на выходе, а не {...r}: порядок и состав фиксированы\n// здесь же, рядом с REVIEW_SQL, а не выводятся из того, что случайно\n// приехало из Trino.\nreturn rows.map((r, i) => {\n  const post = posts[i] || {};\n  const ok = typeof post.id === 'string' && typeof post.message === 'string';\n  return { json: {\n    question_text: ok ? post.message : null,\n    // Пост могли удалить, либо истёк Service Account — молчать об этом\n    // нельзя: пустой question_text должен читаться как «не получилось»,\n    // а не как «вопроса не было».\n    question_fetch_error: ok ? ''\n      : 'не удалось получить исходный пост: ' + JSON.stringify(post).slice(0, 200),\n    feedback_text: r.feedback_text,\n    kind: r.kind,\n    topic: r.topic,\n    domains: r.domains,\n    confidence_claimed: r.confidence_claimed,\n    confidence_key: r.confidence_key,\n    confidence_downgraded: r.confidence_downgraded,\n    articles_read: r.articles_read,\n    dd_count: r.dd_count,\n    router_error: r.router_error,\n    parse_error: r.parse_error,\n    prompt_version: r.prompt_version,\n    draft_useful: r.draft_useful,\n    created_date: r.created_date,\n    request_id: r.request_id,\n    permalink: r.permalink,\n  } };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "id": "merge-with-question",
+      "name": "Merge with question"
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Read reviewed requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read reviewed requests": {
+      "main": [
+        [
+          {
+            "node": "Get original post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get original post": {
+      "main": [
+        [
+          {
+            "node": "Merge with question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

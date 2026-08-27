@@ -1,0 +1,175 @@
+{
+  "name": "Telemetry · Backfill",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        300
+      ],
+      "id": "run-manually",
+      "name": "Run manually"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ch",
+              "name": "channel_id",
+              "type": "string",
+              "value": "piyu3cs9xpdwie7nwxje5cwm8r"
+            },
+            {
+              "id": "since",
+              "name": "since",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "id": "per",
+              "name": "per_page",
+              "type": "number",
+              "value": 200
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -20,
+        300
+      ],
+      "id": "period",
+      "name": "Period"
+    },
+    {
+      "parameters": {
+        "url": "=https://time.tbank.ru/api/v4/channels/{{ $json.channel_id }}/posts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mattermostApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $json.since }}"
+            },
+            {
+              "name": "per_page",
+              "value": "={{ $json.per_page }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        300
+      ],
+      "id": "get-posts",
+      "name": "Get posts",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Разворачивание ответа GET /channels/{id}/posts в события.\n//\n// Ответ несёт и посты, и metadata.reactions на каждом — один запрос закрывает\n// и сообщения, и разметку. Реакции здесь идут С постом, поэтому догоняющий\n// GET /posts не нужен: тред уже известен.\nconst res = $json || {};\nconst posts = res.posts ? Object.values(res.posts) : (Array.isArray(res) ? res : []);\n\nconst out = [];\nfor (const post of posts) {\n  if (!post || !post.id) continue;\n  out.push({ json: { event: 'posted', post } });\n\n  for (const r of post.metadata?.reactions || []) {\n    // Снятия реакций в истории не видны: API отдаёт только текущее состояние.\n    // Для метрик этого достаточно — важно, что реакция ЕСТЬ и когда поставлена.\n    out.push({ json: {\n      event: 'reaction_added',\n      data: { reaction: r },\n      post,\n    } });\n  }\n}\n\n// Пустой выход = «постов за период нет». Отличить это от сбоя запроса нельзя,\n// поэтому говорим прямо.\nif (!out.length) {\n  out.push({ json: { event: 'backfill_empty', post: {},\n    data: { note: 'ответ API не содержит постов — проверить channel_id и период' } } });\n}\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "id": "explode-posts",
+      "name": "Explode posts"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "28ExyYBVz53J1bMu",
+          "mode": "id",
+          "cachedResultName": "Telemetry · Ingest"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        700,
+        300
+      ],
+      "id": "to-ingest",
+      "name": "To Ingest"
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Period",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period": {
+      "main": [
+        [
+          {
+            "node": "Get posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get posts": {
+      "main": [
+        [
+          {
+            "node": "Explode posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explode posts": {
+      "main": [
+        [
+          {
+            "node": "To Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

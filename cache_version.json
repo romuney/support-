@@ -1,0 +1,665 @@
+{
+  "core": {
+    "files": {
+      "darwin": "https://devplatform.tcsbank.ru/cli/prod/dp/13.39.1/darwin/dp",
+      "linux": "https://devplatform.tcsbank.ru/cli/prod/dp/13.39.1/linux/dp",
+      "windows": "https://devplatform.tcsbank.ru/cli/prod/dp/13.39.1/windows/dp.exe"
+    },
+    "version": "13.39.1",
+    "checksums": {
+      "amd64-darwin": "582e6543707349099ffe91bcf0d08edbdc4e3564c0efaa90fc71654eb1a3d1a4",
+      "amd64-linux": "aee998671f154c988b4d8b9b35d1ac3eb87f4a49d303ba497c8c4ce157528fe1",
+      "amd64-windows": "bf7fbbb2fe34bc0daeade6147d92bd09149029ae79e992fb2d52a0dd0233c36c"
+    },
+    "signature": "LS0tLS1CRUdJTiBQR1AgU0lHTkFUVVJFLS0tLS0KCmlKQUVBQllLQURnV0lRVE9TWEQvUmZwTTFETkdhUDJKaTNnN3Z1dFFRZ1VDYW93UVFSb2NjM0JwY21sMExXVmoKYjNONWMzUmxiVUIwWW1GdWF5NXlkUUFLQ1JDSmkzZzd2dXRRUWhjckFRRGRqYXM4Wkljd0hLRGNJQkU1Z3NVRQorVk5OVmdQOG41VmFzaDVnVUV0REVRRUEvdC91WVRVaDk2ZVVUaHhMdFFSRHFmSkFlekk0emx6STM3UEJ2SmhUClhBdz0KPW9HdzAKLS0tLS1FTkQgUEdQIFNJR05BVFVSRS0tLS0tCg=="
+  },
+  "timestamp": "2026-08-25T11:24:42.692624+03:00",
+  "plugins": {
+    "allure": {
+      "version": "1.4.0",
+      "files": {
+        "darwin": {
+          "url": "https://qa-coretech-public.s3-msk.tinkoff.ru/allure/production/1.4.0/darwin/allure",
+          "sha": "f24c5d8cf3b8bc4f3e7fca033302f355572c4d070bf1d9a08438c3ce6755b16d"
+        },
+        "linux": {
+          "url": "https://qa-coretech-public.s3-msk.tinkoff.ru/allure/production/1.4.0/linux/allure",
+          "sha": "ab6087fbb1cfde655db2e085cb2a4d5dd8dff883615872a81339e12b4ea89eda"
+        },
+        "windows": {
+          "url": "https://qa-coretech-public.s3-msk.tinkoff.ru/allure/production/1.4.0/windows/allure.exe",
+          "sha": "4a9b88add0797d7c69c0319cbc90067290e1ba4af1900b811b8e8e454096aaf3"
+        }
+      }
+    },
+    "apphub": {
+      "version": "0.1.0",
+      "files": {
+        "darwin": {
+          "url": "https://apphub-spirit-cli-plugins.s3-msk.tinkoff.ru/apphub/production/0.1.0/darwin/apphub",
+          "sha": "b774084c024d46bc0ee88bccd114c3fbcf6be670b16a21084c99cb26008db634"
+        },
+        "linux": {
+          "url": "https://apphub-spirit-cli-plugins.s3-msk.tinkoff.ru/apphub/production/0.1.0/linux/apphub",
+          "sha": "9aa05f8c5b8fbd5575e2c802a2ed19073e01c42d508e28dfd0a0804465453c2c"
+        },
+        "windows": {
+          "url": "https://apphub-spirit-cli-plugins.s3-msk.tinkoff.ru/apphub/production/0.1.0/windows/apphub.exe",
+          "sha": "9ce980626e0edeff824dd991aa411a458e4b151749df8024eeffe099f85f254d"
+        }
+      }
+    },
+    "artifacts": {
+      "version": "0.2.0",
+      "files": {
+        "darwin": {
+          "url": "https://devplatform.tcsbank.ru/cli/plugins/spirit-artifacts-spirit-cli-plugins/artifacts/0.2.0/darwin/artifacts",
+          "sha": "57b86dfc97c385102dae1cd13d92ffa7974e87e8b97163439b64e29ce5d9385b"
+        },
+        "linux": {
+          "url": "https://devplatform.tcsbank.ru/cli/plugins/spirit-artifacts-spirit-cli-plugins/artifacts/0.2.0/linux/artifacts",
+          "sha": "165feac26732e24265b3adfa4711ac6bdd35c06aabf8c621d971c56a54ce42c1"
+        },
+        "windows": {
+          "url": "https://devplatform.tcsbank.ru/cli/plugins/spirit-artifacts-spirit-cli-plugins/artifacts/0.2.0/windows/artifacts.exe",
+          "sha": "ded7af0b396f0e697297328d87b0f0f5c48d1aefeffbbd0e08062c8fac3a14d5"
+        }
+      }
+    },
+    "cdn": {
+      "version": "0.0.6",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/public-cloud-infra-packages/cdn/production/0.0.6/darwin/cdn",
+          "sha": "450cc677a67af374c6ba963f28a1844306ad50e213726a939abcc43d260fcd51"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/public-cloud-infra-packages/cdn/production/0.0.6/linux/cdn",
+          "sha": "9da245dcfe6152f2fbcb270966a64aeab78b3eceaa9aa8f88302e8d3e8d2cd2b"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/public-cloud-infra-packages/cdn/production/0.0.6/windows/cdn.exe",
+          "sha": "c844105bb4bc21f0dcf7c39e515d4b14cb477d943ac4af896c2de66d10d7dd55"
+        }
+      }
+    },
+    "cloudmanager": {
+      "version": "0.0.12",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/icp-packages/cloudmanager/production/0.0.12/darwin/cloudmanager",
+          "sha": "92ecc05dc70f6b14e2acdbc0752fde96b969682a3ed39e1fd0424d22322c785a"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/icp-packages/cloudmanager/production/0.0.12/linux/cloudmanager",
+          "sha": "39abc0e3d62b6dc534df90189a811c8086c3e5c4d9b85b201c7384f049bd8f58"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/icp-packages/cloudmanager/production/0.0.12/windows/cloudmanager.exe",
+          "sha": "4c4385ecc0819d52e2060834e50ea36499efa7125554d51b404cfbc86f05c51b"
+        }
+      }
+    },
+    "code-interpreter": {
+      "version": "0.0.4",
+      "files": {
+        "darwin": {
+          "url": "https://ai-platform-spirit-cli-plugins-binaries.s3-msk.tinkoff.ru/code-interpreter-cli/production/0.0.4/darwin/code-interpreter",
+          "sha": "863f2bc9010998836d93ccf780d8cc70f7c4125d6492a1a22d6e2851f9ba1c94"
+        },
+        "linux": {
+          "url": "https://ai-platform-spirit-cli-plugins-binaries.s3-msk.tinkoff.ru/code-interpreter-cli/production/0.0.4/linux/code-interpreter",
+          "sha": "27c8eb2bc693d8bc62113f21c4f447d00e48537df211a66db1011ff29cdc5a3c"
+        },
+        "windows": {
+          "url": "https://ai-platform-spirit-cli-plugins-binaries.s3-msk.tinkoff.ru/code-interpreter-cli/production/0.0.4/windows/code-interpreter.exe",
+          "sha": "3bb5778edf349a55801c9f686d83a834762cbb3392d82328c46599ec916abc23"
+        }
+      }
+    },
+    "code-search": {
+      "version": "2.0.0",
+      "files": {
+        "darwin": {
+          "url": "https://sdlc-mcps.s3-msk.tinkoff.ru/code-search/production/2.0.0/darwin/code-search",
+          "sha": "eac3d7618282c4ef8fe9b0cbcddd1a4856010178fe0a1f9c571d67ae65d6a4aa"
+        },
+        "linux": {
+          "url": "https://sdlc-mcps.s3-msk.tinkoff.ru/code-search/production/2.0.0/linux/code-search",
+          "sha": "06748468e2fc21f956ad9ffc8c7574c8d83104511b245d86e4e0ddd9848a1b99"
+        },
+        "windows": {
+          "url": "https://sdlc-mcps.s3-msk.tinkoff.ru/code-search/production/2.0.0/windows/code-search.exe",
+          "sha": "a0cf257a6a5f8d206b04fc091e2c9d68c3df88fb811f68dd1de19a1218771e8a"
+        }
+      }
+    },
+    "codesign": {
+      "version": "0.0.3",
+      "files": {
+        "darwin": {
+          "url": "https://apphub-spirit-cli-plugins.s3-msk.tinkoff.ru/codesign/production/0.0.3/darwin/codesign",
+          "sha": "3d45ba561f90ba3fa27802d12a572f76e098689c4a878a61b6bd0b989acc6e44"
+        },
+        "linux": {
+          "url": "https://apphub-spirit-cli-plugins.s3-msk.tinkoff.ru/codesign/production/0.0.3/linux/codesign",
+          "sha": "d122a672a26facf702d5ea04e4559963e066f5dda495a3195298dd01be5fa1dd"
+        },
+        "windows": {
+          "url": "https://apphub-spirit-cli-plugins.s3-msk.tinkoff.ru/codesign/production/0.0.3/windows/codesign.exe",
+          "sha": "c92323f345dff17c529477903d82210155be4e72eeb6033556f9e0526384454e"
+        }
+      }
+    },
+    "daas": {
+      "version": "0.1.0",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/spirit-deploy-cli/daas/prod/0.1.0/darwin/daas",
+          "sha": "e17325705c91bdf72c6098c4a2b8e6abcf0a7ee6d3c2fc142faf2d0ec3bc3836"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/spirit-deploy-cli/daas/prod/0.1.0/linux/daas",
+          "sha": "93a381e4c40e6d30c56e47a2e4fe25d528ada42660dbcd24354e126bb705cef1"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/spirit-deploy-cli/daas/prod/0.1.0/windows/daas.exe",
+          "sha": "38cda9ffa1a7c0441be159a438cd9124d75631628b58c8c51a60f4b8891805fa"
+        }
+      }
+    },
+    "databases": {
+      "version": "0.1.6",
+      "files": {
+        "darwin": {
+          "url": "https://databases-spirit-cli-plugin.s3-msk.tinkoff.ru/databases/production/0.1.6/darwin/databases",
+          "sha": "fa6fa2f67dfc9a836f5a78e900efe8cf54a5d0293d3ae9a7b5bca1bcb7f0722b"
+        },
+        "linux": {
+          "url": "https://databases-spirit-cli-plugin.s3-msk.tinkoff.ru/databases/production/0.1.6/linux/databases",
+          "sha": "83865872f853eb46d271094e3ffa06f1e545389e24090ec710b7856d5ff53bc2"
+        },
+        "windows": {
+          "url": "https://databases-spirit-cli-plugin.s3-msk.tinkoff.ru/databases/production/0.1.6/windows/databases.exe",
+          "sha": "9498ef129e5e060a88c3417d33a7ca07d781397f4fd27773c32dc902c2bd9ec0"
+        }
+      }
+    },
+    "dbauth": {
+      "version": "0.0.6",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/ps-spirit-cli-plugin-dbauth/dbauth/production/0.0.6/darwin/dbauth",
+          "sha": "e7636e457a30e1821eca89ce3f858a14f599186dad540b34b6aa41282cef8162"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/ps-spirit-cli-plugin-dbauth/dbauth/production/0.0.6/linux/dbauth",
+          "sha": "37a0b0ce17b7fc2838d4d9a54ece39c1f5a122888e0b5c7dd626564b9ff5a743"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/ps-spirit-cli-plugin-dbauth/dbauth/production/0.0.6/windows/dbauth.exe",
+          "sha": "c5cbb316a55d356f5a217e197a605d26e776c7e29489c003b90c17f9b7da4442"
+        }
+      }
+    },
+    "errorhub": {
+      "version": "0.0.3",
+      "files": {
+        "darwin": {
+          "url": "https://error-hub-spirit-cli-plugins.s3-msk.tinkoff.ru/errorhub/production/0.0.3/darwin/errorhub",
+          "sha": "b6ae6413dbd9e76efeadd57ee0a36f6907245873c88d561110b8f735b5929dbf"
+        },
+        "linux": {
+          "url": "https://error-hub-spirit-cli-plugins.s3-msk.tinkoff.ru/errorhub/production/0.0.3/linux/errorhub",
+          "sha": "6fedd3ce089f7208bf5ec3e2b8f352e6a4cecc5f86077e99324f303b27592833"
+        },
+        "windows": {
+          "url": "https://error-hub-spirit-cli-plugins.s3-msk.tinkoff.ru/errorhub/production/0.0.3/windows/errorhub.exe",
+          "sha": "a1294494e145d237f5bf4168b6e377e151f2b9d323e031a958eef4e311a77894"
+        }
+      }
+    },
+    "finedog": {
+      "version": "1.1.0",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-context-finedog-cli.s3-msk.tinkoff.ru/finedog/production/1.1.0/darwin/finedog",
+          "sha": "65715de43d9ca27bbe597d5d8f861e2b787ce47209b224e8e263415673c684cc"
+        },
+        "linux": {
+          "url": "https://spirit-context-finedog-cli.s3-msk.tinkoff.ru/finedog/production/1.1.0/linux/finedog",
+          "sha": "e187bc4990bde5b121a715bef64b6132a67446bf88f00b6d60b101c55884b0be"
+        },
+        "windows": {
+          "url": "https://spirit-context-finedog-cli.s3-msk.tinkoff.ru/finedog/production/1.1.0/windows/finedog.exe",
+          "sha": "8aeda54a1167d060c753d4311b7023d05b0b9f6ee64418d250edbcf71ed1d417"
+        }
+      }
+    },
+    "gitlab": {
+      "version": "1.11.0",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-context-gitlab-cli.s3-msk.tinkoff.ru/gitlab/production/1.11.0/darwin/gitlab",
+          "sha": "9be95014414ecc14b09a00b508b5b69cffbf758175d07cb55482b26f1cfef76d"
+        },
+        "linux": {
+          "url": "https://spirit-context-gitlab-cli.s3-msk.tinkoff.ru/gitlab/production/1.11.0/linux/gitlab",
+          "sha": "e900ed7ea73d87b13f671a7f8faf8ff29637ff51a84d22e0b837de8161e84f04"
+        },
+        "windows": {
+          "url": "https://spirit-context-gitlab-cli.s3-msk.tinkoff.ru/gitlab/production/1.11.0/windows/gitlab.exe",
+          "sha": "e68ef67cf61bb27925579522131a03542e7a4372f7bfef2c5a332825530cbc60"
+        }
+      }
+    },
+    "java": {
+      "version": "0.0.9",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/jvm-core-spirit-cli/java_spirit_cli/prod/0.0.9/darwin/java_spirit_cli",
+          "sha": "d204fc44d6cc22376c71b7201acfc7d4770fa4c8c5d5c57bcadbcea784fd4f33"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/jvm-core-spirit-cli/java_spirit_cli/prod/0.0.9/linux/java_spirit_cli",
+          "sha": "17c58b082326044b4e980d4475b406be27f1cd45f1381b9be4af42cfc0099612"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/jvm-core-spirit-cli/java_spirit_cli/prod/0.0.9/windows/java_spirit_cli.exe",
+          "sha": "6760919e78c8f8d61f5988850d75484e8d441f8ee2e9baf4e723361677711ac9"
+        }
+      }
+    },
+    "jira": {
+      "version": "1.20.1",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-context-jira-cli.s3-msk.tinkoff.ru/jira/production/1.20.1/darwin/jira",
+          "sha": "8348a04ee85dbc285ad4f3741e29af8d0fef5d904e29a19bb62cddb93a94883f"
+        },
+        "linux": {
+          "url": "https://spirit-context-jira-cli.s3-msk.tinkoff.ru/jira/production/1.20.1/linux/jira",
+          "sha": "7766d0529b4a4b56198f65eee7b298bee66e8f84fb6531952e125efba45863f8"
+        },
+        "windows": {
+          "url": "https://spirit-context-jira-cli.s3-msk.tinkoff.ru/jira/production/1.20.1/windows/jira.exe",
+          "sha": "c87880c86b533bdadeb3dc9bae1777b2ecc45ec0dd3b1e89fb2d92741f745ff3"
+        }
+      }
+    },
+    "kaas": {
+      "version": "1.0.7",
+      "files": {
+        "darwin": {
+          "url": "https://kaas-cli-plugin-releases.s3-msk.tinkoff.ru/kaas/production/1.0.7/darwin/kaas",
+          "sha": "aa5e7b34d1ba0ca03d7fdb21d42741f8c53af42b3ad36ffa8ad51d7267bacdaf"
+        },
+        "linux": {
+          "url": "https://kaas-cli-plugin-releases.s3-msk.tinkoff.ru/kaas/production/1.0.7/linux/kaas",
+          "sha": "553609c5d049f148600b63fe6f918a9fa129ae54103660dd70d11cbbbef5a88f"
+        },
+        "windows": {
+          "url": "https://kaas-cli-plugin-releases.s3-msk.tinkoff.ru/kaas/production/1.0.7/windows/kaas.exe",
+          "sha": "09191f8ec1e28f9cad0d5ae32484445c1dca3c1f5b214bcdce543788d1372c69"
+        }
+      }
+    },
+    "kube": {
+      "version": "1.5.6",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-context-kubectl-cli.s3-msk.tinkoff.ru/kube/production/1.5.6/darwin/kube",
+          "sha": "639f3515a2f56a68999b4fe3559b2f73e0bc78a68cdb7b819d15aae5607a8656"
+        },
+        "linux": {
+          "url": "https://spirit-context-kubectl-cli.s3-msk.tinkoff.ru/kube/production/1.5.6/linux/kube",
+          "sha": "7a4564c4fdfe4952277821165a8c2163dd3c681828f313eb86812ca6f43174c6"
+        },
+        "windows": {
+          "url": "https://spirit-context-kubectl-cli.s3-msk.tinkoff.ru/kube/production/1.5.6/windows/kube.exe",
+          "sha": "9182d6d13215ce7e9a5089f34031866aa292e98e842037c92b86241bebc18fea"
+        }
+      }
+    },
+    "mail": {
+      "version": "1.1.0",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-context-mail-cli.s3-msk.tinkoff.ru/mail/production/1.1.0/darwin/mail",
+          "sha": "aab9b9351358b4fe65570cb5debce94d5522c4c7842756484a993c09ba1c3790"
+        },
+        "linux": {
+          "url": "https://spirit-context-mail-cli.s3-msk.tinkoff.ru/mail/production/1.1.0/linux/mail",
+          "sha": "124e1a0fdf3a873f5fa84206c8c878b3caa3cc5521fe5d7df480863d041e9841"
+        },
+        "windows": {
+          "url": "https://spirit-context-mail-cli.s3-msk.tinkoff.ru/mail/production/1.1.0/windows/mail.exe",
+          "sha": "061e3fc665da3ce179260482944754f5e5d9ebc1f4d7712e8e48a680e95994db"
+        }
+      }
+    },
+    "mcp-hub": {
+      "version": "1.1.1",
+      "files": {
+        "darwin": {
+          "url": "https://llm-platform-ai-tools-mcp-hub-cli-plugin.s3-msk.tinkoff.ru/mcp-hub/production/1.1.1/darwin/mcp-hub",
+          "sha": "b7b79cb7c210583521b03518fcadf7943c853eb3597e63df2fa251e817089b5b"
+        },
+        "linux": {
+          "url": "https://llm-platform-ai-tools-mcp-hub-cli-plugin.s3-msk.tinkoff.ru/mcp-hub/production/1.1.1/linux/mcp-hub",
+          "sha": "12ba97fbde066dea968269b3006bca888e5b9e796fd0abae4a58c2795b54aa85"
+        },
+        "windows": {
+          "url": "https://llm-platform-ai-tools-mcp-hub-cli-plugin.s3-msk.tinkoff.ru/mcp-hub/production/1.1.1/windows/mcp-hub.exe",
+          "sha": "be62b6d5b8a449fc0d5c322fa83e026930abe64556755cb6cf8d5e7e245608d5"
+        }
+      }
+    },
+    "nezabudka": {
+      "version": "1.0.3",
+      "files": {
+        "darwin": {
+          "url": "https://promesa-cli.s3-msk.tinkoff.ru/nezabudka/production/1.0.3/darwin/nezabudka",
+          "sha": "e1bfeaf449d185dc1fe110823bb2fbda3cca6ef89492a3a6ba6606ad8b905093"
+        },
+        "linux": {
+          "url": "https://promesa-cli.s3-msk.tinkoff.ru/nezabudka/production/1.0.3/linux/nezabudka",
+          "sha": "3ab0f7f476bace26373a7390208cab14956453c09559231c28e6967bd5d97b54"
+        },
+        "windows": {
+          "url": "https://promesa-cli.s3-msk.tinkoff.ru/nezabudka/production/1.0.3/windows/nezabudka.exe",
+          "sha": "7cf5e6c9cba79c493910890b03e0bdc04380bd1cf8824e013a0f7b048c3bcc37"
+        }
+      }
+    },
+    "proteus": {
+      "version": "0.0.4",
+      "files": {
+        "darwin": {
+          "url": "https://proteus-spirit-cli-plugin.s3-msk.tinkoff.ru/dp-time-mcp/time/production/0.0.4/darwin/time",
+          "sha": "aef5d2bee19f37d42c224563624be6e9727dca905e31c4ef6314348f13298390"
+        },
+        "linux": {
+          "url": "https://proteus-spirit-cli-plugin.s3-msk.tinkoff.ru/dp-time-mcp/time/production/0.0.4/linux/time",
+          "sha": "56ac9285e52f6c5ec24ddeae7b084ca9d6c7577cbd882e64ff1bbbbb5f1103c5"
+        },
+        "windows": {
+          "url": "https://proteus-spirit-cli-plugin.s3-msk.tinkoff.ru/dp-time-mcp/time/production/0.0.4/windows/time.exe",
+          "sha": "18659c3c3d3f23da1e6dba8f8e568d63c4658954f2e85751475fc0acad47effe"
+        }
+      }
+    },
+    "qwarium": {
+      "version": "0.0.59",
+      "files": {
+        "darwin": {
+          "url": "https://ai-platform-spirit-cli-plugins-binaries.s3-msk.tinkoff.ru/qwarium-cli/production/0.0.59/darwin/qwarium",
+          "sha": "2ce46262e31efeb1492e99ff4d06c6ff7a100864ba04d8e5627e4988cd534fd4"
+        },
+        "linux": {
+          "url": "https://ai-platform-spirit-cli-plugins-binaries.s3-msk.tinkoff.ru/qwarium-cli/production/0.0.59/linux/qwarium",
+          "sha": "281c8db9df189b4d8525bead0f93c6119ff26f9b4f68546849154353e2625d6b"
+        },
+        "windows": {
+          "url": "https://ai-platform-spirit-cli-plugins-binaries.s3-msk.tinkoff.ru/qwarium-cli/production/0.0.59/windows/qwarium.exe",
+          "sha": "e433b359cf493a61b37d815dfaf0a6a3c0e153a8f593b9e9e8e83e05470932d1"
+        }
+      }
+    },
+    "repo": {
+      "version": "1.1.0",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-context-repo-cli.s3-msk.tinkoff.ru/repo/production/1.1.0/darwin/repo",
+          "sha": "166904d3a0290e9a2713bac68cdc1826eb6fd468a87e1d500c570ac913010520"
+        },
+        "linux": {
+          "url": "https://spirit-context-repo-cli.s3-msk.tinkoff.ru/repo/production/1.1.0/linux/repo",
+          "sha": "6e5948446be87ed5fc41cde3ea8e74e3497388f84a14dab7375902efa12f0f25"
+        },
+        "windows": {
+          "url": "https://spirit-context-repo-cli.s3-msk.tinkoff.ru/repo/production/1.1.0/windows/repo.exe",
+          "sha": "0b7ff6e97cc4626fd7d07925ba970d392c00b811a455567b239a20531edf1cdc"
+        }
+      }
+    },
+    "rtd": {
+      "version": "0.0.12",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/rtd-cli/rtd/production/0.0.12/darwin/rtd",
+          "sha": "6bf148bd7acd0675cf73e990285a3d81803c24ff07b9ed47b72e9216d438f668"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/rtd-cli/rtd/production/0.0.12/linux/rtd",
+          "sha": "70a9793b1c5294242cbdd73fdf8e24d735b3d1b02d79fc28f84f085980453074"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/rtd-cli/rtd/production/0.0.12/windows/rtd.exe",
+          "sha": "e4a0b02d08f42a8d5e8b7ac12bc9acbb01885c33ba9ac1122149bd0916fcc582"
+        }
+      }
+    },
+    "runtime-migrate-rb": {
+      "version": "0.0.3",
+      "files": {
+        "darwin": {
+          "url": "https://k8s-runtime-migrate-rb.s3-msk.tinkoff.ru/runtime-migrate-rb/production/0.0.3/darwin/runtime-migrate-rb",
+          "sha": "63f49d89500b4f9293a49f5ebbfd79d4e39c547f5f9f1ed98c56ce994edbed44"
+        },
+        "linux": {
+          "url": "https://k8s-runtime-migrate-rb.s3-msk.tinkoff.ru/runtime-migrate-rb/production/0.0.3/linux/runtime-migrate-rb",
+          "sha": "d0983fb28d2bff912d9a1c2f5453b5651dd012e97f588b32b9f4b97b2d27ac18"
+        },
+        "windows": {
+          "url": "https://k8s-runtime-migrate-rb.s3-msk.tinkoff.ru/runtime-migrate-rb/production/0.0.3/windows/runtime-migrate-rb.exe",
+          "sha": "19d5399346c7aad42140308477d409e8e1092a3984fef14498384b76eec69c42"
+        }
+      }
+    },
+    "s3aas": {
+      "version": "1.0.6",
+      "files": {
+        "darwin": {
+          "url": "https://s3aas-cli-plugin-releases.s3-msk.tinkoff.ru/s3aas/production/1.0.6/darwin/s3aas",
+          "sha": "ef2b1ce8072235ab100342af9007c35b2616ac40f51769f23d262d9ce8a2a09c"
+        },
+        "linux": {
+          "url": "https://s3aas-cli-plugin-releases.s3-msk.tinkoff.ru/s3aas/production/1.0.6/linux/s3aas",
+          "sha": "0d132e6e7c239abf4ce77024887883e80735df0008d1676d1482a6276bf5d471"
+        },
+        "windows": {
+          "url": "https://s3aas-cli-plugin-releases.s3-msk.tinkoff.ru/s3aas/production/1.0.6/windows/s3aas.exe",
+          "sha": "4d69172c96a35545f0df5ce62d268046b42b6c6e88b44bf071127bda03bc7e4b"
+        }
+      }
+    },
+    "sage": {
+      "version": "3.3.3",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-context-sage-cli.s3-msk.tinkoff.ru/sage/production/3.3.3/darwin/sage",
+          "sha": "3f3807664200d97c013a41fe62d07255e516f6f01d68ec916716e05a8c85cbf8"
+        },
+        "linux": {
+          "url": "https://spirit-context-sage-cli.s3-msk.tinkoff.ru/sage/production/3.3.3/linux/sage",
+          "sha": "5f68f6e0d25e22f876667828a90824eeb42dfcc81ac66f44c67eeb9ba4b617e2"
+        },
+        "windows": {
+          "url": "https://spirit-context-sage-cli.s3-msk.tinkoff.ru/sage/production/3.3.3/windows/sage.exe",
+          "sha": "633d6b87b37ce31d8189d03d07b3be1862a269b70944c66f8236a370868b8b3b"
+        }
+      }
+    },
+    "skills": {
+      "version": "0.1.72",
+      "files": {
+        "darwin": {
+          "url": "https://ai-office-skills-makert-cli.s3-msk.tinkoff.ru/releases/0.1.72/skills-darwin-amd64",
+          "sha": "8ee9c611ec3b82649f1701a583f78469b53b30f05153c92e12afdc075c7beb9c"
+        },
+        "linux": {
+          "url": "https://ai-office-skills-makert-cli.s3-msk.tinkoff.ru/releases/0.1.72/skills-linux-amd64",
+          "sha": "580e36dc1ccf74900aa64a2978bdb87f840667a0b55ab500eda5c415185fc2dc"
+        },
+        "windows": {
+          "url": "https://ai-office-skills-makert-cli.s3-msk.tinkoff.ru/releases/0.1.72/skills-windows-amd64.exe",
+          "sha": "917537ee1457d6aa64dafe397df136fd4ed68b91a0b0b10fd0cc20820c3defb1"
+        }
+      }
+    },
+    "software-catalog": {
+      "version": "0.9.0",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/spirit-core-plugins/core/production/0.9.0/darwin/software-catalog",
+          "sha": "6f8adff9495c63af08fabfcc1742c93b6b108fc7c84a3c0c2ab43e42f32570f2"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/spirit-core-plugins/core/production/0.9.0/linux/software-catalog",
+          "sha": "7d4ca38ee5c74ffa7355406b0b4c62f043871008d17134dede8ea781c2bc4a3f"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/spirit-core-plugins/core/production/0.9.0/windows/software-catalog.exe",
+          "sha": "ed55f54028b807b3f45c22a66cd2804411e3a0b0e5a609b1697a86925e9392ac"
+        }
+      }
+    },
+    "spirit-deploy": {
+      "version": "2.3.0",
+      "files": {
+        "darwin": {
+          "url": "https://k8s-spirit-deploy.s3-msk.tinkoff.ru/spirit-deploy-cli/spirit-deploy/prod/2.3.0/darwin/spirit-deploy",
+          "sha": "62fa734cff70ce16e92de6d2383e0bf513877e36069bced3dbab70a1d4be6767"
+        },
+        "linux": {
+          "url": "https://k8s-spirit-deploy.s3-msk.tinkoff.ru/spirit-deploy-cli/spirit-deploy/prod/2.3.0/linux/spirit-deploy",
+          "sha": "39342640225ff215a0c295c09e7f67e71f00cc6c7f3b727aab0ff72892e86faf"
+        },
+        "windows": {
+          "url": "https://k8s-spirit-deploy.s3-msk.tinkoff.ru/spirit-deploy-cli/spirit-deploy/prod/2.3.0/windows/spirit-deploy.exe",
+          "sha": "ad6b0ba909422fb3036856f2ff8c897712acd963657a5022d2d9cda11dcc5e23"
+        }
+      }
+    },
+    "spirit-glab": {
+      "version": "0.1.3",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-code-glab.s3-msk.tinkoff.ru/spirit-glab/production/0.1.3/darwin/spirit-glab",
+          "sha": "fd6966301e499c2b9764e657805195aa81b957d3a97382d937039d8ffe0f4405"
+        },
+        "linux": {
+          "url": "https://spirit-code-glab.s3-msk.tinkoff.ru/spirit-glab/production/0.1.3/linux/spirit-glab",
+          "sha": "45aade9f9ceb3a13390942241b6dc68a2aaa8893412924be8d654b7ce6d14e07"
+        },
+        "windows": {
+          "url": "https://spirit-code-glab.s3-msk.tinkoff.ru/spirit-glab/production/0.1.3/windows/spirit-glab.exe",
+          "sha": "8adac3e6a639db8fec0c442c49e51b9117099341f62a564f3bbbe724150e6015"
+        }
+      }
+    },
+    "storm": {
+      "version": "2.16.3",
+      "files": {
+        "darwin": {
+          "url": "https://storm-binaries.s3-msk.tinkoff.ru/releases/download/release-v2.16.3/darwin/amd64/storm",
+          "sha": "9b1901d35328598ca53d6a06255420c3cd4d6b0f15b126f8682b3b2de27d62f3"
+        },
+        "linux": {
+          "url": "https://storm-binaries.s3-msk.tinkoff.ru/releases/download/release-v2.16.3/linux/amd64/storm",
+          "sha": "5e631ef7606dbbbdfc3a92755edd521464d9ee1e01357aacd26286f19455f17f"
+        },
+        "windows": {
+          "url": "https://storm-binaries.s3-msk.tinkoff.ru/releases/download/release-v2.16.3/windows/amd64/storm.exe",
+          "sha": "86f2c3df2060b2a23841c61aa026a031d14f380b20ba9ab6db13e1d2bb409683"
+        }
+      }
+    },
+    "tihon": {
+      "version": "0.0.8",
+      "files": {
+        "darwin": {
+          "url": "https://s3-msk.tinkoff.ru/acq-tech-tihon-cli/tihon/production/0.0.8/darwin/tihon",
+          "sha": "ce263afbe2a70ff3b15b57125372fe522e6d309c20f953e890ac32527f132225"
+        },
+        "linux": {
+          "url": "https://s3-msk.tinkoff.ru/acq-tech-tihon-cli/tihon/production/0.0.8/linux/tihon",
+          "sha": "a1557019d45d6419b769bb67f3bd5398d82decf9f3f5e8015c6a801a6a97bb22"
+        },
+        "windows": {
+          "url": "https://s3-msk.tinkoff.ru/acq-tech-tihon-cli/tihon/production/0.0.8/windows/tihon.exe",
+          "sha": "dbe637ce5c0b2b282e8718d259d0e9b8cde77cc47ae7be1d344ba93f112b027e"
+        }
+      }
+    },
+    "time": {
+      "version": "0.0.5",
+      "files": {
+        "darwin": {
+          "url": "https://messenger-tools.s3-msk.tinkoff.ru/dp-time-mcp/time/production/0.0.5/darwin/time",
+          "sha": "e730a0167ef04dfc30ca149b8213e771abd77941b985ea7964d5187d5b20c7c2"
+        },
+        "linux": {
+          "url": "https://messenger-tools.s3-msk.tinkoff.ru/dp-time-mcp/time/production/0.0.5/linux/time",
+          "sha": "65b8e3f6d0cc0ff7e49b8067d3c6be4c123d5eec1c99bc2cff05e3038461d5cd"
+        },
+        "windows": {
+          "url": "https://messenger-tools.s3-msk.tinkoff.ru/dp-time-mcp/time/production/0.0.5/windows/time.exe",
+          "sha": "5a95bb194df77cfa7731f6181d05b616a041ea141f0b47cd7579f8cda7e0af97"
+        }
+      }
+    },
+    "tracker-cli": {
+      "version": "2.0.0",
+      "files": {
+        "darwin": {
+          "url": "https://sdlc-mcps.s3-msk.tinkoff.ru/tracker-cli/production/2.0.0/darwin/tracker-cli",
+          "sha": "2dcf6c4ac211e0417079728ed3aae77a1a0fb8cc3901ebdeb5c03f8751eb400b"
+        },
+        "linux": {
+          "url": "https://sdlc-mcps.s3-msk.tinkoff.ru/tracker-cli/production/2.0.0/linux/tracker-cli",
+          "sha": "c1e0746f1f96e072d9da43db9b88ec4e0a1516621ac4b93ebe8c2db5f360309b"
+        },
+        "windows": {
+          "url": "https://sdlc-mcps.s3-msk.tinkoff.ru/tracker-cli/production/2.0.0/windows/tracker-cli.exe",
+          "sha": "5411cadba1908c6cf8edd087b5d81651e5e48e983ab126833ec711010ca15ee0"
+        }
+      }
+    },
+    "tvisual": {
+      "version": "0.1.0",
+      "files": {
+        "darwin": {
+          "url": "https://tvisual-spirit-cli-plugins.s3-msk.tinkoff.ru/tvisual/production/0.1.0/darwin/tvisual",
+          "sha": "13c143ed3f7f220bba6cb3e66fb0203118d9ca5a9fa7f8c34a98cc244f2eceea"
+        },
+        "linux": {
+          "url": "https://tvisual-spirit-cli-plugins.s3-msk.tinkoff.ru/tvisual/production/0.1.0/linux/tvisual",
+          "sha": "624eac33e9f6446fe9a1704c32ae23c717daa4d958b5b6ca94a314aed2445d2e"
+        },
+        "windows": {
+          "url": "https://tvisual-spirit-cli-plugins.s3-msk.tinkoff.ru/tvisual/production/0.1.0/windows/tvisual.exe",
+          "sha": "65d6d8cdf46c039ccc50bfb15029537471cedb070af4ad7645f1eea58d31fef4"
+        }
+      }
+    },
+    "wixie": {
+      "version": "3.7.0",
+      "files": {
+        "darwin": {
+          "url": "https://spirit-product-auto-wixie.s3-msk.tinkoff.ru/wixie/production/3.7.0/darwin/wixie",
+          "sha": "a3b3f51a7b9df112eed222b0dfbe28d907f93e793bb0ee3d21e1670c38376312"
+        },
+        "linux": {
+          "url": "https://spirit-product-auto-wixie.s3-msk.tinkoff.ru/wixie/production/3.7.0/linux/wixie",
+          "sha": "6064e97a4e2b55c7d82135cfe57c4cb747770b5c678406373e226c97c346e689"
+        },
+        "windows": {
+          "url": "https://spirit-product-auto-wixie.s3-msk.tinkoff.ru/wixie/production/3.7.0/windows/wixie.exe",
+          "sha": "dcaa7f2da490a6ca410cc6bd04e1cfe7c113bc4b1559555368758173dcf7a568"
+        }
+      }
+    }
+  }
+}

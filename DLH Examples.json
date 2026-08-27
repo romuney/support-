@@ -1,0 +1,60 @@
+{
+  "name": "DLH Examples",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "5e50d1d7-f3fd-4923-a78d-3b8532f961f3",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {},
+      "type": "CUSTOM.trino",
+      "typeVersion": 3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "ed6d513d-26c0-4aaf-84ad-259e6936ebc1",
+      "name": "DWH (DLH - Trino)",
+      "credentials": {
+        "trinoApi": {
+          "id": "82c1YyhkiBGT25Ag",
+          "name": "DWH (Trino DLH) account 128"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "DWH (DLH - Trino)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "37f77275-4b08-42be-bc1c-ebd726d527cb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8476d3351ad8e874891ce696c625adbac4a7de5faa92e59418571c8dc0d0465e"
+  },
+  "nodeGroups": [],
+  "id": "GMKFVejvauDT3k9h",
+  "tags": []
+}

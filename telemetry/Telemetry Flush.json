@@ -1,0 +1,228 @@
+{
+  "name": "Telemetry · Flush",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -460,
+        300
+      ],
+      "id": "every-hour",
+      "name": "Every hour"
+    },
+    {
+      "parameters": {
+        "query": "SELECT COALESCE(CAST(to_unixtime(MAX(ingested_at)) * 1000 AS bigint), 0) AS wm_ms\nFROM dl.usr_cross_data.support_telemetry",
+        "timeout": 900,
+        "timeZone": "Europe/Moscow"
+      },
+      "type": "CUSTOM.trino",
+      "typeVersion": 3,
+      "position": [
+        -260,
+        300
+      ],
+      "id": "watermark",
+      "name": "Watermark",
+      "credentials": {
+        "trinoApi": {
+          "id": "82c1YyhkiBGT25Ag",
+          "name": "DWH (Trino DLH) account 128"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Достаёт wm_ms из ответа ноды Trino, какой бы формы он ни был, и РОНЯЕТ\n// прогон на нераспознанной.\n//\n// Подставлять 0 по умолчанию нельзя ни в какую сторону: в режиме merge это\n// перезалив всей истории каждый час, в режиме insert — дубли всей истории.\n// Отдать «нечего заливать» нельзя тем более: телеметрия просто перестала бы\n// доезжать до DLH, и по виду флоу это неотличимо от «новых событий не было».\n// Единственный честный вариант — громкая ошибка с текстом ответа.\nconst items = $input.all();\nif (!items.length) {\n  throw new Error('Watermark: нода Trino не вернула ни одного элемента, '\n    + 'а SELECT MAX(...) обязан вернуть строку даже по пустой таблице');\n}\n\nconst num = (v) => {\n  if (typeof v === 'number' && Number.isFinite(v)) return v;\n  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);\n  return null;\n};\n\n// Порядок поиска: сама величина → колонка wm_ms → известные обёртки\n// (data/rows/…) → единственный ключ объекта. Именно в этом порядке, чтобы\n// не подобрать первое попавшееся число из служебных полей ответа.\nconst find = (v, depth) => {\n  if (v == null || depth > 4) return null;\n  const direct = num(v);\n  if (direct !== null) return direct;\n  if (Array.isArray(v)) return v.length ? find(v[0], depth + 1) : null;\n  if (typeof v !== 'object') return null;\n  for (const k of Object.keys(v)) {\n    if (/^wm_?ms$/i.test(k)) {\n      const n = num(v[k]);\n      if (n !== null) return n;\n    }\n  }\n  for (const k of ['data', 'rows', 'result', 'results', 'response', 'body']) {\n    if (k in v) {\n      const n = find(v[k], depth + 1);\n      if (n !== null) return n;\n    }\n  }\n  const keys = Object.keys(v);\n  return keys.length === 1 ? find(v[keys[0]], depth + 1) : null;\n};\n\nconst wm = find(items[0].json, 0);\nif (wm === null || wm < 0) {\n  throw new Error('Watermark: не нашёл wm_ms в ответе Trino — '\n    + 'проверить, что нода вернула колонку wm_ms: '\n    + JSON.stringify(items[0].json).slice(0, 300));\n}\nreturn [{ json: { wm_ms: wm } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        300
+      ],
+      "id": "read-watermark",
+      "name": "Read watermark"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "support_event",
+          "mode": "name"
+        },
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ingested_at",
+              "condition": "gte",
+              "keyValue": "={{ $json.wm_ms }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "id": "read-new-events",
+      "name": "Read new events"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Вход: строки support_event с ingested_at за watermark (Read new events).\nconst TABLE = 'dl.usr_cross_data.support_telemetry';\nconst MODE = 'merge';\nconst COLS = [\"event_id\", \"thread_id\", \"event_type\", \"event_ts\", \"ingested_at\", \"actor\", \"source\", \"kind\", \"domains\", \"payload\"];\nconst TIME_COLS = [\"event_ts\", \"ingested_at\"];\nconst TS_EXPR = 'CAST(from_unixtime({ms} / 1000.0) AS timestamp(6))';\nconst MAX_ROWS = 200;\nconst MAX_CHARS = 500000;\n\nconst rows = $input.all().map((x) => x.json || {});\n\n// Trino: в строковом литерале экранируется только одинарная кавычка —\n// удвоением, как в стандартном SQL. Обратный слэш экранировать не нужно.\nconst esc = (v) => \"'\" + String(v ?? '').replace(/'/g, \"''\") + \"'\";\n// event_ts/ingested_at в Data Tables — мс-эпоха (Date.now()). Делим на\n// 1000.0, а не на 1000: целочисленное деление обнулило бы миллисекунды тихо.\nconst ts = (ms) => TS_EXPR.split('{ms}').join(String(Number(ms) || 0));\n\n// event_id — ключ идемпотентности, и в Data Tables он уникален по upsert'у.\n// НО имена параметров условия upsert в `Write event` выведены из документации,\n// а не подтверждены живым узлом: если условие не сработало, в таблице лежат\n// дубли. Для MERGE это ошибка Trino («несколько строк источника на одну\n// строку цели»), то есть падение всего прогона из-за пары строк.\n//\n// Схлопываем здесь, оставляя последнюю запись, и НАЗЫВАЕМ число: молча\n// схлопывать нельзя — это единственный сигнал о неработающем upsert'е.\nconst byId = new Map();\nlet duplicates = 0;\nlet without_id = 0;\nfor (const r of rows) {\n  const id = String(r.event_id ?? '');\n  if (!id) { without_id++; continue; }\n  const prev = byId.get(id);\n  if (prev) {\n    duplicates++;\n    if ((Number(r.ingested_at) || 0) < (Number(prev.ingested_at) || 0)) continue;\n  }\n  byId.set(id, r);\n}\n\n// Порядок по ingested_at: чанки заливаются по очереди, и если прогон упадёт\n// на середине, в DLH останется КОНСИСТЕНТНЫЙ префикс — watermark следующего\n// прогона встанет ровно на границу залитого. При произвольном порядке провал\n// в середине оставил бы дыру, которую watermark перешагнул бы молча.\nconst ordered = [...byId.values()].sort(\n  (a, b) => (Number(a.ingested_at) || 0) - (Number(b.ingested_at) || 0));\n\nconst stats = { rows_total: ordered.length, duplicates_collapsed: duplicates,\n                rows_without_id: without_id };\n\nif (!ordered.length) {\n  return [{ json: { empty: true, sql: '', batch_size: 0, chunks: 0,\n                    mode: MODE, ...stats } }];\n}\n\nconst colList = COLS.join(', ');\nconst tuple = (r) => '  ('\n  + COLS.map((c) => (TIME_COLS.includes(c) ? ts(r[c]) : esc(r[c]))).join(', ')\n  + ')';\n\n// MERGE по event_id: прогон идемпотентен, и перезалив краевой строки после\n// сбоя ничего не портит. INSERT — запасной путь на случай отсутствия прав,\n// и тогда дубли обязан снимать пересчёт витрины.\nconst head = MODE === 'merge'\n  ? `MERGE INTO ${TABLE} AS t\\nUSING (\\n  VALUES\\n`\n  : `INSERT INTO ${TABLE} (${colList})\\nVALUES\\n`;\nconst tail = MODE === 'merge'\n  ? `\\n) AS s (${colList})\\nON t.event_id = s.event_id\\n`\n    + 'WHEN MATCHED THEN UPDATE SET '\n    + COLS.filter((c) => c !== 'event_id').map((c) => `${c} = s.${c}`).join(', ')\n    + `\\nWHEN NOT MATCHED THEN INSERT (${colList})\\n  VALUES (`\n    + COLS.map((c) => `s.${c}`).join(', ') + ')'\n  : '';\n\nconst overhead = head.length + tail.length;\nconst chunks = [];\nlet cur = [];\nlet size = 0;\nfor (const r of ordered) {\n  const t = tuple(r);\n  // Строка длиннее лимита целиком резаться нечем — уезжает своим чанком,\n  // и лимит Trino отработает громко. Молча её выбросить нельзя: событие\n  // пропало бы навсегда, watermark его перешагнёт.\n  if (cur.length && (cur.length >= MAX_ROWS\n                     || overhead + size + t.length + 2 > MAX_CHARS)) {\n    chunks.push(cur);\n    cur = [];\n    size = 0;\n  }\n  cur.push(t);\n  size += t.length + 2;\n}\nif (cur.length) chunks.push(cur);\n\nreturn chunks.map((c, i) => ({ json: {\n  empty: false,\n  sql: head + c.join(',\\n') + tail,\n  batch_size: c.length,\n  chunk: i + 1,\n  chunks: chunks.length,\n  mode: MODE,\n  ...stats,\n} }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ],
+      "id": "build-batch",
+      "name": "Build batch"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "not-empty",
+              "leftValue": "={{ $json.empty }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        300
+      ],
+      "id": "any-new-rows",
+      "name": "Any new rows"
+    },
+    {
+      "parameters": {
+        "query": "={{ $json.sql }}",
+        "timeout": 900,
+        "timeZone": "Europe/Moscow"
+      },
+      "type": "CUSTOM.trino",
+      "typeVersion": 3,
+      "position": [
+        880,
+        220
+      ],
+      "id": "write-batch",
+      "name": "Write batch",
+      "credentials": {
+        "trinoApi": {
+          "id": "82c1YyhkiBGT25Ag",
+          "name": "DWH (Trino DLH) account 128"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Watermark": {
+      "main": [
+        [
+          {
+            "node": "Read watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read watermark": {
+      "main": [
+        [
+          {
+            "node": "Read new events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read new events": {
+      "main": [
+        [
+          {
+            "node": "Build batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build batch": {
+      "main": [
+        [
+          {
+            "node": "Any new rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any new rows": {
+      "main": [
+        [
+          {
+            "node": "Write batch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
