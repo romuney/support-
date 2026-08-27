@@ -1599,6 +1599,48 @@ line('36. Витрина support_request.sql знает про КАЖДЫЙ ти
 
 console.log(`\n${'='.repeat(70)}`);
 
+// ===================================================================== 37
+line('37. Витрина знает про КАЖДОЕ поле ответа бота — или называет, почему нет');
+{
+  // Обратное направление теста 36. Тот держит «витрина не считает по типу
+  // события, которого нет в сборщике»; этот — «ядро посчитало поле, а
+  // посмотреть на него негде». Отказ ровно такой же тихий: колонки в
+  // дашборде просто не появляется, и по виду и лога, и витрины всё в порядке.
+  // Так уже вышло с dd_received, dd_never_ran и router_empty: код считал их
+  // неделями, витрина не читала ни одного.
+  const SQL = fs.readFileSync('support_request.sql', 'utf8');
+  const CORE = JSON.parse(fs.readFileSync('../bot/Support Bot Core.json', 'utf8'));
+  const parse = CORE.nodes.find((n) => n.name === 'Parse answer');
+  check('нода разбора ответа найдена', Boolean(parse));
+  const fields = [...new Set(
+    [...parse.parameters.jsCode.matchAll(/^out\.([a-z_0-9]+)\s*=/gm)].map((m) => m[1]),
+  )].sort();
+  check(`полей на выходе ядра (${fields.length})`, fields.length >= 25);
+  // Прочитано витриной = есть json_extract по этому ключу. Названо
+  // не используемым = упомянуто в блоке «ПОЛЯ ОТВЕТА БОТА, КОТОРЫЕ ВИТРИНА
+  // НЕ ИСПОЛЬЗУЕТ» с причиной.
+  const skipAt = SQL.indexOf('ПОЛЯ ОТВЕТА БОТА, КОТОРЫЕ ВИТРИНА НЕ ИСПОЛЬЗУЕТ');
+  check('блок неиспользуемых полей есть', skipAt !== -1);
+  const skipBlock = skipAt === -1 ? '' : SQL.slice(skipAt, SQL.indexOf('-- Ответ бота.', skipAt));
+  // Имена в блоке берутся из левой колонки «поле — причина», а не поиском
+  // подстроки по всему блоку: имя, упомянутое в ЧУЖОЙ причине, объявлением
+  // не является, иначе блок начнёт покрывать поля, про которые в нём
+  // ничего не сказано.
+  const named = new Set();
+  for (const m of skipBlock.matchAll(/^--\s{2,}([a-z_0-9]+(?:,\s*[a-z_0-9]+)*)\s+—/gm)) {
+    for (const n of m[1].split(',')) named.add(n.trim());
+  }
+  check('в блоке перечислены поля', named.size > 0);
+  for (const f of fields) {
+    // Поле может читаться и из payload, и из колонки лога наверху таблицы —
+    // `domains` вынесен колонкой, потому что по нему группируется витрина.
+    const used = SQL.includes(`'$.${f}'`) ||
+      new RegExp(`max_by\\(${f},`).test(SQL);
+    check(`${f}: ${used ? 'в витрине' : named.has(f) ? 'назван неиспользуемым' : 'ПОТЕРЯН'}`,
+      used || named.has(f));
+  }
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

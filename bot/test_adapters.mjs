@@ -1785,5 +1785,110 @@ line('41. КАЖДАЯ Code-нода всех флоу парсится как J
   check('Code-ноды найдены во всех флоу', total > 10);
 }
 
+// ===================================================================== 42
+line('42. ВХОД values проложен от роутера до запроса в данные');
+{
+  // Цепочка из четырёх звеньев, и разрыв любого тихий: поле просто
+  // не доедет, ветка значений не запустится, а по виду флоу это
+  // неотличимо от «заказчик значений не называл». Ровно так же молча
+  // терялись поля формы, пока их не начал проверять тест 16.
+  const call = core.nodes.find((n) => n.name === 'Call DD Lookup');
+  const mapped = call && call.parameters.workflowInputs &&
+    call.parameters.workflowInputs.value;
+  check('ядро передаёт values в каталог', Boolean(mapped && mapped.values));
+  check('значения берутся из плана, а не из вопроса',
+    mapped && /\$json\.values/.test(mapped.values));
+
+  const lookup = JSON.parse(fs.readFileSync('DD Lookup.json', 'utf8'));
+  const trig = lookup.nodes.find((n) => n.type.endsWith('executeWorkflowTrigger'));
+  const declared = ((trig.parameters.workflowInputs || {}).values || [])
+    .map((v) => v.name);
+  check('каталог объявляет вход values', declared.includes('values'));
+  // n8n не падает на поле, которого субворкфлоу не объявляет, — оно просто
+  // не доедет. Поэтому списки сверяются, а не проверяется наличие по одному.
+  for (const k of Object.keys(mapped || {})) {
+    check(`вход «${k}» объявлен в каталоге`, declared.includes(k));
+  }
+
+  // Схема ноды должна перечислять то же самое: n8n рисует поля по ней,
+  // и незаявленное в схеме поле в интерфейсе не появится.
+  const schema = (call.parameters.workflowInputs.schema || []).map((x) => x.id);
+  for (const k of Object.keys(mapped || {})) {
+    check(`вход «${k}» есть в схеме ноды`, schema.includes(k));
+  }
+
+  // Ветка значений внутри каталога: узел запроса в данные есть, стоит
+  // за гейтом и не роняет прогон отказом Trino — иначе весь ответ
+  // по витрине пропадёт из-за недоехавшей таблицы.
+  const val = lookup.nodes.find((n) => n.name === 'dd_values');
+  check('узел запроса значений есть', Boolean(val));
+  check('отказ запроса не роняет каталог',
+    val && val.onError === 'continueRegularOutput');
+  check('гейт перед запросом есть',
+    lookup.nodes.some((n) => n.name === 'Need values'));
+}
+
+// ===================================================================== 43
+line('43. \\w и \\b рядом с кириллицей — запрещены во ВСЕХ Code-нодах');
+{
+  // В JS \\w это [A-Za-z0-9_], а \\b считается по нему же. Рядом с кириллицей
+  // такая регулярка не совпадает НИКОГДА, при этом читается как верная
+  // и выглядит рабочей. Проект наступил на это четыре раза, и все четыре
+  // отказа были тихими:
+  //   \\bот\\s+пользовател  — в тему уезжала вся шапка формы целиком;
+  //   групп\\w*\\s+компан    — подпись поля про передачу вне контура;
+  //   информационн\\w*        — ложная тревога «ИБ не упомянут» на верном
+  //                            черновике, где всё написано словами;
+  //   и первый из них не поймал ни один тест, потому что проверка искала
+  //   подстроку в параметрах, а не гоняла код.
+  //
+  // Правило проекта: кириллический хвост слова пишется классом [а-яё],
+  // а \\w и \\b рядом с кириллицей не ставятся вовсе. Тест держит правило
+  // по всем собранным флоу разом — включая телеметрию, где тот же JS.
+  // Регулярка-детектор написана ЛИТЕРАЛОМ, а не собрана из строки: уровней
+  // экранирования тут три (файл → строка → регулярка), и лишний обратный слеш
+  // даёт детектор, который не находит ничего и выглядит зелёным.
+  const BAD = /[а-яёА-ЯЁ]\\[wb]|\\[wb][*+?]?\s*[а-яёА-ЯЁ]/;
+  // Сам детектор проверяется на трёх РЕАЛЬНЫХ регулярках, каждая из которых
+  // однажды жила в проде и выглядела рабочей. Без этого зелёный тест ничего
+  // не значит: сломанный детектор и чистый код по выводу неразличимы —
+  // ровно та ошибка, из-за которой проверка ib_stated была зелёной на
+  // мёртвом коде.
+  for (const bad of ['/информационн\\w*\\s+безопасност/',
+                     '/\\bот\\s+пользовател/',
+                     '/групп\\w*\\s+компан/']) {
+    check(`детектор ловит ${bad}`, BAD.test(bad));
+  }
+  for (const good of ['/информационн[а-яё]*\\s+безопасност/',
+                      '/\\b(?:select|sql|join)\\b/i',
+                      '/[а-яё]+/']) {
+    check(`и не ругается на ${good}`, !BAD.test(good));
+  }
+
+  let scanned = 0;
+  for (const f of ['Support Bot Core.json', 'DD Lookup.json', 'Adapter Channel.json',
+                   'Adapter DM.json', 'Adapter Chat.json',
+                   '../telemetry/Telemetry Ingest.json',
+                   '../telemetry/Telemetry Collector.json',
+                   '../telemetry/Telemetry Backfill.json',
+                   '../telemetry/Telemetry Collector Tracker.json',
+                   '../telemetry/Telemetry Flush.json']) {
+    if (!fs.existsSync(f)) continue;
+    const flow = JSON.parse(fs.readFileSync(f, 'utf8'));
+    for (const n of flow.nodes || []) {
+      const code = n.parameters && n.parameters.jsCode;
+      if (typeof code !== 'string') continue;
+      scanned++;
+      const hits = [];
+      for (const m of code.matchAll(/\/(?![/*])(?:\\.|\[[^\]]*\]|[^/\n\\])+\/[gimsuy]*/g)) {
+        if (BAD.test(m[0])) hits.push(m[0].slice(0, 70));
+      }
+      check(`${f.split('/').pop().replace('.json', '')} · ${n.name}` +
+            (hits.length ? ` — ${hits[0]}` : ''), hits.length === 0);
+    }
+  }
+  check(`Code-ноды просканированы (${scanned})`, scanned > 15);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

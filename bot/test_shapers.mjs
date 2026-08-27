@@ -27,7 +27,8 @@ function shortNameLocal(o) {
 // entityAttrs — ответ dd_entity_attrs (атрибуты ТАБЛИЦЫ, не колонки), для
 // «КОММЕНТАРИЙ ИЗ DD». Не передан — как и раньше, {} по умолчанию: comment
 // пуст, строка не печатается.
-function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = null) {
+function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = null,
+                  valuesPlan = null, valuesRes = undefined) {
   const pickList = cards !== null ? cards.map((c) => ({ field: shortNameLocal((c && c.body) || c || {}) })) : [];
   const $ = (name) => {
     if (name === 'dd_column_summary') {
@@ -52,6 +53,14 @@ function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = n
           }),
       };
     }
+    if (name === 'Build values SQL') {
+      if (valuesPlan === null) throw new Error('node not executed');
+      return { first: () => ({ json: valuesPlan }) };
+    }
+    if (name === 'dd_values') {
+      if (valuesRes === undefined) throw new Error('node not executed');
+      return { all: () => valuesRes.map((json) => ({ json })) };
+    }
     if (name === 'Pick columns') {
       return {
         first: () => ({ json: pick !== null ? pick : pickList[0] || null }),
@@ -70,6 +79,26 @@ function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = n
     };
   };
   return new Function('$', js('Shape table meta'))($)[0].json.dd_meta;
+}
+
+// Прогон ноды «Build values SQL»: какой SQL она построит и что исключит.
+function runValuesSql(inputs, cols, picked, cards, summaries = null) {
+  const $ = (name) => {
+    if (name === 'Pick columns') {
+      return { all: () => picked.map((json) => ({ json })) };
+    }
+    if (name === 'dd_column_attrs') {
+      return { all: () => cards.map((json) => ({ json })) };
+    }
+    if (name === 'dd_column_summary') {
+      const list = summaries !== null ? summaries : picked.map(() => ({ body: { data: '' } }));
+      return { all: () => list.map((json) => ({ json })) };
+    }
+    return {
+      first: () => ({ json: { 'When called by agent': inputs, dd_columns: cols }[name] }),
+    };
+  };
+  return new Function('$', js('Build values SQL'))($)[0].json;
 }
 
 // Прогон ноды Pick columns: что она отдаст дальше по флоу.
@@ -577,26 +606,44 @@ line('11. ГРУППЫ ДОСТУПА');
             summary: { data: `описание ${n}` }, attributes: attrs },
   });
 
-  // Признак есть, группы перечислены → поле закрыто.
+  // Атрибут sensitivity ПОДТВЕРЖДЁН владельцем задачи 2026-08-27: заполнен —
+  // поле чувствительное, нужен доступ и согласование. Значение называет
+  // AD-группу, но вывод от неё не зависит.
   const closed = runTable({ urn: URN, search: 'nm' }, card, cols, [
     mkCard('fio_nm', { column_type: { type: 'text', data: 'text' },
-                       access_groups: { type: 'text-list', data: ['HR_PII_READ'] } }),
+                       sensitivity: { type: 'text-list', data: ['HR_PII_READ'] } }),
     mkCard('grade_nm', { column_type: { type: 'text', data: 'text' },
-                         access_groups: { type: 'text-list', data: [] } }),
+                         sensitivity: { type: 'text-list', data: [] } }),
   ]);
-  checkS('закрытое поле помечено у самого поля', /fio_nm[\s\S]*ЗАКРЫТО группами HR_PII_READ/.test(closed));
-  checkS('сводка называет закрытые', /ГРУППЫ ДОСТУПА: закрыто полей 1 из 2/.test(closed));
-  checkS('сводка называет имя атрибута', /атрибута «access_groups»/.test(closed));
+  checkS('чувствительное поле помечено у самого поля',
+    /fio_nm[\s\S]*ЧУВСТВИТЕЛЬНОЕ ПОЛЕ \(sensitivity: HR_PII_READ\)/.test(closed));
+  checkS('сказано, что нужно согласование',
+    /нужен доступ и согласование/.test(closed));
+  checkS('сводка называет чувствительные', /ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ 1 из 2/.test(closed));
+  checkS('сводка называет имя атрибута', /атрибута «sensitivity»/.test(closed));
+  // Группа называет, КУДА идти, но на вывод не влияет: заполнено = закрыто.
+  checkS('группа названа как адрес, а не как условие',
+    /называет, КУДА идти за доступом/.test(closed));
   // Якорь «— » обязателен: без него совпадает упоминание поля в списке
   // «ПОДОШЛИ ПОЛЯ» выше, и проверка ловит чужую пометку.
-  checkS('открытое поле не помечено', !/— grade_nm[\s\S]*ЗАКРЫТО/.test(closed));
+  checkS('незакрытое поле не помечено', !/— grade_nm[\s\S]*ЧУВСТВИТЕЛЬНОЕ/.test(closed));
+
+  // sensitivity стоит ПЕРВЫМ в ACCESS_KEYS — значит выигрывает у прежних
+  // кандидатов, даже если карточка несёт оба атрибута сразу.
+  const both = runTable({ urn: URN, search: 'nm' }, card, cols, [
+    mkCard('fio_nm', { sensitivity: { type: 'text-list', data: ['SENS_GRP'] },
+                       access_groups: { type: 'text-list', data: ['OLD_GRP'] } }),
+  ]);
+  checkS('sensitivity выигрывает у прежних кандидатов',
+    /sensitivity: SENS_GRP/.test(both) && !/OLD_GRP/.test(both));
 
   // Признак есть, групп нет ни у кого → закрытых нет, и это утверждение.
   const open = runTable({ urn: URN, search: 'nm' }, card, cols, [
-    mkCard('fio_nm', { access_groups: { type: 'text-list', data: [] } }),
-    mkCard('grade_nm', { access_groups: { type: 'text-list', data: [] } }),
+    mkCard('fio_nm', { sensitivity: { type: 'text-list', data: [] } }),
+    mkCard('grade_nm', { sensitivity: { type: 'text-list', data: [] } }),
   ]);
-  checkS('групп нет — сказано прямо', /ГРУППЫ ДОСТУПА: среди 2 полей закрытых нет/.test(open));
+  checkS('признак пуст — сказано прямо',
+    /признак не проставлен\s+ни у одного/.test(open));
 
   // Признака нет вовсе → НЕИЗВЕСТНО, и молчать об этом нельзя.
   const unknown = runTable({ urn: URN, search: 'nm' }, card, cols, [
@@ -654,6 +701,185 @@ line('9б. ОТЧЁТ — витрины-источники приходят и�
     { statusCode: 401, body: {} });
   checkS('401 назван отказом, а не пустотой',
     /истёк Service Account/.test(srcFail) && !/не указаны/.test(srcFail));
+}
+
+// ===================================================================== 12
+line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, а не по вере');
+{
+  const URN_T = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d';
+  const colsWithSlice = { statusCode: 200, body: { totalCount: 3, data: [
+    { entity: { fqn: 'emart.mdm_employee_structure_d.emp_specialization_desc' } },
+    { entity: { fqn: 'emart.mdm_employee_structure_d.full_nm' } },
+    { entity: { fqn: 'emart.mdm_employee_structure_d.last_day_flg' } },
+  ] } };
+  const picked = [{ field: 'emp_specialization_desc' }, { field: 'full_nm' }];
+  const cardsOpen = [{ body: {} }, { body: {} }];
+
+  const plan = runValuesSql({ urn: URN_T, search: 'специализация', values: 'аналитик' },
+    colsWithSlice, picked, cardsOpen);
+  checkS('SQL построен', plan.values_sql.length > 0);
+  // Имя таблицы выводится из URN и получает префикс prod_v_: читать из emart
+  // напрямую нельзя, запросы идут из prod_v-схемы.
+  checkS('таблица с префиксом prod_v_',
+    plan.values_table === 'prod_v_emart.mdm_employee_structure_d');
+  // Канонический срез добавляется, ТОЛЬКО если поле есть в таблице: слепое
+  // добавление уронило бы запрос на витрине без last_day_flg.
+  checkS('канонический срез добавлен, раз поле есть',
+    plan.values_slice === true && /last_day_flg = 1/.test(plan.values_sql));
+  // ПДн не тянем никогда, даже если признак чувствительности пуст.
+  checkS('поле с именем ПДн исключено',
+    !plan.values_fields.includes('full_nm') &&
+    plan.values_skipped.some((x) => /full_nm/.test(x)));
+  checkS('исключение названо, а не молча', plan.values_skipped.length === 1);
+  // ilike по числовому столбцу Trino не выполнит — приводим тип.
+  checkS('тип приводится перед ilike', /CAST\(emp_specialization_desc AS varchar\) ILIKE/.test(plan.values_sql));
+  // Слово режется до основы тем же needlesOf, что и фильтр по описаниям, и это
+  // здесь намеренно: ilike '%аналит%' поймает и «Бизнес-аналитик BI», и
+  // «Аналитики BI», а точное '%аналитик%' промахнулось бы мимо склонения —
+  // ровно как промахивалась подстрока «почты» до правки 2026-08-27.
+  checkS('слово подставлено с обёртками, по основе', /ILIKE '%аналит%'/.test(plan.values_sql));
+  // Перенос строки в SQL обязан быть настоящим переносом: литеральный \\n
+  // Trino не разберёт, а по виду JSON это неотличимо от нормального запроса.
+  checkS('в SQL настоящие переносы строк',
+    plan.values_sql.includes('\n') && !/\\n/.test(plan.values_sql));
+
+  // Витрина без last_day_flg: срез не добавляем, иначе запрос упадёт.
+  const noSlice = runValuesSql({ urn: URN_T, values: 'аналитик' },
+    { statusCode: 200, body: { data: [
+      { entity: { fqn: 'emart.t.emp_specialization_desc' } }] } },
+    [{ field: 'emp_specialization_desc' }], [{ body: {} }]);
+  checkS('без last_day_flg срез не добавляется',
+    noSlice.values_slice === false && !/last_day_flg/.test(noSlice.values_sql));
+
+  // Чувствительное поле исключается по признаку из каталога.
+  const sens = runValuesSql({ urn: URN_T, values: 'аналитик' }, colsWithSlice,
+    [{ field: 'emp_specialization_desc' }],
+    [{ body: { sensitivity: { type: 'text-list', data: ['HR_PII_READ'] } } }]);
+  checkS('чувствительное поле исключено', sens.values_sql === '');
+  checkS('и причина названа', /чувствительн/.test(sens.values_reason));
+
+  // В by_meaning «Pick columns» отдаёт ВСЕ колонки таблицы — совпадение
+  // считается позже, по описаниям. Если брать «первые отобранные», запрос
+  // уйдёт по случайному полю: витрина просканирована, автору показаны
+  // значения не из того столбца, и по виду ответа это неотличимо от работы.
+  const wideCols = { statusCode: 200, body: { data: [
+    { entity: { fqn: 'emart.t.a_first_col' } },
+    { entity: { fqn: 'emart.t.b_second_col' } },
+    { entity: { fqn: 'emart.t.emp_specialization_desc' } },
+  ] } };
+  const widePicked = [
+    { field: 'a_first_col', mode: 'by_meaning' },
+    { field: 'b_second_col', mode: 'by_meaning' },
+    { field: 'emp_specialization_desc', mode: 'by_meaning' },
+  ];
+  const meaning = runValuesSql(
+    { urn: 'urn:dd:tables:greenplum:table:emart.t', search: 'специализация', values: 'аналитик' },
+    wideCols, widePicked, [{ body: {} }, { body: {} }, { body: {} }],
+    [{ body: { data: 'Дата приёма' } }, { body: { data: 'Табельный номер' } },
+     { body: { data: 'Специализация сотрудника' } }],
+  );
+  checkS('by_meaning: значения тянутся по совпавшему полю',
+    meaning.values_fields.length === 1 &&
+    meaning.values_fields[0] === 'emp_specialization_desc');
+  checkS('by_meaning: несовпавшие поля в запрос не попали',
+    !/a_first_col|b_second_col/.test(meaning.values_sql));
+
+  // Слов не задали — запроса нет вовсе: тянуть значения «на всякий случай»
+  // значит платить сканом витрины на каждой выгрузке.
+  const noWords = runValuesSql({ urn: URN_T, values: '' }, colsWithSlice, picked, cardsOpen);
+  checkS('без слов SQL не строится', noWords.values_sql === '');
+
+  // --------------------------------------------- три исхода в шейпере
+  const card = { statusCode: 200, body: {} };
+  const shape = (valuesPlan, valuesRes) => runTable(
+    { urn: URN_T, search: 'специализация' }, card, colsWithSlice,
+    [{ statusCode: 200, body: { fqn: 'emart.t.emp_specialization_desc', attributes: {} } }],
+    null, null, valuesPlan, valuesRes);
+
+  const okPlan = { values_sql: 'select 1', values_fields: ['emp_specialization_desc'],
+                   values_words: ['аналитик'], values_skipped: [],
+                   values_table: 'prod_v_emart.mdm_employee_structure_d',
+                   values_slice: true, values_reason: '' };
+
+  const found = shape(okPlan, [
+    { fld: 'emp_specialization_desc', val: 'Бизнес-аналитик BI', cnt: 42 },
+    { fld: 'emp_specialization_desc', val: 'Системный аналитик', cnt: 17 },
+  ]);
+  checkS('найденные значения показаны', /«Бизнес-аналитик BI» — 42 строк/.test(found));
+  checkS('сказано, что это реальные значения', /РЕАЛЬНЫЕ значения из витрины/.test(found));
+  // Значение выбирает АВТОР: автоподстановка «похожего» даст запрос, который
+  // выполнится и вернёт не те цифры.
+  checkS('подставлять похожее запрещено', /подставлять «похожее» нельзя/.test(found));
+
+  // Значений нет — это НЕ то же самое, что «витрины нет».
+  const empty = shape(okPlan, []);
+  checkS('пусто названо отсутствием значений', /НЕ НАЙДЕНО/.test(empty));
+  checkS('и предложено уточнить, а не угадать', /Уточни формулировку/.test(empty));
+
+  // Витрина не доехала до Trino — третий, отдельный диагноз.
+  const missing = shape(okPlan, [{ error: "Table 'dl.prod_v_emart.x' does not exist" }]);
+  checkS('недоступная витрина названа отдельно',
+    /в хранилище запросов нет/.test(missing) && !/НЕ НАЙДЕНО/.test(missing));
+  checkS('и сказано, что значение неизвестно',
+    /КОНКРЕТНОГО значения мы не знаем/.test(missing));
+
+  // Прочий отказ запроса — не «значений нет».
+  const failed = shape(okPlan, [{ error: 'Query exceeded per-node memory limit' }]);
+  checkS('прочий отказ не выдан за отсутствие значений',
+    /отказ запроса, а не отсутствие значений/.test(failed));
+
+  // Узел не выполнялся, хотя SQL был построен — сбой конвейера.
+  const notRun = shape(okPlan, undefined);
+  checkS('неисполнившийся узел назван сбоем', /сбой конвейера/.test(notRun));
+
+  // Форма ответа CUSTOM.trino на SELECT живым прогоном не подтверждена.
+  // Строки могут приехать и обёрткой — разобрать обязаны обе формы.
+  const wrapped = shape(okPlan, [{ data: [
+    { fld: 'emp_specialization_desc', val: 'Бизнес-аналитик BI', cnt: 42 },
+  ] }]);
+  checkS('строки в обёртке разобраны', /«Бизнес-аналитик BI» — 42 строк/.test(wrapped));
+
+  // А вот НЕРАСПОЗНАННАЯ форма обязана называться сбоем разбора. Выдать её
+  // за «значений не найдено» значит ответить про данные, которых никто
+  // не смотрел, — и по виду ответа это неотличимо от проверенного факта.
+  const weird = shape(okPlan, [{ someUnknownShape: 1, columns: ['a'] }]);
+  checkS('нераспознанный ответ назван сбоем разбора',
+    /разобрать его не удалось/.test(weird) && !/НЕ НАЙДЕНО/.test(weird));
+  checkS('и запрещено утверждать про значения',
+    /ничего не утверждай/.test(weird));
+  // Пустая обёртка — это честное «строк нет», а не сбой разбора.
+  const emptyWrap = shape(okPlan, [{ data: [] }]);
+  checkS('пустая обёртка — это отсутствие значений', /НЕ НАЙДЕНО/.test(emptyWrap));
+
+  // Список упёрся в потолок — обрезка называется, иначе «других значений
+  // нет» становится утверждением о факте, которого никто не проверял.
+  const capped = shape({ ...okPlan, values_limit: 3 }, [
+    { fld: 'f', val: 'a', cnt: 3 }, { fld: 'f', val: 'b', cnt: 2 },
+    { fld: 'f', val: 'c', cnt: 1 },
+  ]);
+  checkS('обрезка по лимиту названа', /список ОБРЕЗАН лимитом/.test(capped));
+  const notCapped = shape({ ...okPlan, values_limit: 60 }, [
+    { fld: 'f', val: 'a', cnt: 3 },
+  ]);
+  checkS('без обрезки лишнего не пишется', !/ОБРЕЗАН/.test(notCapped));
+
+  // Ветки значений не было вовсе (старый вызов без values) — блока нет.
+  const silent = shape(null, undefined);
+  checkS('без ветки значений блока нет', !/ЗНАЧЕНИЯ ПОЛЕЙ/.test(silent));
+
+  // Значения ПРОСИЛИ, а ветка не запустилась (пустой search — карточки полей
+  // не запрашивались вовсе). Молчать нельзя: по виду ответа это неотличимо
+  // от «значений не просили», и автор решит, что проверка была.
+  const askedButSkipped = runTable(
+    { urn: URN_T, search: '', values: 'BI-аналитик' }, card, colsWithSlice,
+    null, null, null, null, undefined);
+  checkS('непроверенные значения названы',
+    /НЕ ПРОВЕРЯЛИСЬ/.test(askedButSkipped) && /BI-аналитик/.test(askedButSkipped));
+  checkS('и запрещено утверждать про их наличие',
+    /не утверждай ничего/.test(askedButSkipped));
+  const notAsked = runTable(
+    { urn: URN_T, search: '' }, card, colsWithSlice, null, null, null, null, undefined);
+  checkS('без запроса значений блока нет', !/ЗНАЧЕНИЯ ПОЛЕЙ/.test(notAsked));
 }
 
 console.log(ddFails ? `ПРОВАЛОВ: ${ddFails}` : 'ПРОВЕРКИ ГРУПП ДОСТУПА ПРОШЛИ');

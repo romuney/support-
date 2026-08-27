@@ -402,7 +402,12 @@ def fill(prompt, **slots):
         key = "{{" + name + "}}"
         assert key in out, f"нет плейсхолдера {key}"
         out = out.replace(key, "{{ " + expr + " }}")
-    assert "{{" + "REGISTRY" not in out, "остался незаполненный плейсхолдер"
+    # Проверка общая, а не по одному имени: незаполненный плейсхолдер уезжает
+    # к модели буквальным текстом «{{MATERIALS}}» — промпт при этом выглядит
+    # рабочим, а половина контекста до модели не доезжает. Ловится опечатка
+    # в имени слота и новый плейсхолдер, про который забыли в сборщике.
+    left = re.findall(r"\{\{([A-Z_]+)\}\}", out)
+    assert not left, f"остались незаполненные плейсхолдеры: {left}"
     return "=" + out
 
 
@@ -475,7 +480,7 @@ try {
   const rawDD = Array.isArray(got.dd)
     ? got.dd
     : typeof got.dd_urn === 'string' && got.dd_urn.trim()
-      ? [{ urn: got.dd_urn, hint: got.field_hint }]
+      ? [{ urn: got.dd_urn, hint: got.field_hint, values: got.field_values }]
       : [];
 
   // Повтор URN СКЛЕИВАЕТ иглы, а не выбрасывает вторую.
@@ -488,6 +493,7 @@ try {
   // не искали вовсе. Поле в витрине есть.
   // Объект по-прежнему один, запрос один — фильтр стал списком.
   const byUrnHints = new Map();
+  const byUrnValues = new Map();
   for (const it of rawDD) {
     // Элемент может прийти и просто строкой-урном, без обёртки.
     const urn = String((it && typeof it === 'object' ? it.urn : it) ?? '').trim();
@@ -499,12 +505,34 @@ try {
     // «отдай весь инвентарь», и рядом с конкретным словом он только
     // сбивает режим поиска. Дубли слов тоже ни к чему.
     if (hint && !hints.includes(hint)) hints.push(hint);
+
+    // ЗНАЧЕНИЯ ФИЛЬТРОВ — отдельный список, а не часть hint.
+    //
+    // hint отвечает на «какое поле», values — на «какое в нём значение», и
+    // это разные вопросы к разным источникам: имя поля есть в каталоге,
+    // значения полей в каталоге нет вовсе (подтверждено владельцем задачи),
+    // их видно только в данных. Слить их в один список значило бы искать
+    // поле по слову «аналитик» и значение по слову «специализация» — оба
+    // промаха тихие: первый вернёт полный инвентарь, второй пустой список
+    // значений, и оба читаются как «такого нет».
+    if (!byUrnValues.has(urn)) byUrnValues.set(urn, []);
+    const vals = byUrnValues.get(urn);
+    const rawVals = it && typeof it === 'object' ? it.values : '';
+    for (const v of (Array.isArray(rawVals) ? rawVals : String(rawVals ?? '').split(','))) {
+      const w = String(v ?? '').trim();
+      if (w && !vals.includes(w)) vals.push(w);
+    }
   }
   // Предел на число игл: фильтр из десяти слов совпадёт с половиной таблицы,
-  // и «найдено по смыслу» перестанет что-либо сужать.
+  // и «найдено по смыслу» перестанет что-либо сужать. Тот же потолок у
+  // значений, и по той же причине: ilike по десяти словам вернёт полсправочника.
   const MAX_HINTS = 4;
   for (const [urn, hints] of byUrnHints) {
-    plan.dd.push({ urn, hint: hints.slice(0, MAX_HINTS).join(', ') });
+    plan.dd.push({
+      urn,
+      hint: hints.slice(0, MAX_HINTS).join(', '),
+      values: (byUrnValues.get(urn) || []).slice(0, MAX_HINTS).join(', '),
+    });
   }
 } catch (e) {
   routerError = `не удалось разобрать план роутера: ${e.message}`;
@@ -523,11 +551,19 @@ plan.dd = plan.dd.slice(0, MAX_DD);
 const reg = $('Decode registry').first().json;
 const registry = String(reg.full ?? reg.text ?? '');
 
-function rows(section, next) {
+// Секция читается до СЛЕДУЮЩЕГО заголовка «## », какой бы он ни был, а не до
+// заранее вписанного соседа. Раньше границей служило имя следующей секции —
+// и это молча ломалось дважды: сначала «Самостоятельные выгрузки» читались
+// до конца файла и подхватывали строки новой таблицы «Маршруты» (id маршрута
+// становился id отчёта), потом границы пришлось вписывать парами. Любая новая
+// секция реестра или смена их порядка снова разъезжались бы с кодом — притом
+// беззвучно: чужие строки разбираются как свои, формат колонок другой,
+// а на выходе просто неверные данные. Реестр правят чаще, чем сборщик.
+function rows(section) {
   const i = registry.indexOf(section);
   if (i === -1) return [];
-  const j = next ? registry.indexOf(next, i) : -1;
-  const chunk = registry.slice(i, j === -1 ? registry.length : j);
+  const after = registry.indexOf('\n## ', i + section.length);
+  const chunk = registry.slice(i, after === -1 ? registry.length : after);
   return chunk
     .split('\n')
     .filter((l) => l.trim().startsWith('|'))
@@ -540,13 +576,13 @@ function rows(section, next) {
 }
 
 const masters = new Map();          // домен → [id мастеров]
-for (const c of rows('## Домены', '## Сущности')) {
+for (const c of rows('## Домены')) {
   masters.set(c[0], String(c[2] || '').split(',').map((s) => s.trim()).filter(Boolean));
 }
 
-// Границей у «Сущности» ставим следующую секцию, а не конец файла: иначе
-// таблица «Самостоятельные выгрузки» (свой формат колонок — id отчёта,
-// ключевые слова) подмешается в разбор путей и dd_urn сущностей.
+// Граница секции — следующий заголовок «## » (см. rows выше): без неё таблица
+// «Самостоятельные выгрузки» со своим форматом колонок (id отчёта, ключевые
+// слова) подмешалась бы в разбор путей и dd_urn сущностей.
 const byId = new Map();             // id сущности → путь к статье
 const byUrn = new Map();            // id сущности → dd_urn (для отчётов без статьи)
 const byTitle = new Map();          // id сущности → название, для сообщения автору
@@ -555,7 +591,7 @@ const byTitle = new Map();          // id сущности → название,
 // витрину автор читает, а состав её полей — нет, и разницы между этим
 // не делает ни он, ни код (см. ниже, «инвентарь витрин добирается кодом»).
 const tableByPath = new Map();      // путь → {id, urn, title}
-for (const c of rows('## Сущности', '## Самостоятельные выгрузки')) {
+for (const c of rows('## Сущности')) {
   const path = String(c[4] || '').trim();
   if (path && path !== '—') byId.set(c[0], path);
   const urn = String(c[5] || '').trim();
@@ -766,7 +802,7 @@ if (selfServiceOn) {
   // на сам id, и бот предлагал бы «самостоятельную выгрузку» под названием
   // «payroll». Ошибка ровно того класса, из-за которого граница уже стоит
   // у таблицы «Сущности».
-  for (const c of rows('## Самостоятельные выгрузки', '## Маршруты')) {
+  for (const c of rows('## Самостоятельные выгрузки')) {
     const id = c[0];
     const keywords = String(c[1] || '')
       .split(',')
@@ -788,7 +824,9 @@ if (selfServiceOn) {
 const selfServiceDropped = selfServiceAll.slice(MAX_SELF_SERVICE).map((s) => s.id);
 const selfService = selfServiceAll.slice(0, MAX_SELF_SERVICE);
 for (const s of selfService) {
-  if (s.urn && !plan.dd.some((d) => d.urn === s.urn)) plan.dd.push({ urn: s.urn, hint: '' });
+  if (s.urn && !plan.dd.some((d) => d.urn === s.urn)) {
+    plan.dd.push({ urn: s.urn, hint: '', values: '' });
+  }
 }
 
 // ------------------------------------------- маршруты к эксперту по теме
@@ -824,7 +862,7 @@ for (const s of selfService) {
 // прямо неверным — это дополнительное знание, а не пробел.
 const MAX_ROUTES = 2;
 const routesAll = [];
-for (const c of rows('## Маршруты', null)) {
+for (const c of rows('## Маршруты')) {
   // Строка признаётся маршрутом ПО ФОРМЕ, а не по тому, что лежит в секции:
   // пять колонок и дата в последней. В той же секции живёт пояснительная
   // таблица «какие слова выброшены и почему» — у неё две колонки, и без этой
@@ -871,7 +909,7 @@ const routes = routesAll.slice(0, MAX_ROUTES);
 // ни одно ключевое слово маршрута не срабатывает. Неверное имя в треде —
 // ошибка, видимая заказчику, и молчать о ней нельзя.
 const routeNames = [];
-for (const c of rows('## Маршруты', null)) {
+for (const c of rows('## Маршруты')) {
   if (c.length < 5 || !/^\d{4}-\d{2}-\d{2}$/.test(String(c[4] || '').trim())) continue;
   for (const v of [c[2], c[3]]) {
     const t = String(v || '').trim();
@@ -972,7 +1010,7 @@ const tablesRead = needInventory
 const addedDd = [];
 for (const t of tablesRead) {
   if (plan.dd.some((d) => d.urn === t.urn)) continue;
-  plan.dd.push({ urn: t.urn, hint: '' });
+  plan.dd.push({ urn: t.urn, hint: '', values: '' });
   addedDd.push(t.urn);
 }
 // Потолок применяется ЗАНОВО: добор мог его перебрать. Обрезанное
@@ -1046,6 +1084,11 @@ return [{
     // с нулём. Условие по длине массива в n8n-выражении работает не везде
     // одинаково, а промах здесь тихий — метаданные просто не запросятся.
     dd_count: plan.dd.length,
+    // Сколько объектов уехало со значениями фильтров. Метрика роутера, а не
+    // каталога: доля вопросов, где заказчик назвал конкретное значение, а
+    // роутер его не выделил, по логу иначе не видна вовсе — блок значений
+    // просто не появится, и это неотличимо от «значений не называли».
+    values_asked: plan.dd.filter((d) => String(d.values || '').trim()).length,
     no_question: plan.no_question,
     router_error: routerError,
     router_raw: rawOut,
@@ -1221,6 +1264,10 @@ core_nodes += [
                     # После Split Out элемент — это сам объект { urn, hint }.
                     "urn": "={{ $json.urn }}",
                     "search": "={{ $json.hint }}",
+                    # Значения фильтров: по ним DD Lookup сходит в данные
+                    # и вернёт РЕАЛЬНЫЕ значения поля. Пусто — ветка значений
+                    # в субворкфлоу не запускается вовсе, скана витрины нет.
+                    "values": "={{ $json.values }}",
                 },
                 "matchingColumns": [],
                 "schema": [
@@ -1233,7 +1280,7 @@ core_nodes += [
                         "canBeUsedToMatch": True,
                         "type": "string",
                     }
-                    for k in ("urn", "search")
+                    for k in ("urn", "search", "values")
                 ],
                 "attemptToConvertTypes": False,
                 "convertFieldsToString": True,
@@ -1915,6 +1962,7 @@ out.articles_read = Array.isArray(plan.files) ? plan.files : [];
 // стояло dd_count: 4 при нуле полученных полей, и по логу это выглядело
 // нормально — ветка каталога не выполнялась вовсе (см. dd_never_ran).
 out.dd_count = plan.dd_count ?? 0;
+out.values_asked = plan.values_asked ?? 0;
 out.router_error = plan.router_error ?? '';
 
 // ==================================================== уверенность и пробелы

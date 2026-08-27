@@ -85,16 +85,27 @@ DD_OPTS = {
 
 EF = ["displayName", "summary", "attributes"]
 
-# Атрибут карточки колонки, в котором лежат группы доступа. Живым запросом
-# имя НЕ подтверждено: 2026-08-06 на business_dt пришли column_type, keys,
-# comment, versioning_type, ordinal_position — поле открытое, и признака
-# доступа у него могло не быть по этой же причине.
+# Атрибут карточки колонки, в котором лежит признак чувствительности.
 #
-# Поэтому список — кандидаты, а шейпер при промахе ищет ключ по смыслу
-# и ПЕЧАТАЕТ найденное имя в блоке метаданных. Первый живой прогон на закрытом
-# поле (ФИО, зарплата) покажет настоящее имя — вписать его сюда первым
-# элементом, и эвристика больше не понадобится.
+# ИМЯ ПОДТВЕРЖДЕНО ВЛАДЕЛЬЦЕМ ЗАДАЧИ 2026-08-27: это `sensitivity`. Правило,
+# которое из него следует, простое и не требует разбора значения:
+#
+#   поле заполнено  → данные чувствительные, нужен доступ и согласование;
+#   поле пустое     → признака нет;
+#   атрибута нет    → НЕ «поле открыто», а «признак не пришёл».
+#
+# Конкретное значение называет AD-группу, и групп разных много, но решение
+# для бота от группы не зависит: любое непустое значение означает, что поле
+# просто так не выгружается. Поэтому шейпер печатает значение как есть,
+# а вывод делает по факту заполненности — разбирать список групп ему незачем
+# и не по чему.
+#
+# Остальные ключи — прежние кандидаты, оставлены запасом: имя атрибута может
+# отличаться у других систем каталога, а промах здесь дорогой. При промахе
+# всех явных ключей шейпер ищет по смыслу и ПЕЧАТАЕТ найденное имя, чтобы
+# угадывание было видно, а не выдавало себя за факт.
 ACCESS_KEYS = [
+    "sensitivity",
     "access_groups",
     "access_group",
     "ad_groups",
@@ -102,6 +113,32 @@ ACCESS_KEYS = [
     "security_groups",
     "access",
 ]
+
+
+# ------------------------------------------------------- Trino для значений
+#
+# Нода и credential берутся из собранного «Telemetry Flush», а не заводятся
+# здесь константой: аккаунт и имена полей `CUSTOM.trino` подтверждены живым
+# прогоном 2026-08-17, и вторая копия разъехалась бы с ними молча.
+TRINO_SRC = "../telemetry/Telemetry Flush.json"
+_TRINO = None
+if os.path.exists(TRINO_SRC):
+    _flush = json.load(open(TRINO_SRC, encoding="utf-8"))
+    _tn = next(
+        (n for n in _flush["nodes"] if n.get("type", "").lower().endswith("trino")), None
+    )
+    if _tn is not None:
+        _TRINO = {
+            "type": _tn["type"],
+            "typeVersion": _tn["typeVersion"],
+            "credentials": copy.deepcopy(_tn["credentials"]),
+            "options": {k: v for k, v in _tn["parameters"].items() if k != "query"},
+        }
+if _TRINO is None:
+    raise SystemExit(
+        f"нет ноды Trino в {TRINO_SRC} — сначала cd telemetry && "
+        f"python3 build_telemetry_flows.py: ветка значений полей собирается оттуда"
+    )
 
 
 def qp(pairs):
@@ -139,6 +176,13 @@ trigger = {
             "values": [
                 {"name": "urn"},
                 {"name": "search"},
+                # Слова, ЗНАЧЕНИЕ которых надо найти в данных, через запятую.
+                # Не то же самое, что search: тот ищет ПОЛЕ по имени и описанию,
+                # а это ищет, какое значение в поле соответствует слову
+                # заказчика. Живой прогон 2026-08-27: поле бот назвал верно
+                # (emp_specialization_desc), а значение — нет, потому что
+                # перечня значений в каталоге нет вовсе, он только в данных.
+                {"name": "values"},
             ]
         },
     },
@@ -582,45 +626,236 @@ function detailBlock(list) {
       out.push(`  комментарий из DD: ${d.comment}`);
     }
     if (d.access && d.access.known && d.access.groups) {
-      out.push(`  доступ: ЗАКРЫТО группами ${d.access.groups} — по умолчанию не выгружается`);
+      // Значение называет AD-группу, но вывод от неё не зависит: заполнено —
+      // значит чувствительное, значит нужен доступ и согласование. Разбирать
+      // список групп боту незачем и не по чему.
+      out.push(
+        `  ЧУВСТВИТЕЛЬНОЕ ПОЛЕ (${d.access.key}: ${d.access.groups}) — просто так ` +
+          'не выгружается, нужен доступ и согласование',
+      );
     }
   }
   accessBlock(list);
 }
 
-// Сводка по группам доступа. Отдельным блоком, а не только строками у полей:
+// Значения полей из данных. Три исхода, и они обязаны звучать по-разному:
+// «значения нашлись», «таких значений нет» и «витрина до Trino не доехала».
+// Слитые в один, они отправят чинить не то — ровно как ddFailed и ddMissing
+// до 2026-08-27.
+//
+// Значение ВЫБИРАЕТ АВТОР, а не код. Автоподстановка «наиболее подходящего» —
+// это ilike '%аналитик%', который поймает и «Бизнес-аналитик BI», и
+// «Системный аналитик»: запрос выполнится и вернёт неверные цифры молча.
+function valuesBlock() {
+  let plan = null;
+  try { plan = $('Build values SQL').first().json; } catch (e) { plan = null; }
+  if (!plan) {
+    // Узел не выполнялся. Значений не просили — это нормальный путь, молчим.
+    //
+    // Просили — ветка не запустилась, и причина одна: пустой search. Карточки
+    // полей в этом режиме не запрашиваются вовсе, а «Build values SQL» стоит
+    // за ними, потому что признак чувствительности живёт именно на карточке.
+    // Молчать здесь нельзя: заказчик назвал значение фильтра, проверка
+    // не выполнялась, и по виду ответа это неотличимо от «значений не просили».
+    if (String(inp.values || '').trim()) {
+      out.push('');
+      out.push(
+        `ЗНАЧЕНИЯ ПОЛЕЙ «${oneLine(inp.values)}» в данных НЕ ПРОВЕРЯЛИСЬ: ` +
+          'без слова-фильтра search неизвестно, в каком поле их искать. ' +
+          'Нужны реальные значения — вызови dd_lookup ещё раз, выбрав ' +
+          'поле из списка выше и передав его в search. Про наличие или ' +
+          'отсутствие такого значения в витрине сейчас не утверждай ничего.',
+      );
+    }
+    return;
+  }
+
+  // Запрос не отправлялся — сказать почему, если причина содержательная.
+  if (!plan.values_sql) {
+    if (plan.values_reason && !/слов для поиска/.test(plan.values_reason)) {
+      out.push('');
+      out.push(`ЗНАЧЕНИЯ ПОЛЕЙ не проверялись: ${plan.values_reason}.`);
+      if ((plan.values_skipped || []).length) {
+        out.push('  исключены: ' + plan.values_skipped.join(', '));
+      }
+    }
+    return;
+  }
+
+  let res;
+  try { res = $('dd_values').all().map((i) => i.json); } catch (e) { res = null; }
+
+  out.push('');
+  if (res === null) {
+    out.push(
+      'ЗНАЧЕНИЯ ПОЛЕЙ: запрос к данным не выполнялся, хотя был построен. ' +
+        'Это сбой конвейера, а не отсутствие значений — про наличие или ' +
+        'отсутствие значения ничего не утверждай.',
+    );
+    return;
+  }
+
+  const first = res[0] || {};
+  const err = first.error || first.message;
+  if (err) {
+    const txt = typeof err === 'string' ? err : JSON.stringify(err);
+    // Отказ по недоступной таблице отличим по тексту: подтверждено живым
+    // прогоном 2026-08-27 («Table '…' does not exist»).
+    const missing = /does not exist|not found|schema.*not/i.test(txt);
+    out.push(
+      missing
+        ? `ЗНАЧЕНИЯ ПОЛЕЙ проверить не удалось: витрины ${plan.values_table} ` +
+          'в хранилище запросов нет — она туда ещё не доехала. Поле по описанию ' +
+          'из каталога рекомендовать можно, но КОНКРЕТНОГО значения мы не знаем, ' +
+          'и в черновике это надо сказать прямо.'
+        : `ЗНАЧЕНИЯ ПОЛЕЙ проверить не удалось: ${oneLine(txt).slice(0, 300)}. ` +
+          'Это отказ запроса, а не отсутствие значений.',
+    );
+    return;
+  }
+
+  // Форма ответа CUSTOM.trino на SELECT живым прогоном НЕ подтверждена:
+  // подтверждён только его write-режим (Telemetry Flush, 2026-08-17), а узел
+  // watermark там разбирает ответ переборкой обёрток и роняет прогон на
+  // нераспознанной форме. Здесь ронять нельзя — из-за одного блока пропал бы
+  // весь инвентарь витрины, — но и молчать нельзя тем более: строки, которые
+  // мы не сумели разобрать, дали бы «значений НЕ НАЙДЕНО», то есть ответ
+  // про данные, которых никто не смотрел.
+  const rows = [];
+  let wrappers = 0;
+  let unknown = 0;
+  for (const it of res) {
+    if (!it || typeof it !== 'object') { unknown++; continue; }
+    if (it.val !== undefined && it.val !== null) { rows.push(it); continue; }
+    let unwrapped = false;
+    for (const k of ['data', 'rows', 'result', 'results', 'response', 'body']) {
+      if (Array.isArray(it[k])) {
+        unwrapped = true;
+        wrappers++;
+        for (const r of it[k]) {
+          if (r && typeof r === 'object' && r.val !== undefined && r.val !== null) rows.push(r);
+        }
+      }
+    }
+    if (!unwrapped) unknown++;
+  }
+  const words = (plan.values_words || []).join(', ');
+
+  // Строки пришли, а разобрать не удалось ни одной: это НЕ «значений нет».
+  if (!rows.length && unknown) {
+    out.push(
+      'ЗНАЧЕНИЯ ПОЛЕЙ: ответ хранилища получен, но разобрать его не удалось — ' +
+        `${unknown} элементов неизвестной формы: ` +
+        oneLine(JSON.stringify(res[0])).slice(0, 200) + '. Это сбой разбора, ' +
+        'а не отсутствие значений: про наличие или отсутствие значения ' +
+        'ничего не утверждай.',
+    );
+    return;
+  }
+
+  if (!rows.length) {
+    out.push(
+      `ЗНАЧЕНИЯ ПОЛЕЙ: в полях ${(plan.values_fields || []).join(', ')} ` +
+        `значений со словами «${words}» НЕ НАЙДЕНО. Поля такие есть, а значения ` +
+        'под эти слова в данных нет — либо заказчик называет его иначе, ' +
+        'либо такого среза действительно не существует. Уточни формулировку ' +
+        'у заказчика, а не подставляй похожее.',
+    );
+    return;
+  }
+
+  const byField = new Map();
+  for (const r of rows) {
+    const f = String(r.fld || '');
+    if (!byField.has(f)) byField.set(f, []);
+    byField.get(f).push(r);
+  }
+  out.push(`ЗНАЧЕНИЯ ПОЛЕЙ, найденные в данных по словам «${words}»:`);
+  for (const [f, list] of byField) {
+    out.push('');
+    out.push(`— ${f}:`);
+    for (const r of list) out.push(`    «${r.val}» — ${r.cnt} строк`);
+  }
+  out.push('');
+  out.push(
+    'Это РЕАЛЬНЫЕ значения из витрины' +
+      (plan.values_slice ? ' на актуальном срезе' : '') +
+      ', а не догадка: такой фильтр действительно даст строки. Выбери ' +
+      'подходящее сам или уточни у заказчика, если подходящих несколько — ' +
+      'подставлять «похожее» нельзя, запрос выполнится и вернёт не те цифры.',
+  );
+  if ((plan.values_skipped || []).length) {
+    out.push(
+      '  Не проверялись: ' + plan.values_skipped.join(', ') +
+        ' — по персональным и чувствительным полям значения не тянем.',
+    );
+  }
+  // Список упёрся в потолок запроса — значит, показано не всё. Молча
+  // обрезанный перечень читается как полный, и «других значений нет»
+  // становится утверждением о факте, которого никто не проверял.
+  if (plan.values_limit && rows.length >= plan.values_limit) {
+    out.push(
+      `  Показаны первые ${plan.values_limit} значений по убыванию числа строк — ` +
+        'список ОБРЕЗАН лимитом запроса. Судить по нему об отсутствии другого ' +
+        'значения нельзя.',
+    );
+  }
+}
+
+// Сводка по чувствительности. Отдельным блоком, а не только строками у полей:
 // для запроса на выгрузку это готовый раздел сообщения заказчику, и собирать
 // его перечитыванием инвентаря автор не обязан.
+//
+// ПРАВИЛО, ПОДТВЕРЖДЁННОЕ ВЛАДЕЛЬЦЕМ ЗАДАЧИ 2026-08-27: атрибут `sensitivity`
+// заполнен — поле чувствительное, нужен доступ и согласование. Значение
+// называет AD-группу, и групп много, но решение от группы не зависит.
+// До этого бот отвечал «неоткуда узнать, чувствительные это данные или нет»,
+// имея признак прямо в карточке колонки.
+//
+// Три состояния разведены намеренно, и это не педантизм: «поле открыто»,
+// «поле закрыто» и «признак не пришёл» ведут к разным ответам заказчику,
+// а слитые вместе дают самый дорогой из возможных ответов — уверенное
+// «согласование не нужно» на чувствительном поле.
 function accessBlock(list) {
   const answered = list.filter((d) => !d.failed && d.access && d.access.known);
   const closed = answered.filter((d) => d.access.groups);
   out.push('');
   if (!answered.length) {
     out.push(
-      `ГРУППЫ ДОСТУПА: признака нет в метаданных ни у одного из ${list.length} ` +
-        'полей. Считать эти поля открытыми НЕЛЬЗЯ — каталог признак не вернул. ' +
-        'Перед выгрузкой доступ надо проверить отдельно.',
+      `ЧУВСТВИТЕЛЬНОСТЬ: признака нет в метаданных ни у одного из ${list.length} ` +
+        'полей. Считать эти поля открытыми НЕЛЬЗЯ — каталог признак не вернул, ' +
+        'а это не то же самое, что «поле не чувствительное». Перед выгрузкой ' +
+        'доступ надо проверить отдельно, и в черновике так и сказать.',
     );
     return;
   }
   const key = answered[0].access.key;
   if (closed.length) {
     out.push(
-      `ГРУППЫ ДОСТУПА: закрыто полей ${closed.length} из ${answered.length} — ` +
+      `ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ ${closed.length} из ${answered.length}: ` +
         closed.map((d) => `${d.field} (${d.access.groups})`).join(', ') + '.',
     );
+    out.push(
+      '  Каждое из них просто так не выгружается: нужен доступ и согласование. ' +
+        'В скобках — группа из каталога; она называет, КУДА идти за доступом, ' +
+        'но на сам вывод не влияет — заполнено значит закрыто.',
+    );
   } else {
-    out.push(`ГРУППЫ ДОСТУПА: среди ${answered.length} полей закрытых нет.`);
+    out.push(
+      `ЧУВСТВИТЕЛЬНОСТЬ: среди ${answered.length} полей признак не проставлен ` +
+        'ни у одного — по данным каталога они не чувствительные.',
+    );
   }
   out.push(
     `  Признак взят из атрибута «${key}». Поля, не названные здесь, по данным ` +
-      'каталога группами доступа не закрыты — но запрет на персональные данные ' +
-      'действует независимо от каталога.',
+      'каталога не закрыты — но запрет на персональные данные действует ' +
+      'независимо от каталога: ФИО, телефоны и почты не выгружаются, даже ' +
+      'если признак у них пуст.',
   );
   if (answered.length < list.length) {
     out.push(
       `  По ${list.length - answered.length} полям признак не пришёл: ` +
-        'их закрытость неизвестна.',
+        'про них нельзя сказать ни что они открыты, ни что закрыты.',
     );
   }
 }
@@ -752,6 +987,13 @@ if (problems.length) {
   }
 }
 
+// Блок значений печатается БЕЗУСЛОВНО, а не изнутри detailBlock: он отвечает
+// на отдельный вход (`values`) и к тому, попал ли фильтр по имени поля,
+// отношения не имеет. Пока вызов стоял внутри detailBlock, промах фильтра
+// уводил поток в inventory() — и целый запрос к данным исчезал из ответа
+// молча, притом что он уже был выполнен и оплачен сканом витрины.
+valuesBlock();
+
 out.push('');
 out.push(
   'НАПОМИНАНИЕ: это инвентарь из DD — состав полей и, если каталог их отдал, ' +
@@ -765,6 +1007,143 @@ return [{ json: { dd_meta: out.join('\n') } }];
 # Между списком колонок и шейпером: решаем, по каким полям идти за карточками.
 # Без фильтра карточки не запрашиваются вовсе — 267 запросов ради инвентаря имён
 # не нужны и медленны.
+# ---------------------------------------- SQL для проверки значений полей
+#
+# ЗАЧЕМ. Заказчик говорит «BI-аналитики в стриме Дата», фильтровать надо
+# по emp_specialization_desc и emp_stream_desc, а какие там значения —
+# «Бизнес-аналитик BI» или «Аналитик BI» — из каталога не видно: перечня
+# уникальных значений в DD нет вовсе, подтверждено владельцем задачи.
+# Живой прогон 2026-08-27 на этом и остановился: поле названо верно,
+# значение — нет.
+#
+# Узел строит ОДИН запрос на все проверяемые поля через UNION ALL: сколько бы
+# полей ни отобралось, HTTP-вызов остаётся один.
+#
+# Решения, каждое закрывает тихую ошибку:
+#
+# — ЧУВСТВИТЕЛЬНЫЕ ПОЛЯ ИСКЛЮЧАЮТСЯ. `select distinct` по ФИО или телефону —
+#   это персональные данные, уехавшие в контекст модели. Признак берётся
+#   из уже полученных карточек (sensitivity), поэтому узел стоит ПОСЛЕ них,
+#   а не после «Pick columns»: там признака ещё нет.
+# — ИМЕНА ПО СПИСКУ ПДн ТОЖЕ ИСКЛЮЧАЮТСЯ. Признак в каталоге может быть
+#   не проставлен, а поле всё равно персональное. Два фильтра, а не один:
+#   промах любого из них здесь стоит утечки.
+# — КАНОНИЧЕСКИЙ СРЕЗ ДОБАВЛЯЕТСЯ, ТОЛЬКО ЕСЛИ ПОЛЕ ЕСТЬ В ТАБЛИЦЕ.
+#   `last_day_flg = 1` обязателен на витрине «сотрудник × день», иначе это
+#   скан всей истории. Но не у всякой таблицы он есть, и слепое добавление
+#   уронило бы запрос. Полный список колонок у нас уже на руках — проверяем
+#   по нему, а не по вере.
+# — cast(... as varchar) ПЕРЕД ilike. Тип поля здесь неизвестен, а ilike
+#   по числовому столбцу Trino не выполнит.
+# — ПУСТОЙ СПИСОК СЛОВ = ЗАПРОСА НЕТ. Тянуть значения «на всякий случай»
+#   значит платить сканом витрины на каждой выгрузке.
+VALUES_SQL = COMMON_JS + r"""
+const MAX_VALUE_FIELDS = 4;
+const MAX_ROWS = 60;
+
+const inp = $('When called by agent').first().json;
+const words = needlesOf(inp.values);
+
+// Имена, по которым значения не тянем никогда, даже если признак пуст.
+const PII_RE = /(^|_)(full|fio|name|nm|phone|tel|email|mail|birth|passport|inn|snils|addr)($|_)/i;
+
+const picked = $('Pick columns').all().map((i) => i.json).filter((x) => x.field);
+const summaries = $('dd_column_summary').all().map((i) => i.json);
+const cards = $('dd_column_attrs').all().map((i) => i.json);
+
+// В режиме by_meaning «Pick columns» отдаёт ВСЕ колонки таблицы, а не
+// совпавшие: имя латиницей с русским hint не совпадает никогда, поэтому
+// сравнение по описаниям делается уже после фетча карточек. Значит, брать
+// «первые отобранные» здесь нельзя — на витрине в 289 полей это скан данных
+// по случайному полю и список значений, к вопросу отношения не имеющий.
+// Совпадение считаем тем же способом, что и шейпер: имя, описание,
+// комментарий. Тогда поля, по которым тянутся значения, — ровно те, что
+// автор увидит в блоке «НАЙДЕНО ПО СМЫСЛУ».
+const mode = (picked[0] && picked[0].mode) || 'by_name';
+const searchNeedles = needlesOf(inp.search);
+const cand = picked
+  .map((p, idx) => {
+    const sumRes = summaries[idx];
+    const attrRes = cards[idx];
+    const sumBody = (sumRes && sumRes.body) || sumRes || {};
+    const attrs = (attrRes && attrRes.body) || attrRes || {};
+    return {
+      field: String(p.field || ''),
+      desc: oneLine(sumBody.data || ''),
+      comment: oneLine(attrData(attrs, 'comment')),
+      attrs,
+    };
+  })
+  .filter(
+    (d) =>
+      mode !== 'by_meaning' ||
+      matchesAny(d.field, searchNeedles) ||
+      matchesAny(d.desc, searchNeedles) ||
+      matchesAny(d.comment, searchNeedles),
+  );
+
+// Полный список колонок таблицы — из него узнаём, есть ли канонический срез.
+const colRes = $('dd_columns').first().json;
+const allCols = nodesOf((colRes && colRes.body) || colRes)
+  .map((c) => shortName(c)).filter(Boolean);
+const hasSlice = allCols.includes('last_day_flg');
+
+// Имя таблицы для запроса: из URN берём схему и таблицу, схема с префиксом.
+// urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d
+//   → prod_v_emart.mdm_employee_structure_d
+const fqn = String(inp.urn || '').split(':').pop();
+const dot = fqn.indexOf('.');
+const table = dot === -1 ? '' : `prod_v_${fqn.slice(0, dot)}.${fqn.slice(dot + 1)}`;
+
+const skipped = [];
+const fields = [];
+cand.forEach((d) => {
+  if (fields.length >= MAX_VALUE_FIELDS) return;
+  const f = d.field;
+  if (!/^[a-z_][a-z0-9_]*$/i.test(f)) return;      // в SQL идёт только имя-идентификатор
+  if (PII_RE.test(f)) { skipped.push(`${f} (имя похоже на ПДн)`); return; }
+  const acc = accessOf(d.attrs);
+  if (acc.known && acc.groups) { skipped.push(`${f} (чувствительное)`); return; }
+  fields.push(f);
+});
+// Потолок MAX_VALUE_FIELDS — про стоимость запроса, и отброшенное по нему
+// обязано называться: молча урезанный список полей читается как «значений
+// в остальных полях нет», хотя их просто не спрашивали.
+const overCap = cand.length - fields.length - skipped.length;
+if (overCap > 0) {
+  skipped.push(`ещё ${overCap} полей (потолок ${MAX_VALUE_FIELDS} на один запрос)`);
+}
+
+const ok = Boolean(words.length && table && fields.length);
+if (!ok) {
+  return [{ json: { values_sql: '', values_fields: [], values_words: words,
+                    values_skipped: skipped, values_table: table,
+                    values_reason: !words.length ? 'слов для поиска значений не задано'
+                      : !table ? 'из URN не вывелось имя таблицы'
+                      : 'все отобранные поля исключены как чувствительные' } }];
+}
+
+const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+const like = words.map((w) => q('%' + w + '%'));
+const slice = hasSlice ? 'last_day_flg = 1 AND ' : '';
+const parts = fields.map((f) =>
+  `SELECT ${q(f)} AS fld, CAST(${f} AS varchar) AS val, count(*) AS cnt\n` +
+  `FROM ${table}\nWHERE ${slice}(` +
+  like.map((l) => `CAST(${f} AS varchar) ILIKE ${l}`).join(' OR ') +
+  `)\nGROUP BY 1, 2`);
+
+return [{ json: {
+  values_sql: parts.join('\nUNION ALL\n') + `\nORDER BY 3 DESC\nLIMIT ${MAX_ROWS}`,
+  values_limit: MAX_ROWS,
+  values_fields: fields,
+  values_words: words,
+  values_skipped: skipped,
+  values_table: table,
+  values_slice: hasSlice,
+  values_reason: '',
+} }];
+"""
+
 PICK_COLUMNS = COMMON_JS + r"""
 const MAX_CARDS = 12;
 
@@ -956,6 +1335,50 @@ def code(name, js, pos):
 
 
 pick_columns = code("Pick columns", PICK_COLUMNS, [700, 200])
+values_sql = code("Build values SQL", VALUES_SQL, [700, 200])
+
+# Гейт: пустой SQL — значит слов не задали, или все поля исключены как
+# чувствительные, или из URN не вывелось имя таблицы. Во всех трёх случаях
+# запрос не отправляется, а причина уезжает в шейпер и печатается автору.
+need_values = {
+    "parameters": {
+        "conditions": {
+            "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
+            "conditions": [
+                {
+                    "id": "has-sql",
+                    "leftValue": "={{ $json.values_sql }}",
+                    "rightValue": "",
+                    "operator": {"type": "string", "operation": "notEmpty", "singleValue": True},
+                }
+            ],
+            "combinator": "and",
+        },
+        "looseTypeValidation": True,
+        "options": {},
+    },
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [880, 200],
+    "id": "dd-need-values",
+    "name": "Need values",
+}
+
+# Отказ Trino не должен ронять ответ: метаданные полей уже собраны, и ответ
+# без значений лучше, чем отсутствие ответа. Текст отказа при этом доезжает
+# до шейпера и печатается — «витрина до Trino не доехала» обязано отличаться
+# от «таких значений нет», иначе автор пойдёт чинить не то.
+dd_values = {
+    "parameters": {"query": "={{ $json.values_sql }}", **copy.deepcopy(_TRINO["options"])},
+    "type": _TRINO["type"],
+    "typeVersion": _TRINO["typeVersion"],
+    "position": [1060, 200],
+    "id": "dd-values",
+    "name": "dd_values",
+    "credentials": copy.deepcopy(_TRINO["credentials"]),
+    "onError": "continueRegularOutput",
+}
+
 shape_table = code("Shape table meta", SHAPE_TABLE, [1380, 200])
 shape_report = code("Shape report meta", SHAPE_REPORT, [480, 440])
 
@@ -997,6 +1420,9 @@ sub = {
         need_cards,
         column_summary,
         column_attrs,
+        values_sql,
+        need_values,
+        dd_values,
         shape_table,
         report_markdown,
         report_attrs,
@@ -1035,6 +1461,22 @@ sub = {
             "main": [[{"node": "dd_column_attrs", "type": "main", "index": 0}]]
         },
         "dd_column_attrs": {
+            "main": [[{"node": "Build values SQL", "type": "main", "index": 0}]]
+        },
+        "Build values SQL": {
+            "main": [[{"node": "Need values", "type": "main", "index": 0}]]
+        },
+        # Обе ветви IF ведут в шейпер, и это безопасно: они взаимоисключающие,
+        # шейпер выполнится один раз. Опасен ПАРАЛЛЕЛЬНЫЙ вход с двух узлов,
+        # которые выполняются оба, — из-за этого dd_column_summary и
+        # dd_column_attrs и стоят цепочкой, а не рядом.
+        "Need values": {
+            "main": [
+                [{"node": "dd_values", "type": "main", "index": 0}],
+                [{"node": "Shape table meta", "type": "main", "index": 0}],
+            ]
+        },
+        "dd_values": {
             "main": [[{"node": "Shape table meta", "type": "main", "index": 0}]]
         },
         # Три независимых запроса цепочкой — просто ради порядка выполнения,

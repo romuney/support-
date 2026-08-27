@@ -1064,6 +1064,26 @@ line('24. ЭКСПЕРТ ПО ТЕМЕ: код находит, кого позв
   check('маршрут в самообслуживание не протёк',
     exp.self_service.every((x) => !/^(payroll|quotas|forge|recruitment)$/.test(x.id)));
   check('маршрут при этом найден', exp.routes.some((r) => r.id === 'payroll'));
+
+  // НОВАЯ СЕКЦИЯ РЕЕСТРА не должна подмешиваться ни в одну существующую.
+  // Раньше границей секции служило имя следующей — вписанное в сборщик
+  // парами, — и вставка раздела между ними разъезжалась молча: чужие строки
+  // разбирались как свои, формат колонок другой, на выходе неверные данные.
+  // Реестр правят чаще, чем сборщик, поэтому граница теперь «следующий
+  // заголовок ## », какой бы он ни был.
+  const inserted = REGISTRY.replace('## Самостоятельные выгрузки',
+    '## Новый раздел\n\n| id | тип | что-то |\n|---|---|---|\n' +
+    '| r-hr-detail-list | table | подделка |\n| payroll | table | подделка |\n\n' +
+    '## Самостоятельные выгрузки');
+  const after = runPlan(ROUTER, inserted, {
+    question: 'Нужна выгрузка зарплат по юниту', topic_kind: 'Выгрузка данных',
+  });
+  check('вставленный раздел не подмешался в сущности',
+    !after.files.includes('подделка'));
+  check('и не подмешался в самообслуживание',
+    JSON.stringify(after.self_service) === JSON.stringify(exp.self_service));
+  check('и не подмешался в маршруты',
+    JSON.stringify(after.routes) === JSON.stringify(exp.routes));
 }
 
 // ====================================================================== 25
@@ -1231,6 +1251,104 @@ line('27. ПУСТОЙ ПЛАН РОУТЕРА — не «нет ответа»,
                              REGISTRY.indexOf('## Сущности')).toLowerCase();
   for (const w of ['грейд', 'юнит', 'стрим', 'специализац', 'должност']) {
     check(`слово «${w}» есть в описании доменов`, dom.includes(w));
+  }
+}
+
+// ===================================================================== 28
+line('28. ЗНАЧЕНИЯ ФИЛЬТРОВ едут отдельным полем, а не внутри hint');
+{
+  // hint отвечает на «какое поле», values — на «какое в нём значение».
+  // Источники у них разные: имена полей есть в каталоге, значений полей
+  // в каталоге нет вовсе — их видно только в данных. Слитые в один список,
+  // они промахиваются молча в обе стороны: фильтр полей по слову «аналитик»
+  // вернёт весь инвентарь, поиск значений по слову «специализация» — пустоту,
+  // и оба читаются как «такого нет».
+  const p = runPlan(JSON.stringify({
+    domains: ['headcount-structure'],
+    articles: ['kb/tables/mdm-employee-structure-d.md'],
+    dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
+           hint: 'специализация, стрим', values: 'BI-аналитик, Дата' }],
+    no_question: false,
+  }), REGISTRY, { question: 'сколько BI-аналитиков в стриме Дата' });
+  const d = p.dd.find((x) => /mdm_employee_structure_d/.test(x.urn));
+  check('объект каталога есть', Boolean(d));
+  check('значения доехали отдельным полем', d && d.values === 'BI-аналитик, Дата');
+  check('и не подмешаны в hint', d && !/BI-аналитик/.test(d.hint));
+
+  // Повтор URN склеивает и значения — по той же причине, по которой склеивает
+  // иглы: объект один, а понятий в вопросе несколько.
+  const merged = runPlan(JSON.stringify({
+    domains: ['headcount-structure'], articles: [],
+    dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
+           hint: 'специализация', values: 'аналитик' },
+         { urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
+           hint: 'юнит', values: 'Human Capital Origination' }],
+    no_question: false,
+  }), REGISTRY, { question: 'аналитики в юните Human Capital Origination' });
+  const m = merged.dd.find((x) => /mdm_employee_structure_d/.test(x.urn));
+  check('значения обоих элементов склеены',
+    m && /аналитик/.test(m.values) && /Human Capital Origination/.test(m.values));
+
+  // Потолок: ilike по десяти словам вернёт полсправочника, и «реальные
+  // значения» перестанут что-либо сужать.
+  const many = runPlan(JSON.stringify({
+    domains: ['headcount-structure'], articles: [],
+    dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
+           hint: '', values: 'a, b, c, d, e, f' }],
+    no_question: false,
+  }), REGISTRY, { question: 'вопрос' });
+  const mn = many.dd.find((x) => /mdm_employee_structure_d/.test(x.urn));
+  check('значений не больше четырёх', mn && mn.values.split(',').length === 4);
+
+  // Витрина, добранная КОДОМ (инвентарь прочитанных статей, умолчание,
+  // самообслуживание), значений не несёт и нести не может: код не читал
+  // вопрос на предмет значений фильтров. Поле обязано быть, но пустым —
+  // undefined уехал бы в выражение ноды строкой «undefined» и стал бы
+  // словом для поиска значений.
+  const byCode = runPlan(JSON.stringify({
+    domains: [], articles: [], dd: [], no_question: false,
+  }), REGISTRY, { question: 'подскажи, как написать select по сотрудникам' });
+  check('добранные кодом объекты есть', byCode.dd.length > 0);
+  check('и у каждого values — строка, а не undefined',
+    byCode.dd.every((x) => typeof x.values === 'string'));
+}
+
+// ===================================================================== 29
+line('29. reached_by: code — контракт между базой знаний и сборщиком');
+{
+  // Регламенты из kb/process/ роутер не выбирает никогда: строк process
+  // в реестре нет. До бота они доезжают только тем, что путь вписан
+  // в сборщик и добирается признаком обращения. Поэтому у каждого файла
+  // есть фронтматтер reached_by: code — «меня добирает код» — или human.
+  //
+  // validate_kb.py проверить это не может: сборщик в другом репозитории.
+  // Отсюда — может, оба каталога лежат рядом. Отказ здесь тихий с обеих
+  // сторон: файл со статусом code, которого нет в сборщике, не доезжает
+  // до бота НИ РАЗУ (так месяцами не доезжал sql-conventions.md), а путь
+  // в сборщике без файла в базе даёт «статью не удалось прочитать».
+  const dir = REGISTRY_AT.replace(/index\.md$/, 'process');
+  if (!fs.existsSync(dir)) {
+    check('папка регламентов найдена', false);
+  } else {
+    const src = fs.readFileSync('build_time_flows.py', 'utf8');
+    const declared = [];
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.md'))) {
+      const head = fs.readFileSync(`${dir}/${f}`, 'utf8').slice(0, 600);
+      const m = head.match(/^reached_by:\s*(\w+)/m);
+      check(`${f}: признак reached_by объявлен`, Boolean(m));
+      if (m && m[1] === 'code') declared.push(`kb/process/${f}`);
+    }
+    check('файлы с reached_by: code есть', declared.length > 0);
+    for (const path of declared) {
+      check(`${path} вписан в сборщик`, src.includes(`'${path}'`));
+    }
+    // И обратно: путь, вписанный в сборщик, обязан существовать в базе.
+    const inCode = [...src.matchAll(/'(kb\/process\/[a-z0-9-]+\.md)'/g)]
+      .map((m) => m[1]);
+    check('пути регламентов в сборщике найдены', inCode.length > 0);
+    for (const path of new Set(inCode)) {
+      check(`${path} есть в базе`, fs.existsSync(`${dir}/../${path.slice(3)}`));
+    }
   }
 }
 

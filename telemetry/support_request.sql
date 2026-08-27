@@ -198,6 +198,29 @@ task_state AS (
     GROUP BY thread_id
 ),
 
+-- ПОЛЯ ОТВЕТА БОТА, КОТОРЫЕ ВИТРИНА НЕ ИСПОЛЬЗУЕТ — и почему.
+--
+-- Список обязателен: тест 37 требует, чтобы каждое поле из `Parse answer`
+-- было либо прочитано витриной, либо названо здесь с причиной. Иначе новое
+-- поле ядра тихо не доезжает до дашборда — то же самое, что было с
+-- `dd_received` и `router_empty`: код их считал, а посмотреть было негде.
+--
+--   question, raw          — полный текст обращения и сырой ответ модели.
+--                            Объём и персональные данные; сам пост и так
+--                            лежит в логе событием `request_created`.
+--   mode                   — дубль `is_export`, одно и то же значение.
+--   confidence_basis       — строка для джуна, собранная из полей, которые
+--                            в витрине уже есть по отдельности.
+--   ib_stated              — отрицание `ib_missing` при `ib_required`.
+--                            Две колонки на один факт складывать нечем.
+--   report_url             — ссылка на отчёт из формы. Группировать по ней
+--                            нечего, пока нет моста «ключ ссылки → dd_urn».
+--   routes_dropped         — маршруты, срезанные потолком. Отладочное:
+--                            потолок три, срабатывает почти никогда.
+--   topic_kind             — та же тема, что `kind` у корневого события
+--                            (`kind_source = 'intake'`). Вторая колонка
+--                            приглашала бы сложить два разных счёта.
+--
 -- Ответ бота. Колонки будут NULL до того, как в ядро врежут узел `Ingest`:
 -- событие `bot_answered` пока никто не пишет. Это не поломка витрины —
 -- по числу NULL как раз видно, дошла ли врезка до прода.
@@ -211,6 +234,76 @@ bot AS (
            max_by(domains, event_ts) AS domains,
            max_by(CAST(json_extract_scalar(payload, '$.dd_count') AS integer),
                   event_ts) AS dd_count,
+           -- ПЛАН и ФАКТ каталога — разные колонки, и это не педантизм.
+           -- Две недели в логе стояло dd_count: 4 при нуле полученных полей:
+           -- ветка каталога не выполнялась вовсе, а по логу это выглядело
+           -- нормальной работой. Расхождение этих двух чисел — единственный
+           -- способ увидеть такой отказ в дашборде, а не в живом прогоне.
+           max_by(CAST(json_extract_scalar(payload, '$.dd_received') AS integer),
+                  event_ts) AS dd_received,
+           max_by(CAST(json_extract_scalar(payload, '$.dd_never_ran') AS boolean),
+                  event_ts) AS dd_never_ran,
+           -- Роутер не назвал НИ домена, НИ статьи, и витрину добрал код.
+           -- Доля таких планов — метрика качества роутера: задним числом
+           -- «роутер промахнулся» и «в базе нет ответа» по логу неразличимы.
+           max_by(CAST(json_extract_scalar(payload, '$.router_empty') AS boolean),
+                  event_ts) AS router_empty,
+           -- Значения фильтров, которые роутер выделил из вопроса. Ноль на
+           -- обращении, где заказчик назвал конкретное значение, значит,
+           -- что в данные не ходили — и блок значений просто не появился.
+           max_by(CAST(json_extract_scalar(payload, '$.values_asked') AS integer),
+                  event_ts) AS values_asked,
+           -- Согласование ИБ: возникло требование и попало ли оно в черновик.
+           -- Цена ошибки здесь не «черновик хуже», а файл с персональными
+           -- данными, ушедший наружу без согласования, — поэтому обе части
+           -- считаются, а не одна.
+           max_by(CAST(json_extract_scalar(payload, '$.ib_required') AS boolean),
+                  event_ts) AS ib_required,
+           max_by(CAST(json_extract_scalar(payload, '$.ib_missing') AS boolean),
+                  event_ts) AS ib_missing,
+           -- Просьба помочь с запросом: по ней видно, что режим выгрузки
+           -- погашен намеренно, а не просто не включился.
+           max_by(CAST(json_extract_scalar(payload, '$.is_query_help') AS boolean),
+                  event_ts) AS is_query_help,
+           max_by(CAST(json_extract_scalar(payload, '$.is_export') AS boolean),
+                  event_ts) AS bot_saw_export,
+           -- Витрины, чью статью автор прочитал, а инвентарь полей не получил.
+           max_by(json_array_length(json_extract(payload, '$.tables_no_meta')),
+                  event_ts) AS tables_no_meta,
+           -- По каким темам звали эксперта. id, а не имена: человек в реестре
+           -- меняется, разрез должен пережить смену.
+           max_by(json_extract_scalar(payload, '$.routes'),
+                  event_ts) AS routes,
+           -- Черновик не отправить как есть: служебное внутри или перелив
+           -- через лимит поста. На уверенность эти проверки не влияют
+           -- намеренно — основание под ответом от них не меняется.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_leaks') AS boolean),
+                  event_ts) AS draft_leaks,
+           max_by(CAST(json_extract_scalar(payload, '$.draft_too_long') AS boolean),
+                  event_ts) AS draft_too_long,
+           max_by(CAST(json_extract_scalar(payload, '$.draft_len') AS integer),
+                  event_ts) AS draft_len,
+           -- Заявленную моделью уверенность понизил код, и почему именно.
+           -- Причина текстом: частота каждой — это список того, что чинить.
+           max_by(CAST(json_extract_scalar(payload, '$.confidence_capped') AS boolean),
+                  event_ts) AS confidence_capped,
+           max_by(json_extract_scalar(payload, '$.confidence_capped_reason'),
+                  event_ts) AS confidence_capped_reason,
+           -- Ответ человека в форме про передачу вне контура: yes / no / ''.
+           -- Пустое значение при теме выгрузки — промах разбора формы, и это
+           -- своя метрика: форму переформулируют, разбор промахнётся, а
+           -- молчание неотличимо от «согласование не нужно».
+           max_by(json_extract_scalar(payload, '$.external_transfer'),
+                  event_ts) AS external_transfer,
+           -- Домен, который выбрал человек в форме. Пустая колонка при
+           -- заполненной форме — сигнал, что разбор формы сломался.
+           max_by(json_extract_scalar(payload, '$.form_domain'),
+                  event_ts) AS form_domain,
+           -- Сколько пробелов базы код нашёл на этом обращении. Приоритет
+           -- наполнения копится сам, и его надо уметь считать, а не читать
+           -- глазами в канале джуна.
+           max_by(json_array_length(json_extract(payload, '$.kb_tasks')),
+                  event_ts) AS kb_tasks,
            max_by(json_array_length(json_extract(payload, '$.articles_read')),
                   event_ts) AS articles_read,
            max_by(json_extract_scalar(payload, '$.parse_error'),
@@ -326,6 +419,27 @@ SELECT
     b.domains,
     b.articles_read,
     b.dd_count,
+    b.dd_received,
+    -- Каталог был запланирован, а узел не выполнился: отказ конвейера,
+    -- не пробел базы. Слитые в один диагноз, они отправляют чинить не то.
+    COALESCE(b.dd_never_ran, false)                         AS dd_never_ran,
+    (b.dd_count > 0 AND COALESCE(b.dd_received, 0) = 0)     AS dd_planned_not_received,
+    COALESCE(b.router_empty, false)                         AS router_empty,
+    COALESCE(b.values_asked, 0)                             AS values_asked,
+    COALESCE(b.ib_required, false)                          AS ib_required,
+    COALESCE(b.ib_missing, false)                           AS ib_missing,
+    COALESCE(b.is_query_help, false)                        AS is_query_help,
+    COALESCE(b.bot_saw_export, false)                       AS bot_saw_export,
+    COALESCE(b.tables_no_meta, 0)                           AS tables_no_meta,
+    b.routes,
+    COALESCE(b.draft_leaks, false)                          AS draft_leaks,
+    COALESCE(b.draft_too_long, false)                        AS draft_too_long,
+    b.draft_len,
+    COALESCE(b.confidence_capped, false)                    AS confidence_capped,
+    NULLIF(b.confidence_capped_reason, '')                  AS confidence_capped_reason,
+    NULLIF(b.external_transfer, '')                         AS external_transfer,
+    NULLIF(b.form_domain, '')                               AS form_domain,
+    COALESCE(b.kb_tasks, 0)                                 AS kb_tasks,
     NULLIF(b.parse_error, '')                               AS parse_error,
     NULLIF(b.router_error, '')                              AS router_error,
     b.prompt_version,
@@ -445,7 +559,44 @@ SELECT
     -- Кнопки нажимают единицы, поэтому ненажатие за «плохо» считать нельзя:
     -- знаменатель здесь — только те обращения, где оценка есть.
     count_if(draft_useful IS NOT NULL)                     AS rated,
-    count_if(draft_useful)                                 AS rated_useful
+    count_if(draft_useful)                                 AS rated_useful,
+
+    -- ---------------------------------------------------------------- бот
+    -- Отказы КОНСТРУКЦИИ, а не пробелы базы. Разбор фидбека 2026-08-26/27:
+    -- в 24 обращениях из 49 бот отвечал, не видя ни одного имени поля, —
+    -- и по логу это было неотличимо от нормальной работы. Каждая строка
+    -- ниже — свой класс поломки, который чинится в своём месте, поэтому
+    -- они и не сложены в один счётчик «бот сработал плохо».
+    count_if(dd_never_ran)                                 AS dd_node_never_ran,
+    count_if(dd_planned_not_received)                      AS dd_planned_not_received,
+    count_if(router_empty)                                 AS router_empty_plan,
+    count_if(tables_no_meta > 0)                           AS tables_without_inventory,
+    count_if(parse_error IS NOT NULL OR router_error IS NOT NULL) AS bot_errors,
+
+    -- Согласование ИБ: сколько обращений его требовали и в скольких оно
+    -- не доехало до черновика. Вторая цифра — единственная в этом списке,
+    -- у которой цена ошибки не «черновик хуже», а файл с персональными
+    -- данными, ушедший наружу без согласования.
+    count_if(ib_required)                                  AS ib_required,
+    count_if(ib_required AND ib_missing)                   AS ib_missing_in_draft,
+    -- Форма про передачу вне контура заполнена, а разбор её не понял:
+    -- переформулировали подпись поля. Молчание здесь неотличимо от
+    -- «согласование не нужно», поэтому считается отдельно.
+    count_if(bot_saw_export AND external_transfer IS NULL) AS transfer_unparsed,
+
+    -- Черновик нельзя отправить как есть. На уверенность эти проверки
+    -- не влияют намеренно, но джун правит руками именно их.
+    count_if(draft_leaks)                                  AS draft_leaks,
+    count_if(draft_too_long)                               AS draft_split,
+
+    -- Насколько живёт то, что добавлено последним: значения фильтров
+    -- из данных и маршруты к экспертам. Ноль здесь значит «ни разу
+    -- не сработало», и это надо видеть, а не предполагать.
+    count_if(values_asked > 0)                             AS values_requested,
+    count_if(routes IS NOT NULL AND routes <> '[]')        AS expert_suggested,
+    -- Пробелы базы, найденные кодом. Приоритет наполнения копится сам —
+    -- сумма по неделе и есть очередь на статьи.
+    sum(kb_tasks)                                          AS kb_gaps_found
 FROM dl.usr_cross_data.support_request
 WHERE ours
   AND created_at >= current_timestamp - INTERVAL '30' DAY
