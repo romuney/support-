@@ -287,6 +287,8 @@ line('6. ФАЗА E: связи таблицы, источники отчёта,
     'Search base': ok200([{ urn: 'urn:a' }]),
     'Search text': ok200([{ urn: 'urn:b' }]),
     'Search searchText': ok200([{ urn: 'urn:a' }]),
+    'Search by slug': ok200([]), 'Search by id': ok200([]),
+    'Search reports': ok200([]), 'Search reports p2': ok200([]),
   });
   check('связь, отдающая REPORT, названа', /ОТДАЮТ REPORT.*consumers/.test(out));
   check('типы всех связей показаны', /notes: type=NOTE/.test(out));
@@ -298,12 +300,63 @@ line('6. ФАЗА E: связи таблицы, источники отчёта,
   check('нерабочее поле названо игнорируемым',
     /поле «searchText» игнорируется/.test(out));
 
+  // Перечисление: фильтр по спецификации и пагинация через offset.
+  const enumOk = runProbes({
+    'Table related': ok200({}), 'Report sources': ok200({ data: [] }),
+    'Search base': ok200([]), 'Search text': ok200([]), 'Search searchText': ok200([]),
+    'Search by slug': ok200([]), 'Search by id': ok200([]),
+    'Search reports': ok200([{ urn: 'urn:dd:reports:reports:report:a' },
+                            { urn: 'urn:dd:reports:reports:report:b' }]),
+    'Search reports p2': ok200([{ urn: 'urn:dd:reports:reports:report:c' }]),
+  });
+  check('фильтр признан рабочим, когда пришли только дашборды',
+    /фильтр по systemType\/systemName\/type РАБОТАЕТ/.test(enumOk));
+  check('offset признан рабочим по НОВЫМ урнам', /offset РАБОТАЕТ/.test(enumOk));
+
+  // Вторая страница повторяет первую — это не пагинация.
+  const enumDup = runProbes({
+    'Table related': ok200({}), 'Report sources': ok200({ data: [] }),
+    'Search base': ok200([]), 'Search text': ok200([]), 'Search searchText': ok200([]),
+    'Search by slug': ok200([]), 'Search by id': ok200([]),
+    'Search reports': ok200([{ urn: 'urn:dd:reports:reports:report:a' }]),
+    'Search reports p2': ok200([{ urn: 'urn:dd:reports:reports:report:a' }]),
+  });
+  check('повтор страницы не выдан за пагинацию',
+    /повторяет первую/.test(enumDup) && !/offset РАБОТАЕТ/.test(enumDup));
+
+  // Чужие типы в выдаче — фильтр не сработал, и это надо сказать.
+  const enumDirty = runProbes({
+    'Table related': ok200({}), 'Report sources': ok200({ data: [] }),
+    'Search base': ok200([]), 'Search text': ok200([]), 'Search searchText': ok200([]),
+    'Search by slug': ok200([]), 'Search by id': ok200([]),
+    'Search reports': ok200([{ urn: 'urn:dd:reports:reports:report:a' },
+                             { urn: 'urn:dd:tables:greenplum:table:x' }]),
+    'Search reports p2': ok200([]),
+  });
+  check('чужие типы в выдаче названы',
+    /фильтр не сработал/.test(enumDirty));
+
+  // Поиск по ключу ссылки — от него зависит, нужен ли мост вообще.
+  const byKey = runProbes({
+    'Table related': ok200({}), 'Report sources': ok200({ data: [] }),
+    'Search base': ok200([]), 'Search text': ok200([]), 'Search searchText': ok200([]),
+    'Search by slug': ok200([{ urn: 'urn:dd:reports:reports:report:1728' }]),
+    'Search by id': ok200([{ urn: 'urn:dd:tables:greenplum:table:x' }]),
+    'Search reports': ok200([]), 'Search reports p2': ok200([]),
+  });
+  check('найденный по слагу отчёт снимает нужду в мосте',
+    /НАЙДЕН нужный отчёт/.test(byKey) && /Мост не нужен/.test(byKey));
+  check('ненайденный по числу — мост нужен',
+    /нужного отчёта в выдаче НЕТ/.test(byKey));
+
   // Ни одна связь не отдаёт REPORT — от витрины к дашборду пути нет,
   // и это тоже ответ, а не пустота.
   const noRep = runProbes({
     'Table related': ok200({ columns: { entity: { type: 'COLUMN' } } }),
     'Report sources': ok200({ data: [] }),
     'Search base': ok200([]), 'Search text': ok200([]), 'Search searchText': ok200([]),
+    'Search by slug': ok200([]), 'Search by id': ok200([]),
+    'Search reports': ok200([]), 'Search reports p2': ok200([]),
   });
   check('отсутствие связи к REPORT названо', /НИ ОДНА связь/.test(noRep));
   check('пустые source_tables названы', /связь есть, но не заполнена/.test(noRep));

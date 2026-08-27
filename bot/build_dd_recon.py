@@ -660,10 +660,26 @@ PHASE_E_POST = [
     ("Search by slug", {"text": "hr-executive-detail-employee", "limit": 5}),
     # Ключ-число: так выглядит ссылка «Активности в GitLab».
     ("Search by id", {"text": "35005", "limit": 5}),
-    # Перечисление: можно ли получить СПИСОК отчётов, а не одну карточку.
-    # От этого зависит, собирается ли мост одним прогоном или руками.
+    # Перечисление отчётов. Форма фильтра — из спецификации OpenAPI, а не
+    # угадана: SearchFilters это словарь «ключ → МАССИВ строк», и ключи
+    # называются type / systemType / systemName. Первая версия этой пробы
+    # посылала {"system": "reports", "type": "REPORT"} — неверно и по имени
+    # ключа, и по форме значения, а сервер на такое отвечает 200 и молчит.
+    #
+    # Значения выводятся из URN: urn:dd:<systemType>:<systemName>:<type>:<id>.
+    # У дашборда Proteus это reports / reports / report, у ноутбука —
+    # reports / helicopter / note, у витрины — tables / greenplum / table.
     ("Search reports", {"text": "", "limit": 100,
-                        "filters": {"system": "reports", "type": "REPORT"}}),
+                        "filters": {"systemType": ["reports"],
+                                    "systemName": ["reports"],
+                                    "type": ["REPORT"]}}),
+    # Вторая страница: в SearchRequest есть offset, значит мост собирается
+    # пагинацией за один прогон, а не руками. Проверяем, что offset работает
+    # и вторая страница не повторяет первую.
+    ("Search reports p2", {"text": "", "limit": 100, "offset": 100,
+                           "filters": {"systemType": ["reports"],
+                                       "systemName": ["reports"],
+                                       "type": ["REPORT"]}}),
 ]
 for i, (nm, body) in enumerate(PHASE_E_POST):
     n = node(
@@ -790,22 +806,34 @@ for (const [nm, key, want] of [
 }
 
 const rep = urns('Search reports');
+const rep2 = urns('Search reports p2');
 say('');
 say('ПЕРЕЧИСЛЕНИЕ ОТЧЁТОВ (собирается ли мост одним прогоном):');
 if (!rep) say('  ' + body('Search reports').miss);
 else {
   const onlyReports = rep.filter((x) => /:reports:reports:report:/.test(x));
-  say(`  вернулось ${rep.length}, из них дашбордов Proteus: ${onlyReports.length}`);
-  say(onlyReports.length >= rep.length && rep.length > 5
-    ? '  ← фильтр по системе и типу РАБОТАЕТ, список перечисляется'
-    : '  ← фильтр не сработал: в выдаче не только отчёты. Тогда отсекать '
-      + 'придётся на нашей стороне, по полям system и type каждой записи');
+  say(`  страница 1: вернулось ${rep.length}, из них дашбордов Proteus: ${onlyReports.length}`);
+  say(onlyReports.length === rep.length && rep.length > 0
+    ? '  ← фильтр по systemType/systemName/type РАБОТАЕТ'
+    : '  ← фильтр не сработал: в выдаче не только дашборды. Отсекать придётся '
+      + 'на нашей стороне, по полям system и type каждой карточки');
+  if (rep2) {
+    const fresh = rep2.filter((x) => !rep.includes(x));
+    say(`  страница 2 (offset 100): вернулось ${rep2.length}, новых ${fresh.length}`);
+    say(fresh.length
+      ? '  ← offset РАБОТАЕТ: мост собирается пагинацией за один прогон'
+      : '  ← вторая страница повторяет первую либо пуста: если отчётов меньше '
+        + '100, это норма, иначе offset не работает и перечислять нечем');
+  }
 }
 
 say('');
-say('Если ни одно поле не сработало — тело SearchRequest придётся смотреть');
-say('в спецификации API, перебором его не найти: сервер отвечает 200');
-say('на любое тело и о неизвестных полях молчит.');
+say('Тело SearchRequest подтверждено спецификацией OpenAPI:');
+say('  text · limit(20) · offset(0) · filters · sessionId · requestId');
+say('  filters — словарь «ключ → МАССИВ строк»: type, systemType, systemName.');
+say('Поле searchText в /search/query не существует вовсе — оно принадлежит');
+say('другой ручке, /search/facets/{facetKey}/filters. Отсюда и молчание:');
+say('сервер отвечает 200 на любое тело и о неизвестных полях не сообщает.');
 
 return [{ json: { probes: out.join('\n') } }];
 """
