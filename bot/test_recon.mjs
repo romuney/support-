@@ -199,6 +199,66 @@ line('6. Разведка: владелец ищется по всем пяти 
     html.report.includes('страницу логина'));
 }
 
+// ====================================================================== 5
+line('5. ФАЗА D: три пробы Trino разбираются и НЕ сливаются в один диагноз');
+{
+  // Главное, ради чего фаза написана: «витрины нет в Trino» обязано
+  // отличаться от «таких значений нет». Слитые в один диагноз, они отправят
+  // чинить не то — ровно как ddFailed и ddMissing до 2026-08-27.
+  const runValues = (byName) => {
+    const $ = (name) => {
+      if (!(name in byName)) throw new Error('node not executed: ' + name);
+      return { all: () => byName[name].map((json) => ({ json })) };
+    };
+    return new Function('$', js('Shape values'))($)[0].json.values_recon;
+  };
+
+  // Всё отработало: значения пришли.
+  const ok = runValues({
+    'Probe catalogs': [{ Catalog: 'dl' }, { Catalog: 'gp' }],
+    'Probe values': [{ emp_specialization_desc: 'Бизнес-аналитик BI', cnt: 42 },
+                     { emp_specialization_desc: 'Системный аналитик', cnt: 17 }],
+    'Probe missing': [{ error: 'line 1:15: Table … does not exist' }],
+  });
+  check('значения показаны', ok.includes('Бизнес-аналитик BI'));
+  check('число строк названо', /Probe values: 2 строк/.test(ok));
+  check('отказ промаха назван отказом', /Probe missing: ОТКАЗ/.test(ok));
+  check('каталоги показаны', ok.includes('Probe catalogs: 2 строк'));
+
+  // Витрина недоступна: и запрос, и промах отказали. Это тот случай,
+  // ради которого промах и стоит в цепочке — сравнить тексты.
+  const denied = runValues({
+    'Probe catalogs': [{ Catalog: 'dl' }],
+    'Probe values': [{ error: 'Schema prod_v_emart does not exist' }],
+    'Probe missing': [{ error: 'line 1:15: Table … does not exist' }],
+  });
+  check('отказ по витрине назван отказом', /Probe values: ОТКАЗ/.test(denied));
+  check('текст отказа сохранён целиком',
+    denied.includes('Schema prod_v_emart does not exist'));
+  check('сказано, что делать при отказе',
+    denied.includes('дело') && denied.includes('префиксе каталога'));
+  check('сказано сравнить два отказа между собой',
+    /Сравните текст отказа/.test(denied));
+
+  // Пустой результат — НЕ отказ. Разница принципиальная: «значений нет»
+  // и «витрины нет» чинятся в разных местах.
+  const empty = runValues({
+    'Probe catalogs': [{ Catalog: 'dl' }],
+    'Probe values': [],
+    'Probe missing': [{ error: 'does not exist' }],
+  });
+  check('пустой результат не назван отказом',
+    /Probe values: ноль элементов/.test(empty) && !/Probe values: ОТКАЗ/.test(empty));
+
+  // Узел не выполнялся вовсе — третий, отдельный случай.
+  const notRun = runValues({
+    'Probe catalogs': [{ Catalog: 'dl' }],
+    'Probe values': [],
+  });
+  check('невыполненный узел назван отдельно',
+    /Probe missing: узел не выполнялся/.test(notRun));
+}
+
 console.log(`\n${'='.repeat(70)}`);
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));

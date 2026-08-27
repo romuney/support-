@@ -80,6 +80,30 @@ DD_OPTS = copy.deepcopy(_probe["parameters"]["options"])
 
 BASE = "https://dd.t-tech.team/api/v3"
 
+# ------------------------------------------------------- Trino для ФАЗЫ D
+#
+# Нода и credential берутся из собранного «Telemetry Flush», а не заводятся
+# здесь константой: аккаунт и имена полей `CUSTOM.trino` уже подтверждены
+# живым прогоном 2026-08-17, и вторая копия разъехалась бы с ними молча —
+# ровно то, из-за чего 2026-08-27 один устаревший credential в забытом файле
+# уронил бы разом каталог и чтение статей.
+TRINO_SRC = "../telemetry/Telemetry Flush.json"
+if not os.path.exists(TRINO_SRC):
+    raise SystemExit(
+        f"нет {TRINO_SRC} — сначала cd telemetry && python3 build_telemetry_flows.py: "
+        f"нода Trino и её credential берутся оттуда, а не дублируются здесь"
+    )
+_flush = json.load(open(TRINO_SRC, encoding="utf-8"))
+_tn = next(
+    (n for n in _flush["nodes"] if n.get("type", "").lower().endswith("trino")), None
+)
+if _tn is None:
+    raise SystemExit(f"в {TRINO_SRC} не нашлось ноды Trino — фазу D собрать не из чего")
+TRINO_TYPE = _tn["type"]
+TRINO_TV = _tn["typeVersion"]
+TRINO_CRED = copy.deepcopy(_tn["credentials"])
+TRINO_OPTS = {k: v for k, v in _tn["parameters"].items() if k != "query"}
+
 
 # ------------------------------------------------------------------ реестр
 def read_registry():
@@ -565,11 +589,114 @@ nodes.append(
 # Строго ЦЕПОЧКА, без веера. В n8n нет неявного слияния: узел за развилкой
 # выполняется по разу на каждую дошедшую ветвь, и разведённые фазы дали бы
 # два прогона моста на один запуск.
+# --------------------------------------------------- ФАЗА D: значения полей
+#
+# ЗАЧЕМ. Инвентарь полей мы берём из каталога, но перечня УНИКАЛЬНЫХ ЗНАЧЕНИЙ
+# поля в DD нет — подтверждено владельцем задачи. А без него бот не может
+# закрыть типовой случай: заказчик говорит «BI-аналитики», фильтровать надо
+# по emp_specialization_desc, и какое там значение — «Бизнес-аналитик BI»,
+# «Аналитик BI» или иное — из каталога не видно. Живой прогон 2026-08-27
+# на этом и остановился: поле бот назвал верно, значение — нет.
+#
+# Значения можно достать только запросом к данным. Нода CUSTOM.trino в проекте
+# уже есть и работает (телеметрия, прогон 2026-08-17), но три вещи неизвестны,
+# и все три — блокеры для стройки:
+#
+#   1. видит ли аккаунт 128 HR-витрины: он заведён под dl.usr_cross_data,
+#      а витрины лежат в prod_v_emart, и каталог Trino для них неизвестен;
+#   2. какая у поля кардинальность — 50 значений или 5000: от этого зависит,
+#      нужен ли потолок и какой;
+#   3. КАК ВЫГЛЯДИТ ОТКАЗ по недоступной таблице. Это главное. Часть витрин
+#      до Trino ещё не доехала, и «витрины здесь нет» обязано отличаться
+#      от «таких значений нет» — слитые в один диагноз, они отправят чинить
+#      не то, ровно как ddFailed и ddMissing до 2026-08-27.
+#
+# Поэтому проб три, и третья — НАМЕРЕННЫЙ ПРОМАХ по несуществующей таблице:
+# без него форму отказа взять неоткуда, а угадывать её в коде значит написать
+# разбор, который не сработает ни разу и будет выглядеть рабочим.
+#
+# Все три с onError, как и запросы к каталогу: фаза D не должна ронять прогон,
+# ради которого воркфлоу написан, — мост отчётов собирается раньше неё.
+VALUES_TABLE = "prod_v_emart.mdm_employee_structure_d"
+VALUES_FIELD = "emp_specialization_desc"
+PHASE_D = [
+    # Список каталогов: если запрос к витрине упадёт «table not found»,
+    # правильный префикс ищется здесь, а не подбором.
+    ("Probe catalogs", "SHOW CATALOGS"),
+    # Сам вопрос. Срез канонический (last_day_flg = 1): без него это скан
+    # витрины «сотрудник × день» по всей истории. count(*) нужен не меньше
+    # значений — по нему видно, какие варианты рабочие, а какие единичны.
+    (
+        "Probe values",
+        f"SELECT {VALUES_FIELD}, count(*) AS cnt\n"
+        f"FROM {VALUES_TABLE}\n"
+        f"WHERE last_day_flg = 1\n"
+        f"GROUP BY 1 ORDER BY 2 DESC LIMIT 200",
+    ),
+    # Промах: таблицы с таким именем нет и не будет.
+    (
+        "Probe missing",
+        f"SELECT 1 FROM {VALUES_TABLE}__zz_recon_probe_no_such_table LIMIT 1",
+    ),
+]
+for i, (nm, sql) in enumerate(PHASE_D):
+    n = node(nm, TRINO_TYPE, TRINO_TV, [720 + i * 220, 620],
+             {"query": sql, **copy.deepcopy(TRINO_OPTS)}, TRINO_CRED)
+    n["onError"] = "continueRegularOutput"
+    nodes.append(n)
+
+SHAPE_VALUES_JS = r"""
+// Разбор трёх проб Trino. Ничего не решает — печатает, что удалось узнать,
+// чтобы решение принял человек.
+const look = (name) => {
+  try { return $(name).all().map((x) => x.json); } catch (e) { return null; }
+};
+const out = [];
+const say = (s) => out.push(s);
+
+const describe = (name) => {
+  const items = look(name);
+  if (items === null) return `${name}: узел не выполнялся`;
+  if (!items.length) return `${name}: ноль элементов`;
+  const first = items[0] || {};
+  // n8n при onError кладёт текст отказа в поле error элемента.
+  const err = first.error || first.message || (first.json && first.json.error);
+  if (err) return `${name}: ОТКАЗ — ${JSON.stringify(err).slice(0, 600)}`;
+  return `${name}: ${items.length} строк, ключи первой: ` +
+    Object.keys(first).join(', ') + '\\n  первая строка: ' +
+    JSON.stringify(first).slice(0, 400);
+};
+
+say('=== ФАЗА D: значения полей через Trino ===');
+say('');
+for (const n of ['Probe catalogs', 'Probe values', 'Probe missing']) say(describe(n));
+
+say('');
+say('ЧТО С ЭТИМ ДЕЛАТЬ:');
+say('— «Probe values» вернул строки → аккаунт видит витрину, и значения');
+say('  можно тянуть. Посмотрите число разных значений: от него зависит,');
+say('  нужен ли потолок в шейпере и какой.');
+say('— «Probe values» отказал, а «Probe catalogs» вернул список → дело');
+say('  в префиксе каталога. Возьмите нужный из списка и перепишите');
+say('  VALUES_TABLE в build_dd_recon.py, прогон повторить.');
+say('— Сравните текст отказа «Probe values» с «Probe missing». Если они');
+say('  РАЗНЫЕ — значит недоступную витрину можно отличить от пустого');
+say('  результата, и это то, на чём будет стоять диагностика в DD Lookup.');
+say('  Если ОДИНАКОВЫЕ — отличить нельзя, и тогда список доступных витрин');
+say('  придётся держать явно, со всеми издержками копии.');
+
+return [{ json: { values_recon: out.join('\\n') } }];
+"""
+
+nodes.append(code("Shape values", [1380, 620], SHAPE_VALUES_JS))
+
 CHAIN = (
     ["Run recon"]
     + [n for n, _ in PHASE_A]
     + ["Shape recon", "Search probe", "Tables", "Notes of table",
        "Collect notes", "Note link", "Build bridge"]
+    + [n for n, _ in PHASE_D]
+    + ["Shape values"]
 )
 conn = {
     a: {"main": [[{"node": b, "type": "main", "index": 0}]]}
@@ -592,5 +719,10 @@ print(f"  витрин из реестра: {len(TABLE_URNS)}")
 print(f"  ключей эталона:   {len(FEEDBACK_KEYS)}")
 print()
 print("Импортировать НОВЫМ воркфлоу (он ничего не вызывает по id), запустить")
-print("вручную и прочитать вывод трёх нод: «Shape recon» — где владелец,")
-print("«Build bridge» — готовые строки моста, «Search probe» — форма поиска.")
+print("вручную и прочитать вывод четырёх нод:")
+print("  «Shape recon»  — где у отчёта владелец")
+print("  «Build bridge» — готовые строки моста «ключ ссылки → dd_urn»")
+print("  «Search probe» — форма тела и ответа POST /search/query")
+print("  «Shape values» — видит ли Trino витрины, кардинальность поля")
+print("                   и чем отказ по недоступной таблице отличается")
+print("                   от пустого результата")

@@ -360,6 +360,86 @@
       ],
       "id": "recon-build-bridge",
       "name": "Build bridge"
+    },
+    {
+      "parameters": {
+        "query": "SHOW CATALOGS",
+        "timeout": 900,
+        "timeZone": "Europe/Moscow"
+      },
+      "type": "CUSTOM.trino",
+      "typeVersion": 3,
+      "position": [
+        720,
+        620
+      ],
+      "id": "recon-probe-catalogs",
+      "name": "Probe catalogs",
+      "credentials": {
+        "trinoApi": {
+          "id": "82c1YyhkiBGT25Ag",
+          "name": "DWH (Trino DLH) account 128"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "query": "SELECT emp_specialization_desc, count(*) AS cnt\nFROM prod_v_emart.mdm_employee_structure_d\nWHERE last_day_flg = 1\nGROUP BY 1 ORDER BY 2 DESC LIMIT 200",
+        "timeout": 900,
+        "timeZone": "Europe/Moscow"
+      },
+      "type": "CUSTOM.trino",
+      "typeVersion": 3,
+      "position": [
+        940,
+        620
+      ],
+      "id": "recon-probe-values",
+      "name": "Probe values",
+      "credentials": {
+        "trinoApi": {
+          "id": "82c1YyhkiBGT25Ag",
+          "name": "DWH (Trino DLH) account 128"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "query": "SELECT 1 FROM prod_v_emart.mdm_employee_structure_d__zz_recon_probe_no_such_table LIMIT 1",
+        "timeout": 900,
+        "timeZone": "Europe/Moscow"
+      },
+      "type": "CUSTOM.trino",
+      "typeVersion": 3,
+      "position": [
+        1160,
+        620
+      ],
+      "id": "recon-probe-missing",
+      "name": "Probe missing",
+      "credentials": {
+        "trinoApi": {
+          "id": "82c1YyhkiBGT25Ag",
+          "name": "DWH (Trino DLH) account 128"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Разбор трёх проб Trino. Ничего не решает — печатает, что удалось узнать,\n// чтобы решение принял человек.\nconst look = (name) => {\n  try { return $(name).all().map((x) => x.json); } catch (e) { return null; }\n};\nconst out = [];\nconst say = (s) => out.push(s);\n\nconst describe = (name) => {\n  const items = look(name);\n  if (items === null) return `${name}: узел не выполнялся`;\n  if (!items.length) return `${name}: ноль элементов`;\n  const first = items[0] || {};\n  // n8n при onError кладёт текст отказа в поле error элемента.\n  const err = first.error || first.message || (first.json && first.json.error);\n  if (err) return `${name}: ОТКАЗ — ${JSON.stringify(err).slice(0, 600)}`;\n  return `${name}: ${items.length} строк, ключи первой: ` +\n    Object.keys(first).join(', ') + '\\\\n  первая строка: ' +\n    JSON.stringify(first).slice(0, 400);\n};\n\nsay('=== ФАЗА D: значения полей через Trino ===');\nsay('');\nfor (const n of ['Probe catalogs', 'Probe values', 'Probe missing']) say(describe(n));\n\nsay('');\nsay('ЧТО С ЭТИМ ДЕЛАТЬ:');\nsay('— «Probe values» вернул строки → аккаунт видит витрину, и значения');\nsay('  можно тянуть. Посмотрите число разных значений: от него зависит,');\nsay('  нужен ли потолок в шейпере и какой.');\nsay('— «Probe values» отказал, а «Probe catalogs» вернул список → дело');\nsay('  в префиксе каталога. Возьмите нужный из списка и перепишите');\nsay('  VALUES_TABLE в build_dd_recon.py, прогон повторить.');\nsay('— Сравните текст отказа «Probe values» с «Probe missing». Если они');\nsay('  РАЗНЫЕ — значит недоступную витрину можно отличить от пустого');\nsay('  результата, и это то, на чём будет стоять диагностика в DD Lookup.');\nsay('  Если ОДИНАКОВЫЕ — отличить нельзя, и тогда список доступных витрин');\nsay('  придётся держать явно, со всеми издержками копии.');\n\nreturn [{ json: { values_recon: out.join('\\\\n') } }];\n",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        620
+      ],
+      "id": "recon-shape-values",
+      "name": "Shape values"
     }
   ],
   "connections": {
@@ -489,6 +569,50 @@
         [
           {
             "node": "Build bridge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build bridge": {
+      "main": [
+        [
+          {
+            "node": "Probe catalogs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Probe catalogs": {
+      "main": [
+        [
+          {
+            "node": "Probe values",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Probe values": {
+      "main": [
+        [
+          {
+            "node": "Probe missing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Probe missing": {
+      "main": [
+        [
+          {
+            "node": "Shape values",
             "type": "main",
             "index": 0
           }
