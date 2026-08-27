@@ -663,7 +663,7 @@ const describe = (name) => {
   const err = first.error || first.message || (first.json && first.json.error);
   if (err) return `${name}: ОТКАЗ — ${JSON.stringify(err).slice(0, 600)}`;
   return `${name}: ${items.length} строк, ключи первой: ` +
-    Object.keys(first).join(', ') + '\\n  первая строка: ' +
+    Object.keys(first).join(', ') + '\n  первая строка: ' +
     JSON.stringify(first).slice(0, 400);
 };
 
@@ -685,7 +685,7 @@ say('  результата, и это то, на чём будет стоять
 say('  Если ОДИНАКОВЫЕ — отличить нельзя, и тогда список доступных витрин');
 say('  придётся держать явно, со всеми издержками копии.');
 
-return [{ json: { values_recon: out.join('\\n') } }];
+return [{ json: { values_recon: out.join('\n') } }];
 """
 
 nodes.append(code("Shape values", [1380, 620], SHAPE_VALUES_JS))
