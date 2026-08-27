@@ -1,0 +1,5148 @@
+openapi: 3.0.3
+info:
+  title: Data Detective 2.0 Public API
+  description: Public API Documentation
+  version: 1.0.0
+tags:
+  - name: entity
+    description: Entity API
+  - name: batch
+    description: Batch API
+  - name: entity-attribute
+    description: Entity Attribute API
+  - name: entity-summary
+    description: Entity Summary API
+  - name: entity-table
+    description: Entity Table API
+  - name: entity-markdown
+    description: Entity Markdown API
+  - name: entity-code
+    description: Entity Code API
+  - name: entity-notification
+    description: Entity Notification API
+  - name: entity-tag
+    description: Entity Tag API
+  - name: entity-link
+    description: Entity Links API
+  - name: related-entity
+    description: Related Entity API
+  - name: relation
+    description: Relation API
+  - name: relation-via
+    description: Relation Via API
+  - name: relation-attribute
+    description: Relation Attribute API
+  - name: metric
+    description: Metric API
+  - name: search
+    description: Search API
+  - name: lineage
+    description: Lineage API
+  - name: requirement-dq-metric
+    description: Requirement DQ Metric API
+  - name: tree
+    description: Tree API
+security:
+  - spiritToken: [ ]
+paths:
+  /api/v3/search/query:
+    post:
+      tags:
+        - search
+      operationId: searchQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        200:
+          description: Список найденных карточек
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchCard'
+        401:
+          description: Unauthorized
+        400:
+          $ref: '#/components/responses/ValidationError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/search/facets/{facetKey}/filters:
+    post:
+      tags:
+        - search
+      summary: getFacetFilters
+      operationId: getFacetFilters
+      parameters:
+        - name: facetKey
+          in: path
+          required: true
+          description: Системный ключ фасета
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchFacetFiltersRequest'
+      responses:
+        200:
+          description: Список фильтров фасета
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchFacetFilter'
+        401:
+          description: Unauthorized
+        400:
+          $ref: '#/components/responses/ValidationError'
+        404:
+          description: Фасет с переданным названием не существует
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/batch:
+    post:
+      summary: Выполнить батч-операции в транзакции
+      operationId: executeBatch
+      tags: [ batch ]
+      description: Примеры всех типов операцией есть [здесь](https://gitlab.tcsbank.ru/mg/dd-catalog/-/blob/master/component-test/src/componentTest/resources/BatchTest/catalog-request.json)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/BatchOperation'
+      responses:
+        200:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/BatchOperationResult'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/full-entity:
+    post:
+      operationId: postFullEntity
+      tags: [ entity ]
+      summary: Create full entity with all resources and relations
+      description: Create entity
+      requestBody:
+        description: Entity payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FullEntityWithRelations'
+      responses:
+        200:
+          description: Entity created
+          content:
+            application/json:
+              schema:
+                title: EntityUrn
+                type: string
+                description: Entity urn for created entity
+                example: urn:dd:system:entity_type:entity_name
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity:
+    post:
+      operationId: postEntity
+      tags: [ entity ]
+      summary: Create entity
+      description: Create entity
+      requestBody:
+        description: Entity payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewEntity'
+      responses:
+        200:
+          description: Entity created
+          content:
+            application/json:
+              schema:
+                title: EntityUrn
+                type: string
+                description: Entity urn for created entity
+                example: urn:dd:system:entity_type:entity_name
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}:
+    get:
+      operationId: getEntity
+      tags: [ entity ]
+      summary: Get entity
+      description: Get entity by urn with custom response fields
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/entityFields'
+      responses:
+        200:
+          $ref: '#/components/responses/EntityResponse'
+        400:
+          $ref: '#/components/responses/ValidationError'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ entity ]
+      operationId: putEntity
+      summary: Update entity by urn
+      description: Update entity with all blocks (optional)
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      requestBody:
+        description: Entity payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewEntity'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity ]
+      operationId: deleteEntity
+      summary: Delete entity
+      description: Delete entity by urn
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/oldUrn/{urn}:
+    get:
+      operationId: getNewUrnsByOldUrn
+      tags: [ entity ]
+      summary: Get new urns by old urn
+      description: Get new urns by old urn
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          description: New urn
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NewUrn'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/history:
+    get:
+      operationId: getEntityHistory
+      tags: [ entity ]
+      summary: Get entity history
+      description: Get entity history by urn
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/aroundDate'
+        - $ref: '#/components/parameters/afterDate'
+        - $ref: '#/components/parameters/beforeDate'
+      responses:
+        200:
+          description: Entity history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EntityHistory'
+        400:
+          $ref: '#/components/responses/ValidationError'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/attribute:
+    get:
+      operationId: getAttributes
+      tags: [ entity-attribute ]
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/AttributesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/attribute/{key}:
+    get:
+      tags: [ entity-attribute ]
+      operationId: getAttribute
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/AttributeResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+    put:
+      tags: [ entity-attribute ]
+      operationId: putAttribute
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      requestBody:
+        description: Attribute payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttributePayload'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-attribute ]
+      operationId: deleteAttribute
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/markdown:
+    get:
+      tags: [ entity-markdown ]
+      operationId: getMarkdowns
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/MarkdownsResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/markdown/{key}:
+    get:
+      tags: [ entity-markdown ]
+      operationId: getMarkdown
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/MarkdownResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ entity-markdown ]
+      operationId: putMarkdown
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      requestBody:
+        description: Markdown payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkdownPayload'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-markdown ]
+      operationId: deleteMarkdown
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/code:
+    get:
+      tags: [ entity-code ]
+      operationId: getCodes
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/CodesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/code/{key}:
+    get:
+      tags: [ entity-code ]
+      operationId: getCode
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/CodeResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ entity-code ]
+      operationId: putCode
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      requestBody:
+        description: Code payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodePayload'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-code ]
+      operationId: deleteCode
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/table:
+    get:
+      tags: [ entity-table ]
+      operationId: getTables
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/TablesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/table/{key}:
+    get:
+      tags: [ entity-table ]
+      operationId: getTable
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/TableResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ entity-table ]
+      operationId: putTable
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      requestBody:
+        description: Table payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewTablePayload'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-table ]
+      operationId: deleteTable
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/notification:
+    get:
+      tags: [ entity-notification ]
+      operationId: getNotifications
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/NotificationsResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/notification/{key}:
+    get:
+      tags: [ entity-notification ]
+      operationId: getNotification
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/NotificationResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ entity-notification ]
+      operationId: putNotification
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      requestBody:
+        description: Notification payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPayload'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-notification ]
+      operationId: deleteNotification
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/tag:
+    get:
+      tags: [ entity-tag ]
+      operationId: getTags
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/TagsResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/tag/{name}:
+    put:
+      tags: [ entity-tag ]
+      operationId: putTag
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/name'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-tag ]
+      operationId: deleteTag
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/name'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/link:
+    get:
+      tags: [ entity-link ]
+      operationId: getLinks
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/LinksResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/link/{key}:
+    get:
+      tags: [ entity-link ]
+      operationId: getLink
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/LinkResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ entity-link ]
+      operationId: putLink
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      requestBody:
+        description: Link payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkPayload'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-link ]
+      operationId: deleteLink
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/summary:
+    get:
+      tags: [ entity-summary ]
+      operationId: getSummary
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/SummaryResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ entity-summary ]
+      operationId: putSummary
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      requestBody:
+        description: Summary payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Summary'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ entity-summary ]
+      operationId: deleteSummary
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/requirements:
+    get:
+      tags: [ entity-requirements ]
+      operationId: getRequirements
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          description: Requirements by type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Requirements'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/requirements/{type}:
+    get:
+      tags: [ entity-requirements ]
+      operationId: getRequirementsByType
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: type
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/RequirementType'
+      responses:
+        200:
+          description: Requirement resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementResource'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/requirement-dq-metric:
+    get:
+      tags: [ requirement-dq-metric ]
+      operationId: getRequirementDqMetrics
+      summary: Get all DQ metrics for entity
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          description: List of DQ metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RequirementDqMetric'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/requirement-dq-metric/{metricId}:
+    get:
+      tags: [ requirement-dq-metric ]
+      operationId: getRequirementDqMetricByMetricId
+      summary: Get DQ metric by metricId
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: metricId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: DQ metric found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementDqMetric'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/relation/{relationId}:
+    get:
+      tags: [ relation ]
+      operationId: getRelationById
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+      responses:
+        200:
+          $ref: '#/components/responses/RelationResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ relation ]
+      operationId: deleteRelationById
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/relation:
+    post:
+      tags: [ relation ]
+      operationId: postRelation
+      requestBody:
+        description: Relation payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Relation'
+      responses:
+        200:
+          description: Relation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelationId'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ relation ]
+      operationId: deleteRelation
+      requestBody:
+        description: Relation payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Relation'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/{urn}/related:
+    get:
+      tags: [ related-entity ]
+      operationId: getRelationsQueries
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        200:
+          description: Relation queries by urn
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/RelationQuery'
+        400:
+          $ref: '#/components/responses/ValidationError'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/related-by-query:
+    post:
+      tags: [ related-entity ]
+      operationId: getRelatedEntityByUrn
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - $ref: '#/components/parameters/entityFields'
+        - $ref: '#/components/parameters/relationFields'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/search'
+        - $ref: '#/components/parameters/aroundUrn'
+        - $ref: '#/components/parameters/afterUrn'
+        - $ref: '#/components/parameters/beforeUrn'
+      requestBody:
+        description: Relations conditional payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelationsConditional'
+      responses:
+        200:
+          $ref: '#/components/responses/RelatedEntitiesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/related/{key}:
+    get:
+      tags: [ related-entity ]
+      operationId: getRelatedEntityByUrnAndKey
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/entityFields'
+        - $ref: '#/components/parameters/relationFields'
+        - $ref: '#/components/parameters/limitNotRequired'
+        - $ref: '#/components/parameters/search'
+        - $ref: '#/components/parameters/aroundUrn'
+        - $ref: '#/components/parameters/afterUrn'
+        - $ref: '#/components/parameters/beforeUrn'
+      responses:
+        200:
+          $ref: '#/components/responses/RelatedEntitiesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/entity/batch/related-by-query:
+    post:
+      tags: [ related-entity ]
+      operationId: getBatchRelatedEntityByUrns
+      requestBody:
+        description: Relations conditional payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRelationsConditional'
+      responses:
+        200:
+          $ref: '#/components/responses/BatchRelatedEntitiesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/batch/related:
+    post:
+      tags: [ related-entity ]
+      operationId: getBatchRelatedEntityByUrnsAndKey
+      requestBody:
+        description: Relations conditional payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRelatedEntitiesByKey'
+      responses:
+        200:
+          $ref: '#/components/responses/BatchRelatedEntitiesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/relation/{relationId}/via:
+    get:
+      tags: [ relation-via ]
+      operationId: getRelationVias
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+      responses:
+        200:
+          $ref: '#/components/responses/RelationViaResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/relation/{relationId}/via/{viaUrn}:
+    post:
+      tags: [ relation-via ]
+      operationId: postRelationVia
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+        - $ref: '#/components/parameters/viaUrn'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ relation-via ]
+      operationId: deleteRelationVia
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+        - $ref: '#/components/parameters/viaUrn'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/relation/{relationId}/attribute:
+    get:
+      tags: [ relation-attribute ]
+      operationId: getRelationAttributes
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+      responses:
+        200:
+          $ref: '#/components/responses/RelationAttributesResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/relation/{relationId}/attribute/{key}:
+    get:
+      tags: [ relation-attribute ]
+      operationId: getRelationAttribute
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/RelationAttributeResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    put:
+      tags: [ relation-attribute ]
+      operationId: putRelationAttribute
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+        - $ref: '#/components/parameters/key'
+      requestBody:
+        description: Relation attribute payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelationAttributePayload'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    delete:
+      tags: [ relation-attribute ]
+      operationId: deleteRelationAttribute
+      parameters:
+        - $ref: '#/components/parameters/relationId'
+        - $ref: '#/components/parameters/key'
+      responses:
+        200:
+          $ref: '#/components/responses/Empty200'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        403:
+          $ref: '#/components/responses/ForbiddenError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        400:
+          $ref: '#/components/responses/ValidationsError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  # возвращает линк, бейдж или серию из таблицы с ключем
+  /api/v3/entity/{urn}/metrics-group/{group}/format/{format}/metric/{metric}:
+    get:
+      tags: [ metric ]
+      operationId: getMetricsByUrnAndGroupAndFormatAndKey
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/MetricFormat'
+        - name: metric
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/MetricsByKeyResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/metrics-group/{group}/format/{format}/metric:
+    get:
+      tags: [ metric ]
+      operationId: getMetricsKeyByUrnAndGroupAndFormat
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/MetricFormat'
+      responses:
+        '200':
+          $ref: '#/components/responses/MetricsKeyListResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  # возвращает все линки, все бейджы или таблицу
+  /api/v3/entity/{urn}/metrics-group/{group}/format/{format}:
+    get:
+      tags: [ metric ]
+      operationId: getMetricsByUrnAndGroupAndFormat
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/MetricFormat'
+      responses:
+        '200':
+          $ref: '#/components/responses/MetricsByTypeResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/metrics-group/{group}/format:
+    get:
+      tags: [ metric ]
+      operationId: getMetricsFormatByUrnAndGroup
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/MetricsFormatListResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/metrics-group/{group}:
+    get:
+      tags: [ metric ]
+      operationId: getMetricsByUrnAndGroup
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/MetricsGroupResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/entity/{urn}/metrics-group:
+    get:
+      tags: [ metric ]
+      operationId: getMetricsGroupByUrn
+      parameters:
+        - $ref: '#/components/parameters/urn'
+      responses:
+        '200':
+          $ref: '#/components/responses/MetricsGroupListResponse'
+        401:
+          $ref: '#/components/responses/NotAuthorizedError'
+        404:
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+  /api/v3/change-request:
+    post:
+      tags:
+        - change-request
+      summary: Create CR
+      description: |
+        Создаёт новый запрос на изменение. Изначальный статус - open, состояние - WIP (по умолчанию). Запрос становится доступен для редактирования и согласования.
+      operationId: createChangeRequest
+      requestBody:
+        description: CR payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestCreateRequest'
+      responses:
+        '201':
+          description: Запрос успешно создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-requests:
+    get:
+      tags:
+        - change-request
+      summary: Get Change Requests List
+      description: |
+        Возвращает пагинированный список запросов на изменение с поддержкой фильтрации по статусу и состоянию.
+        Ответ содержит краткую информацию о каждом запросе.
+      operationId: getChangeRequestList
+      parameters:
+        - name: search
+          in: query
+          description: Поиск по title CR
+          required: false
+          schema:
+            type: string
+        - name: objectUrns
+          in: query
+          description: Поиск по urn объектов в CR
+          required: false
+          schema:
+            type: array
+            uniqueItems: true
+            items:
+              type: string
+        - name: statuses
+          in: query
+          description: Фильтр по статусу запроса. Допустимые значения - open, closed, published
+          required: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/ChangeRequestStatus'
+            uniqueItems: true
+        - name: openStates
+          in: query
+          description: |
+            Детализированные состояния для OPEN
+            in_progress - wip=true
+            review - wip=false, approved=false
+            approved - wip=false, approved=true
+          required: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/CombinedOpenState'
+            uniqueItems: true
+        - name: createdBy
+          in: query
+          description: Логины пользователей или названия SA
+          required: false
+          schema:
+            type: array
+            uniqueItems: true
+            items:
+              type: string
+        - name: approvers
+          in: query
+          description: Логины пользователей или названия SA
+          required: false
+          schema:
+            type: array
+            uniqueItems: true
+            items:
+              type: string
+        - name: page
+          in: query
+          description: Номер страницы (начинается с 0)
+          required: true
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Размер страницы (количество элементов)
+          required: true
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Список запросов успешно возвращён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestListResponse'
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}:
+    get:
+      tags:
+        - change-request
+      summary: Get Change Request by id
+      description: Возвращает Change Request по идентификатору
+      operationId: getChangeRequestById
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      responses:
+        '200':
+          description: Change Request успешно найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequest'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    patch:
+      tags:
+        - change-request
+      summary: Update Change Request
+      description: |
+        Обновляет поля запроса: `title`, `description`, `wip`.
+        Доступно только если статус CR — `open`
+      operationId: updateChangeRequest
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      requestBody:
+        description: Данные для обновления запроса
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChangeRequestRequest'
+      responses:
+        '200':
+          description: Запрос успешно обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateChangeRequestResponse'
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/validate:
+    post:
+      tags:
+        - change-request
+      summary: Validate CR
+      description: |
+        Запускает валидацию запроса на изменение:
+        - Проверяет корректность данных
+        - Проверяет наличие конфликтов
+        - Сохраняет результат валидации
+      operationId: validateChangeRequest
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      responses:
+        '204':
+          description: Валидация пройдена успешно, ошибок нет
+        '200':
+          description: Результат валидации изменений
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ValidationResult'
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/approvals:
+    get:
+      tags:
+        - change-request
+      summary: Get Approvals by CR
+      description: Возвращает список согласований для запроса на изменение.
+      operationId: getChangeApproveStateByChangeRequestId
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      responses:
+        '200':
+          description: Аппруверы успешно посчитаны и возвращены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalsResponse'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/publish:
+    post:
+      tags:
+        - change-request
+      summary: Publish Change Request
+      description: |
+        Применяет все изменения из запроса, если:
+        - Статус = `open`
+        - Состояние = `approved`
+        - Нет ошибок валидации
+        - Нет конфликтов
+
+        Валидация и проверка аппрувов пересчитывается перед проверкой.
+      operationId: publishChangeRequest
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Comment'
+      responses:
+        '204':
+          description: Запрос успешно опубликован
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/close:
+    post:
+      tags:
+        - change-request
+      summary: Close Change Request
+      description: |
+        Переводит запрос на изменение из статуса open в closed.
+        После перевода статус устанавливается в `closed`, а флаг `wip` в `false`, апрувы слетают.
+        Опционально может быть передан комментарий.
+      operationId: closeChangeRequest
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Comment'
+      responses:
+        '200':
+          description: Запрос успешно переведён в статус closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestStatusUpdateResponse'
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/approve:
+    post:
+      tags:
+        - change-request
+      summary: Approve Change Request
+      description: |
+        Фиксирует факт подтверждения (approve) запроса на изменение от имени пользователя.
+        Доступно только если статус CR = open
+      operationId: approveChangeRequest
+      parameters:
+        - $ref: "#/components/parameters/crId"
+      requestBody:
+        description: Данные для подтверждения запроса
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRequest'
+      responses:
+        '204':
+          description: Запрос успешно подтверждён
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/unapprove:
+    post:
+      tags:
+        - change-request
+      summary: Unapprove Change Request
+      description: |
+        Убирает статус Approved у CR от вызвавшего пользователя
+      operationId: unapproveChangeRequest
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      requestBody:
+        description: Данные для снятия подтверждения
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Comment'
+      responses:
+        '204':
+          description: Подтверждение успешно снято
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/changes:
+    get:
+      tags:
+        - change-request
+      summary: Получить changes в Change Request
+      description: Возвращает постранично список изменений в указанном CR
+      operationId: getChangeRequestChanges
+      parameters:
+        - $ref: '#/components/parameters/crId'
+        - name: page
+          in: query
+          description: Номер страницы (начинается с 0)
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Размер страницы
+          required: false
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 50
+        - name: includeEmpty
+          in: query
+          description: Включать ли empty изменения в ответ. По умолчанию false.
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Список changes успешно возвращён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestChangeListResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+    patch:
+      tags:
+        - change-request
+      summary: Update Changes in CR
+      description: |
+        Обновляет пакет изменений, связанных с запросом.
+        Доступно только если:
+        - Статус CR — `open`
+
+        При успешном обновлении:
+        - Все существующие `approve` снимаются
+        - Состояние `approved` для всего CR пересчитывается
+      operationId: updateChangeRequestChanges
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      requestBody:
+        description: Массив изменений
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChangeRequestChange'
+      responses:
+        '200':
+          description: Изменения успешно обновлены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateChangesResponse'
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/change-request/{id}/rebase:
+    post:
+      tags:
+        - change-request
+      summary: Rebase Change Request
+      description: |
+        Возвращает актуальное значение данных в change'ах, где требуется ребейз.
+        Используется, если другие изменения уже внесены в те же ресурсы.
+        Доступно только в статусе open.
+      operationId: rebaseChangeRequest
+      parameters:
+        - $ref: '#/components/parameters/crId'
+      responses:
+        '200':
+          description: Успешно. Возвращены изменения с актуальными данными.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RebaseConflictItem'
+        '400':
+          $ref: '#/components/responses/ValidationsError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/lineage/{urn}:
+    get:
+      tags:
+        - lineage
+      summary: Get lineage
+      description: |
+        Возвращает lineage для сущности в формате JSON.
+      operationId: getLineage
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: direction
+          in: query
+          description: Направление (FORWARD/BACKWARD)
+          required: true
+          schema:
+            $ref: '#/components/schemas/LineageDirection'
+        - name: depth
+          in: query
+          description: Глубина обхода графа
+          required: false
+          schema:
+            type: integer
+            default: 2
+            minimum: 1
+            maximum: 5
+        - name: relationTypes
+          in: query
+          description: Типы связей для фильтрации
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+            uniqueItems: true
+            default: ["LOADS", "SUPPLIES", "READS", "WRITES"]
+        - name: entityTypes
+          in: query
+          description: Фильтр по типам сущностей
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+            uniqueItems: true
+        - name: schemas
+          in: query
+          description: Фильтр по схемам (для PHYSICAL_TABLE и PHYSICAL_COLUMN)
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+            uniqueItems: true
+      responses:
+        '200':
+          description: Текстовое lineage в формате JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineageNode'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+  /api/v3/tree/{urn}/parents:
+    get:
+      tags:
+        - tree
+      summary: Get parent entities
+      description: |
+        Возвращает список родителей для указанной сущности.
+        Массив отсортирован от ближнего к дальнему родительскому узлу.
+      operationId: getParents
+      parameters:
+        - $ref: '#/components/parameters/urn'
+        - name: depth
+          in: query
+          description: Глубина обхода графа
+          required: false
+          schema:
+            type: integer
+            default: 2
+            minimum: 1
+            maximum: 10
+      responses:
+        '200':
+          $ref: '#/components/responses/ParentsResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/NotAuthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        default:
+          $ref: '#/components/responses/DefaultError'
+
+
+
+components:
+  securitySchemes:
+    spiritToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    ParentsResponse:
+      description: Успешно. Возвращены родители.
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Parent'
+    BatchRelatedEntitiesResponse:
+      description: Batch Related entities response
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties:
+              $ref: '#/components/schemas/RelatedEntities'
+    RelatedEntitiesResponse:
+      description: Related entities response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RelatedEntities'
+    MetricsKeyListResponse:
+      description: Metrics key list response
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              type: string
+    MetricsFormatListResponse:
+      description: Metrics type list response
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/MetricFormat'
+            uniqueItems: true
+    MetricsGroupListResponse:
+      description: Metrics group list response
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              type: string
+    MetricsByKeyResponse:
+      description: Metrics by key response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Metric'
+    MetricsByTypeResponse:
+      description: Metrics by type response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MetricsByType'
+    MetricsGroupResponse:
+      description: Metrics group response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MetricsGroup'
+    EntityResponse:
+      description: Entity Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Entity'
+    EntitiesResponse:
+      description: Entities Response
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Entity'
+    AttributesResponse:
+      description: Attributes Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Attributes'
+    AttributeResponse:
+      description: Attribute Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AttributePayload'
+    MarkdownsResponse:
+      description: Markdowns Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Markdowns'
+    MarkdownResponse:
+      description: Markdown Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MarkdownPayload'
+    CodesResponse:
+      description: Codes Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Codes'
+    CodeResponse:
+      description: Code Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CodePayload'
+    TablesResponse:
+      description: Tables Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Tables'
+    TableResponse:
+      description: Table Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TablePayload'
+    NotificationsResponse:
+      description: Notifications Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Notifications'
+    NotificationResponse:
+      description: Notification Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NotificationPayload'
+    TagsResponse:
+      description: Tag Response
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Tag'
+    TagResponse:
+      description: Tag Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Tag'
+    LinksResponse:
+      description: Links Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Links'
+    LinkResponse:
+      description: Link Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LinkPayload'
+    SummaryResponse:
+      description: Summary Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Summary'
+
+    RelationResponse:
+      description: Relation Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FullRelation'
+    RelationViaResponse:
+      description: Relation Via Response
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/RelationVia'
+    RelationAttributesResponse:
+      description: Relation Attributes Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RelationAttribute'
+    RelationAttributeResponse:
+      description: Relation Attribute Response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RelationAttributePayload'
+    ValidationError:
+      description: Validation Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    ValidationsError:
+      description: Validations Error
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/ErrorDto'
+    NotFoundError:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    NotAuthorizedError:
+      description: Not authorized
+    ForbiddenError:
+      description: Forbidden
+    DefaultError:
+      description: Unknown error
+      content:
+        text/plain:
+          schema:
+            type: string
+    Empty200:
+      description: OK
+  parameters:
+    crId:
+      name: id
+      in: path
+      description: Уникальный идентификатор запроса на изменение
+      required: true
+      schema:
+        type: integer
+    search:
+      name: search
+      in: query
+      required: false
+      description: Search query
+      schema:
+        type: string
+    limit:
+      name: limit
+      in: query
+      description: Limit for page
+      required: true
+      schema:
+        type: integer
+        default: 100
+        maximum: 10000
+        minimum: 1
+    limitNotRequired:
+      name: limit
+      in: query
+      description: Limit for page
+      required: false
+      schema:
+        type: integer
+        default: 100
+        maximum: 10000
+        minimum: 1
+    aroundUrn:
+      name: aroundUrn
+      in: query
+      description: URN of entity to get around
+      required: false
+      schema:
+        type: string
+    beforeUrn:
+      name: beforeUrn
+      in: query
+      description: URN of entity to get before
+      required: false
+      schema:
+        type: string
+    afterUrn:
+      name: afterUrn
+      in: query
+      description: URN of entity to get after
+      required: false
+      schema:
+        type: string
+    aroundDate:
+      name: aroundDate
+      in: query
+      description: Date to get around
+      required: false
+      schema:
+        type: string
+        format: date-time
+    beforeDate:
+      name: beforeDate
+      in: query
+      description: Date to get before
+      required: false
+      schema:
+        type: string
+        format: date-time
+    afterDate:
+      name: afterDate
+      in: query
+      description: Date to get after
+      required: false
+      schema:
+        type: string
+        format: date-time
+    relationFields:
+      name: relationFields
+      in: query
+      description: Relation fields to get
+      schema:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: '#/components/schemas/RelationField'
+    entityFields:
+      name: entityFields
+      in: query
+      description: Entity's fields to return
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/EntityField'
+        uniqueItems: true
+    urn:
+      name: urn
+      in: path
+      required: true
+      schema:
+        type: string
+        description: urn of entity
+        example: urn:dd:system:entity_type:entity_name
+    relationId:
+      name: relationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    viaUrn:
+      name: viaUrn
+      in: path
+      required: true
+      schema:
+        type: string
+    key:
+      name: key
+      in: path
+      required: true
+      schema:
+        type: string
+    name:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    Parent:
+      type: object
+      required:
+        - urn
+        - id
+      properties:
+        urn:
+          type: string
+          description: URN of parent
+        id:
+          type: string
+          format: uuid
+          description: ID of parent
+    CombinedOpenState:
+      type: string
+      enum: [ in_process, review, approved ]
+    RebaseConflictItem:
+      type: object
+      required:
+        - id
+        - urn
+        - data
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор изменения в CR
+        urn:
+          type: string
+          description: Идентификатор целевой сущности
+        data:
+          $ref: '#/components/schemas/ChangeDataResponse'
+
+    ValidationResult:
+      type: object
+      description: Результат валидации для одного из изменений в CR
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор change'а
+        hasConflict:
+          type: boolean
+          description: Признак конфликта
+        errors:
+          type: array
+          description: Список ошибок валидации
+          items:
+            $ref: '#/components/schemas/ErrorDto'
+      required:
+        - id
+        - hasConflict
+        - errors
+    ChangeRequestListResponse:
+      type: object
+      required:
+        - totalCount
+        - data
+      properties:
+        totalCount:
+          type: integer
+          description: Общее количество запросов
+        data:
+          type: array
+          description: Список запросов
+          items:
+            $ref: '#/components/schemas/ChangeRequest'
+    ChangeRequest:
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - wip
+        - createdBy
+        - createdAt
+        - updatedBy
+        - updatedAt
+        - approved
+        - approvers
+        - validity
+        - entityUrns
+      properties:
+        id:
+          type: integer
+          description: Уникальный идентификатор запроса
+        title:
+          type: string
+          description: Заголовок запроса
+        description:
+          type: string
+          description: Описание изменений
+        status:
+          $ref: "#/components/schemas/ChangeRequestStatus"
+        wip:
+          type: boolean
+          description: Признак, что запрос находится в работе
+        createdBy:
+          $ref: '#/components/schemas/Account'
+        createdAt:
+          type: string
+          format: date-time
+          description: Время создания запроса
+        updatedBy:
+          $ref: '#/components/schemas/Account'
+        updatedAt:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+        approved:
+          type: boolean
+          description: Признак, что все изменения в запросе согласованы.
+        approvers:
+          type: array
+          description: Список аппруверов запроса
+          items:
+            $ref: '#/components/schemas/Account'
+        validity:
+          type: boolean
+          description: Признак валидности всех изменений
+        entityUrns:
+          type: array
+          description: Список уникальных идентификаторов изменяемых сущностей
+          items:
+            type: string
+        dataProductUrn:
+          type: string
+          description: Продукт данных
+        dataProcessUrn:
+          type: string
+          description: Процесс данных
+    ChangeRequestChangeItem:
+      type: object
+      discriminator:
+        propertyName: resourceType
+        mapping:
+          markdown: '#/components/schemas/ChangeRequestChangeItemMarkdown'
+          summary: '#/components/schemas/ChangeRequestChangeItemSummary'
+          attribute: '#/components/schemas/ChangeRequestChangeItemAttribute'
+          requirement: '#/components/schemas/ChangeRequestChangeItemRequirement'
+          requirement-metrics: '#/components/schemas/ChangeRequestChangeItemRequirementMetrics'
+          entity: '#/components/schemas/ChangeRequestChangeItemEntity'
+          empty: '#/components/schemas/ChangeRequestChangeItemEmpty'
+      required:
+        - resourceType
+      properties:
+        isRollback:
+          type: boolean
+          description: Признак отмены изменений
+        urn:
+          type: string
+          description: Уникальный идентификатор целевой сущности
+        entityFqn:
+          $ref: '#/components/schemas/EntityFqn'
+          description: Уникальный идентификатор сущности (необходимо заполнить urn или entity)
+        resourceType:
+          type: string
+          description: Тип ресурса, подлежащего изменению
+
+    ChangeRequestChangeItemAttribute:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestChangeItem'
+        - $ref: '#/components/schemas/AttributeItem'
+
+    ChangeRequestChangeItemRequirement:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestChangeItem'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/RequirementPayload'
+
+    ChangeRequestChangeItemRequirementMetrics:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestChangeItem'
+        - type: object
+          required:
+            - metricId
+          properties:
+            metricId:
+              type: string
+              description: Идентификатор DQ-метрики
+            newValue:
+              type: boolean
+              description: >-
+                действие с метрикой: true — привязать, false — отвязать.
+                Не required: при isRollback=true достаточно metricId (для ключа).
+
+    AttributeItem:
+      type: object
+      required:
+        - key
+      properties:
+        key:
+          type: string
+          description: Ключ атрибута
+        data:
+          $ref: '#/components/schemas/AttributePayload'
+          description: Новое значение атрибута
+
+    UpdateChangeRequestRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Новое название запроса (опционально)
+        description:
+          type: string
+          description: Новое описание запроса (опционально)
+        wip:
+          type: boolean
+          description: Новое состояние WIP (опционально)
+        dataProductUrn:
+          type: string
+          description: Новое состояние Продукта данных (опционально)
+        dataProcessUrn:
+          type: string
+          description: Новое состояние Процесса данных (опционально)
+        comment:
+          type: string
+          description: Комментарий (опционально)
+      additionalProperties: false
+      minProperties: 1
+      description: Хотя бы одно поле должно быть указано
+
+    UpdateChangeRequestChange:
+      allOf:
+        - $ref: '#/components/schemas/Comment'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChangeRequestChangeItem'
+
+    UpdateChangeRequestResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Уникальный идентификатор запроса
+        title:
+          type: string
+          description: Обновлённое название
+        description:
+          type: string
+          description: Обновлённое описание
+        wip:
+          type: boolean
+          description: Обновлённое состояние WIP
+        dataProductUrn:
+          type: string
+          description: Продукт данных
+        dataProcessUrn:
+          type: string
+          description: Процесс данных
+        updatedBy:
+          type: string
+          description: Идентификатор пользователя, внесшего изменения
+        updatedAt:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+      required:
+        - id
+        - title
+        - wip
+        - updatedBy
+        - updatedAt
+
+    ChangeRequestChangeItemMarkdown:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestChangeItem'
+        - $ref: '#/components/schemas/MarkdownItem'
+
+    ChangeRequestChangeItemSummary:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestChangeItem'
+        - $ref: '#/components/schemas/SummaryItem'
+
+    ChangeRequestChangeItemEmpty:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestChangeItem'
+
+    EntityData:
+      type: object
+      properties:
+        displayName:
+          type: string
+          description: Отображаемое имя сущности
+        treeParentUrn:
+          type: string
+          description: Уникальный идентификатор родительской сущности
+
+    ChangeRequestChangeItemEntity:
+      allOf:
+        - $ref: '#/components/schemas/ChangeRequestChangeItem'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/EntityData'
+
+    EntityFqn:
+      type: object
+      required:
+        - system
+        - type
+        - fqn
+      properties:
+        system:
+          type: string
+          description: Система
+        type:
+          type: string
+          description: Тип сущности
+        fqn:
+          type: string
+          description: Полное имя сущности
+
+    MarkdownItem:
+      type: object
+      required:
+        - key
+      properties:
+        key:
+          type: string
+          description: Ключ ресурса
+        data:
+          type: string
+          description: Новое значение ресурса
+
+    SummaryItem:
+      type: object
+      properties:
+        data:
+          type: string
+
+
+
+    ChangeRequestCreateRequest:
+      type: object
+      required:
+        - title
+        - description
+        - wip
+        - changes
+      properties:
+        title:
+          type: string
+          description: Заголовок запроса на изменение
+        description:
+          type: string
+          description: Описание изменений
+        wip:
+          type: boolean
+          description: Признак, что запрос находится в работе
+          default: true
+        dataProductUrn:
+          type: string
+          description: Продукт данных (опционально)
+        dataProcessUrn:
+          type: string
+          description: Процесс данных (опционально)
+        changes:
+          type: array
+          description: Список изменений
+          items:
+            $ref: '#/components/schemas/ChangeRequestChangeItem'
+
+    ChangeRequestResponse:
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - wip
+        - createdBy
+        - createdAt
+        - changesCount
+      properties:
+        id:
+          type: integer
+          description: Уникальный идентификатор запроса
+        title:
+          type: string
+          description: Заголовок запроса
+        description:
+          type: string
+          description: Описание запроса
+        status:
+          $ref: "#/components/schemas/ChangeRequestStatus"
+        wip:
+          type: boolean
+          description: Признак, что запрос находится в работе
+        createdBy:
+          $ref: '#/components/schemas/Account'
+        createdAt:
+          type: string
+          format: date-time
+          description: Время создания запроса
+        changesCount:
+          type: integer
+          description: Количество изменений в запросе
+        dataProductUrn:
+          type: string
+          description: Продукт данных
+        dataProcessUrn:
+          type: string
+          description: Процесс данных
+
+    ChangeRequestStatus:
+      type: string
+      enum: [ open, closed, published ]
+      description: Статус запроса
+
+    ChangeRequestChangeListResponse:
+      type: object
+      required:
+        - totalCount
+        - data
+      properties:
+        totalCount:
+          type: integer
+          description: Общее количество изменений в запросе
+        data:
+          type: array
+          description: Список изменений в запросе
+          items:
+            $ref: '#/components/schemas/ChangeRequestChange'
+
+    ChangeRequestChange:
+      type: object
+      required:
+        - id
+        - urn
+        - data
+        - createdBy
+        - createdAt
+        - updatedBy
+        - updatedAt
+        - hasConflict
+        - errors
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор change'а
+        urn:
+          type: string
+          description: Уникальный идентификатор сущности
+        data:
+          $ref: '#/components/schemas/ChangeDataResponse'
+        createdBy:
+          $ref: '#/components/schemas/Account'
+        createdAt:
+          type: string
+          format: date-time
+          description: Время создания изменения
+        updatedBy:
+          $ref: '#/components/schemas/Account'
+        updatedAt:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+        hasConflict:
+          type: boolean
+          description: Признак конфликта с актуальным состоянием
+        errors:
+          type: array
+          description: Список ошибок валидации
+          items:
+            $ref: '#/components/schemas/ErrorDto'
+
+    ShortChangeRequestChangeResponse:
+      type: object
+      required:
+        - id
+        - urn
+        - data
+        - updatedBy
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор изменения
+        urn:
+          type: string
+          description: Идентификатор сущности
+        data:
+          $ref: '#/components/schemas/ChangeDataResponse'
+        createdBy:
+          $ref: '#/components/schemas/Account'
+        createdAt:
+          type: string
+          format: date-time
+          description: Время создания
+        updatedBy:
+          $ref: '#/components/schemas/Account'
+        updatedAt:
+          type: string
+          format: date-time
+          description: Время обновления
+
+    UpdateChangesResponse:
+      type: object
+      required:
+        - updated
+        - deleted
+        - created
+      properties:
+        updated:
+          type: array
+          description: Список обновлённых изменений
+          items:
+            $ref: '#/components/schemas/ShortChangeRequestChangeResponse'
+        deleted:
+          type: array
+          description: Список удалённых изменений
+          items:
+            $ref: '#/components/schemas/ShortChangeRequestChangeResponse'
+        created:
+          type: array
+          description: Список вновь созданных изменений
+          items:
+            $ref: '#/components/schemas/ShortChangeRequestChangeResponse'
+
+    ChangeDataResponse:
+      type: object
+      discriminator:
+        propertyName: resourceType
+        mapping:
+          markdown: '#/components/schemas/ChangeDataMarkdown'
+          summary: '#/components/schemas/ChangeDataSummary'
+          attribute: '#/components/schemas/ChangeDataAttribute'
+          requirement: '#/components/schemas/ChangeDataRequirement'
+          requirement-metrics: '#/components/schemas/ChangeDataRequirementMetrics'
+          entity: '#/components/schemas/ChangeDataEntity'
+          empty: '#/components/schemas/ChangeDataEmpty'
+      required:
+        - resourceType
+      properties:
+        resourceType:
+          type: string
+          description: Тип ресурса, подлежащего изменению
+
+    ChangeDataAttribute:
+      allOf:
+        - $ref: '#/components/schemas/ChangeDataResponse'
+        - type: object
+          required:
+            - key
+          properties:
+            key:
+              type: string
+              description: Ключ атрибута
+            oldValue:
+              $ref: '#/components/schemas/AttributePayload'
+              description: Текущее значение атрибута
+            newValue:
+              $ref: '#/components/schemas/AttributePayload'
+              description: Предлагаемое новое значение атрибута
+
+    ChangeDataMarkdown:
+      allOf:
+        - $ref: '#/components/schemas/ChangeDataResponse'
+        - type: object
+          required:
+            - key
+          properties:
+            key:
+              type: string
+              description: Ключ ресурса
+            oldValue:
+              type: string
+              description: Значение markdown на момент внесения правок
+            newValue:
+              type: string
+              description: Предлагаемое новое значение markdown
+
+    ChangeDataSummary:
+      allOf:
+        - $ref: '#/components/schemas/ChangeDataResponse'
+        - type: object
+          properties:
+            oldValue:
+              type: string
+              description: Текущее значение summary
+            newValue:
+              type: string
+              description: Предлагаемое новое значение summary
+
+    ChangeDataRequirement:
+      allOf:
+        - $ref: '#/components/schemas/ChangeDataResponse'
+        - type: object
+          required:
+            - meta
+          properties:
+            meta:
+              $ref: '#/components/schemas/RequirementChangeMeta'
+            oldValue:
+              $ref: '#/components/schemas/RequirementPayload'
+            newValue:
+              $ref: '#/components/schemas/RequirementPayload'
+
+    ChangeDataRequirementMetrics:
+      allOf:
+        - $ref: '#/components/schemas/ChangeDataResponse'
+        - type: object
+          required:
+            - metricId
+            - oldValue
+            - newValue
+          properties:
+            metricId:
+              type: string
+              description: Идентификатор DQ-метрики
+            oldValue:
+              type: boolean
+              description: Была ли метрика привязана в каталоге (на момент формирования change)
+            newValue:
+              type: boolean
+              description: true - если метрику надо добавить, false - если удалить
+
+    RequirementChangeMeta:
+      type: object
+      required:
+        - group
+        - type
+      properties:
+        group:
+          $ref: '#/components/schemas/RequirementGroup'
+        type:
+          $ref: '#/components/schemas/RequirementType'
+
+    RequirementPayload:
+      discriminator:
+        propertyName: type
+        mapping:
+          ingest_criticality: "#/components/schemas/IngestCriticalityRequirementPayload"
+          etl_criticality: "#/components/schemas/EtlCriticalityRequirementPayload"
+          delivery_sla: "#/components/schemas/DeliverySlaRequirementPayload"
+          dlq: "#/components/schemas/DlqRequirementPayload"
+          ready_sla: "#/components/schemas/ReadySlaRequirementPayload"
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          $ref: '#/components/schemas/RequirementType'
+
+    ReadySlaRequirementPayload:
+      allOf:
+        - $ref: '#/components/schemas/RequirementPayload'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ReadySlaRequirementData'
+
+    ReadySlaRequirementData:
+      type: object
+      required:
+        - cron
+        - checkInterval
+      properties:
+        cron:
+          type: string
+        checkInterval:
+          $ref: '#/components/schemas/ReadySlaCheckIntervalRequirementData'
+
+    ReadySlaCheckIntervalRequirementData:
+      type: object
+      required:
+        - from
+      properties:
+        from:
+          $ref: '#/components/schemas/ReadySlaIntervalBoundRequirementData'
+
+    ReadySlaIntervalBoundRequirementData:
+      type: object
+      required:
+        - offsetDuration
+        - at
+      properties:
+        offsetDuration:
+          type: string
+        at:
+          type: string
+
+    IngestCriticalityRequirementPayload:
+      allOf:
+        - $ref: '#/components/schemas/RequirementPayload'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CriticalityEnum'
+
+    EtlCriticalityRequirementPayload:
+      allOf:
+        - $ref: '#/components/schemas/RequirementPayload'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CriticalityEnum'
+
+    DeliverySlaRequirementPayload:
+      allOf:
+        - $ref: '#/components/schemas/RequirementPayload'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DeliverySlaInterval'
+
+    DlqRequirementPayload:
+      allOf:
+        - $ref: '#/components/schemas/RequirementPayload'
+        - type: object
+          properties:
+            data:
+              type: number
+
+    ChangeDataEmpty:
+      allOf:
+        - $ref: '#/components/schemas/ChangeDataResponse'
+
+    ChangeDataEntity:
+      allOf:
+        - $ref: '#/components/schemas/ChangeDataResponse'
+        - type: object
+          required:
+            - entityFqn
+          properties:
+            entityFqn:
+              $ref: '#/components/schemas/EntityFqn'
+            oldValue:
+              $ref: '#/components/schemas/EntityData'
+            newValue:
+              $ref: '#/components/schemas/EntityData'
+
+    ApprovalsResponse:
+      type: object
+      required:
+        - approved
+        - changes
+      properties:
+        approved:
+          type: boolean
+          description: Признак, что все изменения согласованы
+        changes:
+          type: array
+          description: Список изменений
+          items:
+            $ref: '#/components/schemas/ChangeApproval'
+
+    ChangeRequestStatusUpdateResponse:
+      type: object
+      required:
+        - id
+        - status
+        - wip
+        - updatedBy
+        - updatedAt
+      properties:
+        id:
+          type: integer
+          description: Уникальный идентификатор запроса
+        status:
+          $ref: '#/components/schemas/ChangeRequestStatus'
+        wip:
+          type: boolean
+          description: Флаг, что запрос находится в работе
+        updatedBy:
+          $ref: '#/components/schemas/Account'
+        updatedAt:
+          type: string
+          format: date-time
+          description: Время обновления статуса
+
+    ChangeApproval:
+      type: object
+      required:
+        - id
+        - approved
+      properties:
+        id:
+          type: string
+          format: uuid
+        approved:
+          type: boolean
+          description: Признак, что изменение согласовано
+        requiredApprovals:
+          type: array
+          description: Список обязательных согласований
+          items:
+            $ref: '#/components/schemas/Approval'
+        notRequiredApprovals:
+          type: array
+          description: Список необязательных согласований
+          items:
+            $ref: '#/components/schemas/Approval'
+        needApprovals:
+          type: array
+          description: Список недостающих согласований
+          items:
+            $ref: '#/components/schemas/NeedApproval'
+
+    Approval:
+      type: object
+      discriminator:
+        propertyName: type
+        mapping:
+          principal: '#/components/schemas/PrincipalApproval'
+      required:
+        - type
+      properties:
+        type:
+          type: string
+
+    PrincipalApproval:
+      allOf:
+        - $ref: '#/components/schemas/Approval'
+        - type: object
+          required:
+            - approvedBy
+            - groups
+            - approvedAt
+          properties:
+            approvedBy:
+              $ref: '#/components/schemas/Account'
+            groups:
+              type: array
+              items:
+                type: string
+            approvedAt:
+              type: string
+              format: date-time
+
+    NeedApproval:
+      type: object
+      discriminator:
+        propertyName: type
+        mapping:
+          principal: '#/components/schemas/PrincipalNeedApproval'
+      required:
+        - type
+      properties:
+        type:
+          type: string
+
+    PrincipalNeedApproval:
+      allOf:
+        - $ref: '#/components/schemas/NeedApproval'
+        - type: object
+          required:
+            - approvedBy
+            - groups
+          properties:
+            approvedBy:
+              $ref: '#/components/schemas/Account'
+            groups:
+              type: array
+              items:
+                type: string
+
+    BatchOperationResult:
+      type: object
+      discriminator:
+        propertyName: operationType
+        mapping:
+          full-entity: '#/components/schemas/PostFullEntityResult'
+          put-entity: '#/components/schemas/PutEntityResult'
+          delete-entity: '#/components/schemas/DeleteEntityResult'
+          delete-relation-by-id: '#/components/schemas/DeleteRelationByIdResult'
+          delete-relation: '#/components/schemas/DeleteRelationResult'
+          post-relation: '#/components/schemas/PostRelationResult'
+          post-relation-with-insert-if-not-exist-entities: '#/components/schemas/PostRelationWithInsertIfNotExistEntitiesResult'
+          post-relation-with-insert-entities: '#/components/schemas/PostRelationWithInsertEntitiesResult'
+          put-link: '#/components/schemas/PutLinkResult'
+          delete-link: '#/components/schemas/DeleteLinkResult'
+          put-attribute: '#/components/schemas/PutAttributeResult'
+          delete-attribute: '#/components/schemas/DeleteAttributeResult'
+          put-code: '#/components/schemas/PutCodeResult'
+          delete-code: '#/components/schemas/DeleteCodeResult'
+          put-markdown: '#/components/schemas/PutMarkdownResult'
+          delete-markdown: '#/components/schemas/DeleteMarkdownResult'
+          put-notification: '#/components/schemas/PutNotificationResult'
+          delete-notification: '#/components/schemas/DeleteNotificationResult'
+          put-table: '#/components/schemas/PutTableResult'
+          delete-table: '#/components/schemas/DeleteTableResult'
+          put-tag: '#/components/schemas/PutTagResult'
+          delete-tag: '#/components/schemas/DeleteTagResult'
+          put-summary: '#/components/schemas/PutSummaryResult'
+          delete-summary: '#/components/schemas/DeleteSummaryResult'
+          put-relation-via: '#/components/schemas/PutRelationViaResult'
+          delete-relation-via: '#/components/schemas/DeleteRelationViaResult'
+          put-relation-attribute: '#/components/schemas/PutRelationAttributeResult'
+          delete-relation-attribute: '#/components/schemas/DeleteRelationAttributeResult'
+      required:
+        - operationType
+      properties:
+        operationType:
+          type: string
+
+    PostFullEntityResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+        - type: object
+          required:
+            - urn
+          properties:
+            urn:
+              type: string
+
+    PutEntityResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+        - type: object
+          required:
+            - urn
+          properties:
+            urn:
+              type: string
+
+    DeleteEntityResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteRelationByIdResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteRelationResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PostRelationResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+        - type: object
+          required:
+            - relationId
+          properties:
+            relationId:
+              type: string
+              format: uuid
+
+    PostRelationWithInsertIfNotExistEntitiesResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+        - type: object
+          required:
+            - relationId
+          properties:
+            relationId:
+              type: string
+              format: uuid
+
+    PostRelationWithInsertEntitiesResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+        - type: object
+          required:
+            - relationId
+          properties:
+            relationId:
+              type: string
+              format: uuid
+
+    PutLinkResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteLinkResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutAttributeResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteAttributeResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutCodeResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteCodeResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutMarkdownResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteMarkdownResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutNotificationResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteNotificationResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutTableResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteTableResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutTagResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteTagResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutSummaryResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteSummaryResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutRelationViaResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteRelationViaResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    PutRelationAttributeResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    DeleteRelationAttributeResult:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperationResult'
+
+    BatchOperation:
+      type: object
+      discriminator:
+        propertyName: operationType
+        mapping:
+          full-entity: '#/components/schemas/PostFullEntity'
+          put-entity: '#/components/schemas/PutEntity'
+          delete-entity: '#/components/schemas/DeleteEntity'
+          delete-relation-by-id: '#/components/schemas/DeleteRelationById'
+          delete-relation: '#/components/schemas/DeleteRelation'
+          post-relation: '#/components/schemas/PostRelation'
+          post-relation-with-insert-if-not-exist-entities: '#/components/schemas/PostRelationInsertIfNotExistEntities'
+          post-relation-with-insert-entities: '#/components/schemas/PostRelationWithInsertEntities'
+          put-link: '#/components/schemas/PutLink'
+          delete-link: '#/components/schemas/DeleteLink'
+          put-attribute: '#/components/schemas/PutAttribute'
+          delete-attribute: '#/components/schemas/DeleteAttribute'
+          put-code: '#/components/schemas/PutCode'
+          delete-code: '#/components/schemas/DeleteCode'
+          put-markdown: '#/components/schemas/PutMarkdown'
+          delete-markdown: '#/components/schemas/DeleteMarkdown'
+          put-notification: '#/components/schemas/PutNotification'
+          delete-notification: '#/components/schemas/DeleteNotification'
+          put-table: '#/components/schemas/PutTable'
+          delete-table: '#/components/schemas/DeleteTable'
+          put-tag: '#/components/schemas/PutTag'
+          delete-tag: '#/components/schemas/DeleteTag'
+          put-summary: '#/components/schemas/PutSummary'
+          delete-summary: '#/components/schemas/DeleteSummary'
+          put-relation-via: '#/components/schemas/PutRelationVia'
+          delete-relation-via: '#/components/schemas/DeleteRelationVia'
+          put-relation-attribute: '#/components/schemas/PutRelationAttribute'
+          delete-relation-attribute: '#/components/schemas/DeleteRelationAttribute'
+      required:
+        - operationType
+      properties:
+        operationType:
+          type: string
+
+    PutRelationAttribute:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - relationId
+            - key
+            - data
+          properties:
+            relationId:
+              type: string
+              format: uuid
+            key:
+              type: string
+            data:
+              $ref: '#/components/schemas/RelationAttributePayload'
+    DeleteRelationAttribute:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - relationId
+            - key
+          properties:
+            relationId:
+              type: string
+              format: uuid
+            key:
+              type: string
+    PutRelationVia:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - relationId
+            - data
+          properties:
+            relationId:
+              type: string
+              format: uuid
+            data:
+              $ref: '#/components/schemas/RelationVia'
+    DeleteRelationVia:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - relationId
+            - data
+          properties:
+            relationId:
+              type: string
+              format: uuid
+            data:
+              $ref: '#/components/schemas/RelationVia'
+    PutSummary:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - data
+          properties:
+            urn:
+              type: string
+            data:
+              $ref: '#/components/schemas/Summary'
+    DeleteSummary:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+          properties:
+            urn:
+              type: string
+    PutTag:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - tagName
+          properties:
+            urn:
+              type: string
+            tagName:
+              type: string
+    DeleteTag:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - tagName
+          properties:
+            urn:
+              type: string
+            tagName:
+              type: string
+    PutTable:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+            - data
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+            data:
+              $ref: '#/components/schemas/NewTablePayload'
+    DeleteTable:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+    PutNotification:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+            - data
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+            data:
+              $ref: '#/components/schemas/NotificationPayload'
+    DeleteNotification:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+    PutMarkdown:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+            - data
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+            data:
+              $ref: '#/components/schemas/MarkdownPayload'
+    DeleteMarkdown:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+    PutCode:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+            - data
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+            data:
+              $ref: '#/components/schemas/CodePayload'
+    DeleteCode:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+    PutAttribute:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+            - data
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+            data:
+              $ref: '#/components/schemas/AttributePayload'
+    DeleteAttribute:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+    PutLink:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+            - data
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+            data:
+              $ref: '#/components/schemas/LinkPayload'
+    DeleteLink:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+            - key
+          properties:
+            urn:
+              type: string
+            key:
+              type: string
+    DeleteEntity:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - urn
+          properties:
+            urn:
+              type: string
+    DeleteRelationById:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - relationId
+          properties:
+            relationId:
+              type: string
+              format: uuid
+    DeleteRelation:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - sourceUrn
+            - destinationUrn
+            - type
+          properties:
+            sourceUrn:
+              type: string
+            destinationUrn:
+              type: string
+            type:
+              type: string
+    EntityWithBaseData:
+      type: object
+      required:
+        - system
+        - type
+        - fqn
+      properties:
+        system:
+          type: string
+        type:
+          type: string
+        fqn:
+          type: string
+    PostRelationInsertIfNotExistEntities:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - source
+            - destination
+            - type
+          properties:
+            source:
+              $ref: '#/components/schemas/EntityWithBaseData'
+            destination:
+              $ref: '#/components/schemas/EntityWithBaseData'
+            type:
+              type: string
+    PostRelationWithInsertEntities:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - source
+            - destination
+            - type
+          properties:
+            source:
+              $ref: '#/components/schemas/NewEntity'
+            destination:
+              $ref: '#/components/schemas/NewEntity'
+            type:
+              type: string
+    PostRelation:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - sourceUrn
+            - destinationUrn
+            - type
+          properties:
+            sourceUrn:
+              type: string
+            destinationUrn:
+              type: string
+            type:
+              type: string
+
+    PostFullEntity:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              $ref: '#/components/schemas/FullEntityWithRelations'
+
+    PutEntity:
+      allOf:
+        - $ref: '#/components/schemas/BatchOperation'
+        - type: object
+          required:
+            - system
+            - type
+            - fqn
+          properties:
+            system:
+              type: string
+            type:
+              type: string
+            fqn:
+              type: string
+            displayName:
+              type: string
+    BatchRelatedEntitiesByKey:
+      type: object
+      required:
+        - urns
+        - key
+      properties:
+        search:
+          type: string
+        limit:
+          type: integer
+          default: 100
+        key:
+          type: string
+        entityFields:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntityField'
+          uniqueItems: true
+        relationFields:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelationField'
+          uniqueItems: true
+        urns:
+          type: array
+          items:
+            type: string
+    RelatedEntities:
+      type: object
+      required:
+        - totalCount
+        - data
+      properties:
+        totalCount:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelatedEntity'
+    SearchFacetsRequest:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchFilters'
+    SearchFacetFilter:
+      type: object
+      required:
+        - value
+        - count
+      properties:
+        value:
+          type: string
+        count:
+          type: integer
+          format: int64
+    SearchFacetFiltersRequest:
+      type: object
+      properties:
+        searchText:
+          description: Текст из поисковой строки
+          type: string
+        limit:
+          description: Максимальное количество возвращаемых фильтров в фасете
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+        facetText:
+          description: Текст из поисковой строки внутри фасета
+          type: string
+        filters:
+          $ref: '#/components/schemas/SearchFilters'
+
+    SearchCard:
+      type: object
+      required:
+        - urn
+        - fqn
+        - system
+        - type
+      properties:
+        urn:
+          type: string
+        fqn:
+          type: string
+        displayName:
+          type: string
+        system:
+          type: string
+        type:
+          type: string
+        summary:
+          type: string
+
+    LayoutType:
+      type: string
+      enum:
+        - card-tabs
+    Breadcrumb:
+      title: Breadcrumb
+      type: object
+      required:
+        - name
+        - urn
+      properties:
+        name:
+          type: string
+        urn:
+          type: string
+    SearchRequest:
+      type: object
+      properties:
+        text:
+          description: Текст из поисковой строки
+          type: string
+        limit:
+          description: Максимальное количество найденных документов
+          type: integer
+          default: 20
+        offset:
+          description: Смещение для пагинации
+          type: integer
+          default: 0
+        filters:
+          $ref: '#/components/schemas/SearchFilters'
+        sessionId:
+          description: ID поисковой сессии, в рамках который выполняется поисковый запрос
+          type: string
+          format: uuid
+        requestId:
+          description: ID текущего поискового запроса
+          type: string
+          format: uuid
+    SearchFilters:
+      type: object
+      additionalProperties:
+        type: array
+        items:
+          type: string
+      example:
+        type: [ "TABLE", "PHYSICAL_TABLE" ]
+        systemType: [ "tables" ]
+        systemName: [ "dlh", "greenplum" ]
+    MetricBadge:
+      type: object
+      required:
+        - key
+      properties:
+        data:
+          $ref: '#/components/schemas/MetricValue'
+        key:
+          type: string
+    MetricValue:
+      type: object
+      discriminator:
+        propertyName: type
+        mapping:
+          link: '#/components/schemas/LinkMetricValue'
+          number: '#/components/schemas/NumberMetricValue'
+          boolean: '#/components/schemas/BooleanMetricValue'
+          text: '#/components/schemas/TextMetricValue'
+          datetime: '#/components/schemas/DatetimeMetricValue'
+          traffic-light: '#/components/schemas/TrafficLightMetricValue'
+          text-list-with-title: '#/components/schemas/TextListWithTitleMetricValue'
+      required:
+        - type
+      properties:
+        type:
+          type: string
+    LinkMetricValue:
+      type: object
+      properties:
+        url:
+          type: string
+        label:
+          type: string
+    NumberMetricValue:
+      type: object
+      properties:
+        data:
+          type: number
+    BooleanMetricValue:
+      type: object
+      properties:
+        data:
+          type: boolean
+    TextMetricValue:
+      type: object
+      properties:
+        data:
+          type: string
+    DatetimeMetricValue:
+      type: object
+      properties:
+        data:
+          type: string
+          format: date-time
+
+    TrafficLightMetricValue:
+      type: object
+      properties:
+        color:
+          $ref: '#/components/schemas/TrafficLight'
+        description:
+          type: string
+    TrafficLight:
+      type: string
+      enum:
+        - green
+        - yellow
+        - red
+        - blue
+        - grey
+    TextListWithTitleMetricValue:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: string
+        title:
+          type: string
+    MetricLink:
+      type: object
+      required:
+        - key
+        - data
+      properties:
+        key:
+          type: string
+        data:
+          type: object
+          required:
+            - url
+          properties:
+            url:
+              type: string
+            label:
+              type: string
+    NewUrn:
+      type: object
+      required:
+        - newUrn
+      properties:
+        newUrn:
+          type: string
+    RelationId:
+      type: object
+      required:
+        - relationId
+      properties:
+        relationId:
+          type: string
+          format: uuid
+    MetricTable:
+      type: object
+      required:
+        - data
+        - columns
+      properties:
+        columns:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              $ref: '#/components/schemas/MetricValue'
+    MetricBadgeList:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricBadge'
+    MetricLinkList:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricLink'
+    MetricSeries:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricValue'
+    MetricFormat:
+      type: string
+      enum:
+        - link
+        - badge
+        - series
+    Metric:
+      discriminator:
+        propertyName: type
+        mapping:
+          badge: "#/components/schemas/MetricBadge"
+          link: "#/components/schemas/MetricLink"
+          series: "#/components/schemas/MetricSeries"
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+    MetricsByType:
+      discriminator:
+        propertyName: type
+        mapping:
+          badge: "#/components/schemas/MetricBadgeList"
+          link: "#/components/schemas/MetricLinkList"
+          table: "#/components/schemas/MetricTable"
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+    MetricsGroup:
+      type: object
+      properties:
+        badges:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricBadge'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricLink'
+        table:
+          $ref: '#/components/schemas/MetricTable'
+      example:
+        badges:
+          - key: total_count
+            value: "100"
+        links:
+          - key: wiki_link
+            value:
+              url: "https://wiki.example.com"
+              text: "Wiki"
+        table:
+          columns:
+            - key: name
+              type: string
+            - key: count
+              type: integer
+          data:
+            - name: "test"
+              count: 100
+            - name: "test2"
+              count: 12
+    Column:
+      type: object
+      required: [ key, header, order ]
+      properties:
+        key:
+          type: string
+        header:
+          type: string
+        order:
+          type: integer
+    RelationDirection:
+      type: string
+      enum:
+        - src_dest
+        - dest_src
+        - bidirectional
+    RelationQuery:
+      type: object
+      required:
+        - relation
+      properties:
+        limit:
+          type: integer
+        relation:
+          $ref: '#/components/schemas/QueryRelation'
+        entity:
+          $ref: '#/components/schemas/EntityFilter'
+    QueryRelation:
+      type: object
+      required: [ type, direction ]
+      properties:
+        type:
+          type: string
+        direction:
+          $ref: '#/components/schemas/RelationDirection'
+    EntityFilter:
+      type: object
+      properties:
+        type:
+          type: string
+        system:
+          type: string
+    BatchRelationsConditional:
+      allOf:
+        - $ref: '#/components/schemas/RelationsConditional'
+        - type: object
+          required:
+            - urns
+            - limit
+          properties:
+            search:
+              type: string
+            limit:
+              type: integer
+              default: 100
+            entityFields:
+              type: array
+              items:
+                $ref: '#/components/schemas/EntityField'
+              uniqueItems: true
+            relationFields:
+              type: array
+              items:
+                $ref: '#/components/schemas/RelationField'
+              uniqueItems: true
+            urns:
+              type: array
+              items:
+                type: string
+    RelationsConditional:
+      type: object
+      required:
+        - type
+        - direction
+      properties:
+        type:
+          type: string
+        direction:
+          $ref: '#/components/schemas/RelationDirection'
+        entity:
+          $ref: '#/components/schemas/EntityFilter'
+    RelationField:
+      type: string
+      enum:
+        - viaEntity
+        - viaEntities
+        - attributes
+    HistoryType:
+      type: string
+      enum:
+        - ENTITY
+        - ATTRIBUTE
+        - CODE
+        - TABLE
+        - MARKDOWN
+        - NOTIFICATION
+        - LINKS
+        - SUMMARY
+        - TAG
+    EntityField:
+      type: string
+      enum:
+        - displayName
+        - attributes
+        - codes
+        - tables
+        - markdowns
+        - notifications
+        - requirements
+        - requirementDqMetrics
+        - links
+        - summary
+        - tags
+        - oldUrns
+    EntityHistory:
+      type: object
+      required:
+        - type
+        - updatedAt
+        - updatedBy
+        - operation
+      properties:
+        operation:
+          $ref: '#/components/schemas/HistoryOperation'
+        type:
+          $ref: '#/components/schemas/HistoryType'
+        blockKey:
+          type: string
+        oldData:
+          type: string
+        newData:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          $ref: '#/components/schemas/Account'
+    Account:
+      discriminator:
+        propertyName: type
+        mapping:
+          user: "#/components/schemas/UserAccount"
+          service: "#/components/schemas/ServiceAccount"
+          kafka-topic: "#/components/schemas/KafkaTopicAccount"
+          kafka-topic-datasource: "#/components/schemas/KafkaTopicDatasourceAccount"
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+    KafkaTopicAccount:
+      type: object
+      required:
+        - topic
+      properties:
+        topic:
+          type: string
+    KafkaTopicDatasourceAccount:
+      type: object
+      required:
+        - topic
+        - datasource
+      properties:
+        topic:
+          type: string
+        datasource:
+          type: string
+    ServiceAccount:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+    UserAccount:
+      type: object
+      required:
+        - login
+        - masterId
+      properties:
+        login:
+          type: string
+        masterId:
+          type: integer
+    HistoryOperation:
+      type: string
+      enum:
+        - IU
+        - D
+    RelationAttributePayload:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+    RelationAttribute:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/RelationAttributePayload'
+    RelationVia:
+      type: object
+      required:
+        - viaUrn
+      properties:
+        viaUrn:
+          type: string
+    FullRelation:
+      allOf:
+        - $ref: '#/components/schemas/Relation'
+        - type: object
+          required:
+            - sourceUrn
+            - destinationUrn
+          properties:
+            viaEntity:
+              $ref: '#/components/schemas/RelationVia'
+              deprecated: true
+              description: Deprecated. Use viaEntities instead.
+            viaEntities:
+              type: array
+              items:
+                $ref: '#/components/schemas/RelationVia'
+              description: List of via entities
+            attributes:
+              $ref: '#/components/schemas/RelationAttribute'
+    Relation:
+      type: object
+      required:
+        - sourceUrn
+        - destinationUrn
+        - type
+      properties:
+        sourceUrn:
+          type: string
+        destinationUrn:
+          type: string
+        type:
+          type: string
+    Links:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/LinkPayload'
+    LinkPayload:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+    NotificationPayload:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: string
+    Notifications:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/NotificationPayload'
+    AttributePayload:
+      discriminator:
+        propertyName: type
+        mapping:
+          text: "#/components/schemas/TextAttributePayload"
+          enum: "#/components/schemas/EnumAttributePayload"
+          text-list: "#/components/schemas/TextListAttributePayload"
+          enum-list: "#/components/schemas/EnumListAttributePayload"
+          number: "#/components/schemas/NumberAttributePayload"
+          boolean: "#/components/schemas/BooleanAttributePayload"
+          datetime: "#/components/schemas/DatetimeAttributePayload"
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          description: Attribute type
+
+    Attributes:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/AttributePayload'
+    AttributeInterface:
+      type: object
+    TextAttributePayload:
+      allOf:
+        - $ref: '#/components/schemas/AttributeInterface'
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: string
+    TextListAttributePayload:
+      allOf:
+        - $ref: '#/components/schemas/AttributeInterface'
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            type: string
+    EnumAttributePayload:
+      allOf:
+        - $ref: '#/components/schemas/AttributeInterface'
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: string
+    EnumListAttributePayload:
+      allOf:
+        - $ref: '#/components/schemas/AttributeInterface'
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            type: string
+    NumberAttributePayload:
+      allOf:
+        - $ref: '#/components/schemas/AttributeInterface'
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: number
+    BooleanAttributePayload:
+      allOf:
+        - $ref: '#/components/schemas/AttributeInterface'
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: boolean
+    DatetimeAttributePayload:
+      allOf:
+        - $ref: '#/components/schemas/AttributeInterface'
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: string
+          format: date-time
+    Tag:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+    NewTablePayload:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+    TablePayload:
+      type: object
+      required:
+        - data
+        - columns
+      properties:
+        columns:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    Tables:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/TablePayload'
+    NewTables:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/NewTablePayload'
+    CodePayload:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: string
+    Codes:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/CodePayload'
+    MarkdownPayload:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: string
+    Markdowns:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/MarkdownPayload'
+    Summary:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: string
+    RequirementType:
+      type: string
+      enum:
+        - delivery_sla
+        - dlq
+        - ingest_criticality
+        - etl_criticality
+        - ready_sla
+    RequirementGroup:
+      type: string
+      enum:
+        - ingest
+        - etl
+    RequirementMeta:
+      type: object
+      required:
+        - group
+      properties:
+        group:
+          $ref: '#/components/schemas/RequirementGroup'
+    Requirements:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/RequirementResource'
+    RequirementResource:
+      type: object
+      discriminator:
+        propertyName: type
+        mapping:
+          delivery_sla: '#/components/schemas/DeliverySlaRequirementResource'
+          dlq: '#/components/schemas/DlqRequirementResource'
+          ingest_criticality: '#/components/schemas/IngestCriticalityRequirementResource'
+          etl_criticality: '#/components/schemas/EtlCriticalityRequirementResource'
+          ready_sla: '#/components/schemas/ReadySlaRequirementResource'
+      required:
+        - type
+      properties:
+        type:
+          $ref: '#/components/schemas/RequirementType'
+
+    DeliverySlaInterval:
+      type: object
+      required:
+        - latencyDuration
+        - startTime
+        - endTime
+      properties:
+        latencyDuration:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+
+    ReadySlaData:
+      type: object
+      required:
+        - cron
+        - checkInterval
+      properties:
+        cron:
+          type: string
+        checkInterval:
+          $ref: '#/components/schemas/ReadySlaCheckInterval'
+    ReadySlaCheckInterval:
+      type: object
+      required:
+        - from
+      properties:
+        from:
+          $ref: '#/components/schemas/ReadySlaBoundary'
+    ReadySlaBoundary:
+      type: object
+      required:
+        - offsetDuration
+        - at
+      properties:
+        offsetDuration:
+          type: string
+        at:
+          type: string
+    DeliverySlaRequirementResource:
+      allOf:
+        - $ref: '#/components/schemas/RequirementResource'
+        - type: object
+          required:
+            - data
+          properties:
+            meta:
+              $ref: '#/components/schemas/RequirementMeta'
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DeliverySlaInterval'
+    DlqRequirementResource:
+      allOf:
+        - $ref: '#/components/schemas/RequirementResource'
+        - type: object
+          required:
+            - data
+          properties:
+            meta:
+              $ref: '#/components/schemas/RequirementMeta'
+            data:
+              type: number
+
+    CriticalityEnum:
+      type: string
+      enum:
+        - NC
+        - OP
+        - BO
+        - BC
+        - BC_PLUS
+        - MC
+
+    IngestCriticalityRequirementResource:
+      allOf:
+        - $ref: '#/components/schemas/RequirementResource'
+        - type: object
+          required:
+            - data
+          properties:
+            meta:
+              $ref: '#/components/schemas/RequirementMeta'
+            data:
+              $ref: '#/components/schemas/CriticalityEnum'
+    EtlCriticalityRequirementResource:
+      allOf:
+        - $ref: '#/components/schemas/RequirementResource'
+        - type: object
+          required:
+            - data
+          properties:
+            meta:
+              $ref: '#/components/schemas/RequirementMeta'
+            data:
+              $ref: '#/components/schemas/CriticalityEnum'
+    ReadySlaRequirementResource:
+      allOf:
+        - $ref: '#/components/schemas/RequirementResource'
+        - type: object
+          required:
+            - data
+          properties:
+            meta:
+              $ref: '#/components/schemas/RequirementMeta'
+            data:
+              $ref: '#/components/schemas/ReadySlaData'
+
+    RequirementDqMetric:
+      type: object
+      required:
+        - metricId
+      properties:
+        metricId:
+          type: string
+
+    RelatedEntity:
+      type: object
+      required:
+        - relationId
+        - entity
+      properties:
+        relationId:
+          type: string
+          description: Идентификатор связи
+          format: uuid
+        entity:
+          $ref: '#/components/schemas/Entity'
+        viaEntity:
+          $ref: '#/components/schemas/RelationVia'
+          deprecated: true
+          description: Deprecated. Use viaEntities instead.
+        viaEntities:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelationVia'
+          description: List of via entities
+        attributes:
+          $ref: '#/components/schemas/RelationAttribute'
+    Entity:
+      type: object
+      required:
+        - id
+        - urn
+        - system
+        - type
+        - fqn
+      properties:
+        id:
+          type: string
+          format: uuid
+        urn:
+          type: string
+        system:
+          type: string
+        type:
+          type: string
+        fqn:
+          type: string
+        displayName:
+          type: string
+        oldUrns:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        summary:
+          $ref: '#/components/schemas/Summary'
+        links:
+          $ref: '#/components/schemas/Links'
+        notifications:
+          $ref: '#/components/schemas/Notifications'
+        attributes:
+          $ref: '#/components/schemas/Attributes'
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+        tables:
+          $ref: '#/components/schemas/Tables'
+        codes:
+          $ref: '#/components/schemas/Codes'
+        markdowns:
+          $ref: '#/components/schemas/Markdowns'
+        requirements:
+          $ref: '#/components/schemas/Requirements'
+        requirementDqMetrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequirementDqMetric'
+
+    FullEntityWithRelations:
+      type: object
+      required:
+        - entity
+        - relations
+      properties:
+        entity:
+          $ref: '#/components/schemas/NewFullEntity'
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/NewFullRelationByEntity'
+    NewFullEntity:
+      type: object
+      required:
+        - system
+        - type
+        - fqn
+      properties:
+        system:
+          type: string
+        type:
+          type: string
+        fqn:
+          type: string
+        displayName:
+          type: string
+        oldUrns:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        summary:
+          $ref: '#/components/schemas/Summary'
+        links:
+          $ref: '#/components/schemas/Links'
+        notifications:
+          $ref: '#/components/schemas/Notifications'
+        attributes:
+          $ref: '#/components/schemas/Attributes'
+        tags:
+          type: array
+          items:
+            type: string
+        tables:
+          $ref: '#/components/schemas/NewTables'
+        codes:
+          $ref: '#/components/schemas/Codes'
+        markdowns:
+          $ref: '#/components/schemas/Markdowns'
+        requirementDqMetrics:
+          type: array
+          items:
+            type: string
+
+    NewFullRelationByEntity:
+      type: object
+      required:
+        - entityUrn
+        - relationType
+        - direction
+      properties:
+        entityUrn:
+          type: string
+        relationType:
+          type: string
+        direction:
+          $ref: '#/components/schemas/RelationDirection'
+        attributes:
+          $ref: '#/components/schemas/RelationAttribute'
+        via:
+          $ref: '#/components/schemas/RelationVia'
+    NewEntity:
+      type: object
+      required:
+        - system
+        - type
+        - fqn
+      properties:
+        system:
+          type: string
+        type:
+          type: string
+        fqn:
+          type: string
+        displayName:
+          type: string
+        oldUrns:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+    ErrorDto:
+      type: object
+      properties:
+        errorId:
+          type: string
+        errorCode:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+    Comment:
+      type: object
+      properties:
+        comment:
+          type: string
+          description: Комментарий к действию
+
+    ApproveRequest:
+      type: object
+      properties:
+        comment:
+          type: string
+          description: Комментарий к действию
+        autoPublish:
+          type: boolean
+          default: false
+          description: |
+            Автоматически опубликовать CR сразу после approve.
+            Публикация выполняется только если после approve CR полностью согласован
+            и проходит валидацию. Иначе возвращается ошибка публикации.
+
+    LineageDirection:
+      type: string
+      enum: [ forward, backward ]
+      description: Направление обхода графа lineage
+
+    LineageNode:
+      type: object
+      required:
+        - urn
+        - fqn
+        - type
+        - system
+        - depth
+        - isUsed
+        - isPreviousFilteredOut
+      properties:
+        urn:
+          type: string
+          description: URN сущности
+        fqn:
+          type: string
+          description: FQN сущности
+        displayName:
+          type: string
+          description: Отображаемое имя
+        type:
+          type: string
+          description: Тип сущности
+        system:
+          type: string
+          description: Система
+        depth:
+          type: integer
+          description: Глубина в графе
+        duplicate:
+          $ref: '#/components/schemas/LineageNodeDuplicate'
+        isUsed:
+          type: boolean
+          description: Флаг использования
+        isPreviousFilteredOut:
+          type: boolean
+          description: Флаг фильтрации предыдущего узла
+        destinations:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageNode'
+          description: Дочерние узлы (backward)
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageNode'
+          description: Родительские узлы (forward)
+
+    LineageNodeDuplicate:
+      type: object
+      required:
+        - isDuplicate
+        - path
+      properties:
+        isDuplicate:
+          type: boolean
+          description: Флаг дубликата
+        path:
+          type: array
+          items:
+            type: string
+          description: Путь к дубликату
