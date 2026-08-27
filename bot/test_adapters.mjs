@@ -1694,5 +1694,68 @@ line('39. «Не доехал до вызова» и «каталог не от�
   check('и это не назвали сбоем бота', !/СБОЙ БОТА/.test(tasks2));
 }
 
+// ===================================================================== 40
+line('40. ЭКСПЕРТ, КОТОРОГО НЕ ПОДБИРАЛИ, назван в черновике — это видно');
+{
+  // Живой прогон 2026-08-27: на вопрос «где взять инфу о количестве
+  // BI-аналитиков в стриме „Дата“, 15 грейд, юнит Human Capital Origination»
+  // бот написал «Подключу в тред @Artur Mermovich». Ни одно ключевое слово
+  // маршрута на этом тексте не срабатывает: про деньги там нет ничего,
+  // это вопрос про поля ультраширокой витрины. Неверное имя в треде видит
+  // ЗАКАЗЧИК, и цена такой ошибки выше, чем у неполного ответа.
+  const NAMES = ['Artur Mermovich', 'Kirill Seliverstov', '~recruitment_reports_ask'];
+  const ANSWER = (draft) => `ЧЕРНОВИК ОТВЕТА: ${draft}
+ИСТОЧНИКИ: —
+УВЕРЕННОСТЬ: средняя`;
+
+  const bad = runParse(
+    ANSWER('Ответа не нашлось. Подключу в тред @Artur Mermovich.'),
+    { question: 'сколько BI-аналитиков 15 грейда', mode: 'channel' }, {},
+    { ...MAT_OK, routes: [], route_names: NAMES });
+  check('выдуманный эксперт замечен',
+    bad.experts_invented.includes('Artur Mermovich'));
+  // Уверенность не трогаем — как draft_leaks и ib_missing: основание
+  // под ответом от этого не меняется, а понижение испортило бы калибровку.
+  check('уверенность не тронута', bad.confidence_capped === false);
+  const thread = runChannelParts(bad).join('\n');
+  check('джун предупреждён', thread.includes('которого код не подбирал'));
+  check('и имя названо', thread.includes('Artur Mermovich'));
+  // Раньше маршрута и основания: это не «насколько верить черновику»,
+  // а «черновик нельзя отправлять как есть».
+  const iFlag = thread.indexOf('🚩');
+  const iBasis = thread.indexOf('**Основание:**');
+  check('предупреждение раньше основания',
+    iFlag !== -1 && (iBasis === -1 || iFlag < iBasis));
+
+  // Маршрут совпал — имя законно, тревоги нет.
+  const ok = runParse(
+    ANSWER('Квоты ведёт Kirill Seliverstov, позову его в тред.'),
+    { question: 'кто ведёт квоты', mode: 'channel' }, {},
+    { ...MAT_OK, route_names: NAMES,
+      routes: [{ id: 'quotas', who: 'Kirill Seliverstov', where: '',
+                 checked: '2026-08-26', matched: ['квот'] }] });
+  check('подобранный эксперт тревоги не вызывает',
+    ok.experts_invented.length === 0);
+  check('и строки в треде нет', !runChannelParts(ok).join('\n').includes('🚩'));
+
+  // Совпал ОДИН маршрут, а назван человек из ДРУГОЙ строки — тоже выдумка.
+  const mixed = runParse(
+    ANSWER('Квоты ведёт Kirill Seliverstov. Ещё напишите Artur Mermovich.'),
+    { question: 'кто ведёт квоты', mode: 'channel' }, {},
+    { ...MAT_OK, route_names: NAMES,
+      routes: [{ id: 'quotas', who: 'Kirill Seliverstov', where: '',
+                 checked: '2026-08-26', matched: ['квот'] }] });
+  check('чужая строка таблицы тоже ловится',
+    mixed.experts_invented.length === 1 &&
+    mixed.experts_invented[0] === 'Artur Mermovich');
+
+  // Имени нет вовсе — тишина. Строка, которая горит всегда, перестаёт
+  // читаться, и вместе с ней перестают читать соседние.
+  const clean = runParse(ANSWER('Считается по ультраширокой витрине.'),
+    { question: 'вопрос', mode: 'channel' }, {},
+    { ...MAT_OK, routes: [], route_names: NAMES });
+  check('без имён тревоги нет', clean.experts_invented.length === 0);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

@@ -865,6 +865,23 @@ for (const c of rows('## Маршруты', null)) {
 const routesDropped = routesAll.slice(MAX_ROUTES).map((r) => r.id);
 const routes = routesAll.slice(0, MAX_ROUTES);
 
+// ВСЕ адресаты таблицы, а не только совпавшие. Нужны, чтобы поймать имя,
+// названное в черновике без совпадения: живой прогон 2026-08-27 показал
+// черновик, где бот подключил в тред человека из таблицы на вопросе, где
+// ни одно ключевое слово маршрута не срабатывает. Неверное имя в треде —
+// ошибка, видимая заказчику, и молчать о ней нельзя.
+const routeNames = [];
+for (const c of rows('## Маршруты', null)) {
+  if (c.length < 5 || !/^\d{4}-\d{2}-\d{2}$/.test(String(c[4] || '').trim())) continue;
+  for (const v of [c[2], c[3]]) {
+    const t = String(v || '').trim();
+    if (t && t !== '—') for (const one of t.split(',')) {
+      const n = one.trim();
+      if (n && !routeNames.includes(n)) routeNames.push(n);
+    }
+  }
+}
+
 // ------------------------------------ роутер не назвал НИЧЕГО: витрина по умолчанию
 //
 // Живой прогон 2026-08-27: «где взять инфу о количестве биай аналитиков
@@ -1009,6 +1026,7 @@ return [{
     // покрывает то, что встретилось в фидбеке, и растёт по мере трафика.
     routes,
     routes_dropped: routesDropped,
+    route_names: routeNames,
     // Что роутер выбрал САМ, отдельно от итога.
     //
     // Пустой router_articles при непустом files значит «точного совпадения
@@ -1723,6 +1741,7 @@ return [{
     // Маршруты — целиком, вместе с датой подтверждения и совпавшими словами.
     // Автору из них уходит только адресат (см. блок выше), а джуну нужны все
     // три части: по какому слову сработало, к кому ведёт и когда проверялось.
+    route_names: Array.isArray(plan.route_names) ? plan.route_names : [],
     routes: routes.map((r) => ({
       id: r.id, who: r.who || '', where: r.where || '',
       checked: r.checked || '', matched: Array.isArray(r.matched) ? r.matched : [],
@@ -2035,6 +2054,35 @@ out.tables_no_meta = Array.isArray(mat.tables_no_meta) ? mat.tables_no_meta : []
 out.router_empty = mat.router_empty === true;
 out.is_query_help = mat.is_query_help === true;
 out.routes = Array.isArray(mat.routes) ? mat.routes : [];
+
+// 6. Эксперт, которого код НЕ подбирал, а черновик его назвал.
+//
+//    Живой прогон 2026-08-27: на вопрос «где взять инфу о количестве
+//    BI-аналитиков в стриме „Дата“, 15 грейд, юнит Human Capital Origination»
+//    бот написал «Подключу в тред @Artur Mermovich». Ни одно ключевое слово
+//    маршрута на этом тексте не срабатывает — про деньги там нет ничего,
+//    это чистый вопрос про поля ультраширокой витрины. Неверное имя в треде
+//    видит заказчик, и цена у такой ошибки выше, чем у неполного ответа.
+//
+//    Проверка узкая и потому без ложных тревог: ищутся ТОЛЬКО имена
+//    из таблицы маршрутов и только те, которых код под этот вопрос
+//    не подбирал. Придуманное с нуля имя она не поймает — померить это
+//    нечем, — но именно этот случай ловит точно.
+//
+//    Уверенность НЕ трогает, как draft_leaks и ib_missing: основание под
+//    ответом от этого не меняется, а понижение испортило бы калибровку.
+{
+  const named = new Set();
+  for (const r of out.routes) {
+    for (const v of [r.who, r.where]) {
+      const t = String(v || '').trim();
+      if (t) for (const one of t.split(',')) named.add(one.trim());
+    }
+  }
+  const text = String(out.draft || '') + '\n' + String(out.tech_spec || '');
+  const all = Array.isArray(mat.route_names) ? mat.route_names : [];
+  out.experts_invented = all.filter((n) => n && !named.has(n) && text.includes(n));
+}
 out.routes_dropped = Array.isArray(mat.routes_dropped) ? mat.routes_dropped : [];
 
 // Короткое имя объекта DD: полный URN в сообщении для человека — шум.
@@ -3065,6 +3113,10 @@ return [{ json: {
     // «маршрута не существует» — таблица покрывает то, что встретилось
     // в фидбеке, и растёт по мере трафика.
     routes: (Array.isArray(a.routes) ? a.routes : []).map((r) => r.id).join(','),
+    // Эксперт назван без совпадения. Считать надо с первого дня: неверное
+    // имя в треде видит заказчик, и это худший класс ошибки из тех,
+    // что бот вообще может сделать.
+    experts_invented: (Array.isArray(a.experts_invented) ? a.experts_invented : []).length,
     // Витрины, чью статью автор прочитал, а состав полей не получил.
     // Числом, а не списком: разрез «как часто бот отвечал, не видя
     // инвентаря» — это метрика полноты, а какие именно витрины,
@@ -3235,6 +3287,15 @@ if (a.ib_missing) {
 // Дата подтверждения печатается ЗДЕСЬ и только здесь. В черновик она
 // не идёт — это служебное, — а джун единственный, кто заметит, что маршрут
 // протух, и поправит строку в реестре.
+// Названный, но не подобранный эксперт — раньше маршрута и основания:
+// это не «насколько верить черновику», а «черновик нельзя отправлять как есть».
+if (Array.isArray(a.experts_invented) && a.experts_invented.length) {
+  parts.push('🚩 **В черновике назван эксперт, которого код не подбирал:** ' +
+    a.experts_invented.join(', ') +
+    '. Ни одно ключевое слово маршрута под этот вопрос не совпало — ' +
+    'проверьте, тот ли это человек, перед отправкой.');
+}
+
 if (Array.isArray(a.routes) && a.routes.length) {
   const line = a.routes.map((r) => {
     const addr = [r.who, r.where].filter(Boolean).join(', ') || 'адресат не указан';
