@@ -4,6 +4,7 @@ owner: Руководитель группы HR-аналитики
 updated: null
 status: active
 applies_to: [export]
+reached_by: code
 ---
 
 # Плейбук: запрос на выгрузку

@@ -4,6 +4,7 @@ owner: Владелец витрины
 updated: 2026-08-05
 status: active
 applies_to: [export, report]
+reached_by: code
 ---
 
 # Правила написания SQL по HR-витринам

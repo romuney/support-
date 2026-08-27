@@ -4,6 +4,7 @@ owner: Руководитель группы HR-аналитики
 updated: 2026-08-06
 status: active
 applies_to: [export, report, question]
+reached_by: human
 ---
 
 # Что берём из базы знаний, а что из Data Detective

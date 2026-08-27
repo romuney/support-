@@ -1597,5 +1597,45 @@ line('36. ЭКСПЕРТ печатается ДЖУНУ вместе с дат�
     runChannelParts(chan).join('\n').includes('~recruitment_reports_ask'));
 }
 
+// ===================================================================== 37
+line('37. ВЫГРУЗКА без инвентаря витрины: уверенность понижается и названа');
+{
+  const ANSWER = `ЧЕРНОВИК ОТВЕТА: Телефона в витрине нет.
+ТЗ ДЛЯ АНАЛИТИКА: ТАБЛИЦА: prod_v_emart.mdm_employee_structure_d
+ИСТОЧНИКИ: kb/tables/mdm-employee-structure-d.md
+УВЕРЕННОСТЬ: высокая`;
+  const URN = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d';
+  const INPUTS = { question: 'нужны телефоны подрядчиков', mode: 'channel',
+                   topic_kind: 'Выгрузка данных' };
+
+  // Живой прогон 2026-08-27: ТЗ утверждало «в метаданных витрины нет поля
+  // с мобильным телефоном», имея метаданные ровно одного объекта — отчёта.
+  const gap = runParse(ANSWER, INPUTS, {},
+    { ...MAT_OK, is_export: true, tables_no_meta: [URN] });
+  check('понижено до средней', gap.confidence_key === 'medium');
+  check('и понижение зафиксировано', gap.confidence_capped === true);
+  check('причина названа витриной',
+    /состав полей не получен/i.test(gap.confidence_capped_reason));
+  check('заявленное сохранено', gap.confidence_claimed === 'high');
+  check('поле доехало до выхода', gap.tables_no_meta.includes(URN));
+
+  // Обычный ВОПРОС статью читает и без инвентаря — понижать там значило бы
+  // сделать «среднюю» значением по умолчанию и обесценить сам сигнал.
+  const ask = runParse(ANSWER, { question: 'что такое текучесть', mode: 'channel' }, {},
+    { ...MAT_OK, is_export: false, tables_no_meta: [URN] });
+  check('на обычном вопросе не понижается', ask.confidence_key === 'high');
+
+  // Инвентарь пришёл — понижать не за что.
+  const ok = runParse(ANSWER, INPUTS, {},
+    { ...MAT_OK, is_export: true, tables_no_meta: [] });
+  check('инвентарь пришёл — уверенность не тронута', ok.confidence_key === 'high');
+
+  // Просьба помочь с запросом доезжает до телеметрии отдельным полем:
+  // такого типа обращения нет в разрезе по темам формы вовсе.
+  const q = runParse(ANSWER, { question: 'как написать select', mode: 'channel' }, {},
+    { ...MAT_OK, is_query_help: true });
+  check('признак «просят запрос» на выходе ядра', q.is_query_help === true);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

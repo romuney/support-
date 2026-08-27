@@ -745,7 +745,11 @@ line('20. САМООБСЛУЖИВАНИЕ: self-service отчёт находи
     domains: ['movement'], articles: [], dd: [], no_question: false,
   }), REGISTRY, { topic_kind: 'Выгрузка данных', question: 'Нужна выгрузка по текучести за квартал' });
   check('нет совпадения — self-service пуст', noMatch.self_service.length === 0);
-  check('нет совпадения — dd не тронут', noMatch.dd.length === 0);
+  // Отчёта в объектах DD нет. Витрина там БУДЕТ — в режиме выгрузки код
+  // добирает инвентарь прочитанных витрин сам, — но это другой механизм,
+  // и проверять надо именно отсутствие отчёта, а не пустой список.
+  check('нет совпадения — отчёт в dd не уехал',
+    !noMatch.dd.some((d) => /reports/.test(d.urn)));
 }
 
 // ===================================================================== 21
@@ -867,7 +871,8 @@ line('22. САМООБСЛУЖИВАНИЕ на РЕАЛЬНОМ обращен�
   }), REGISTRY, { topic_kind: 'Выгрузка данных', question: boilerplate });
 
   check('шаблон формы отчёт не предлагает', bp.self_service.length === 0);
-  check('шаблон формы не тронул объекты DD', bp.dd.length === 0);
+  check('шаблон формы не добавил отчёт в объекты DD',
+    !bp.dd.some((d) => /reports/.test(d.urn)));
   check('режим выгрузки при этом на месте', bp.is_export === true);
 }
 
@@ -1052,6 +1057,116 @@ line('24. ЭКСПЕРТ ПО ТЕМЕ: код находит, кого позв
   check('маршрут в самообслуживание не протёк',
     exp.self_service.every((x) => !/^(payroll|quotas|forge|recruitment)$/.test(x.id)));
   check('маршрут при этом найден', exp.routes.some((r) => r.id === 'payroll'));
+}
+
+// ====================================================================== 25
+line('25. ИНВЕНТАРЬ ВИТРИН добирает код, а несобранный — называется');
+{
+  // Живой прогон 2026-08-27, обращение из инфобеза про телефоны подрядчиков.
+  // В служебном блоке стояло «метаданные: 1728» — из каталога пришёл ровно
+  // один объект, отчёт. Инвентарь витрины не запрашивался вовсе, а ТЗ при
+  // этом утверждало: «в метаданных витрины mdm_employee_structure_d нет поля
+  // с мобильным телефоном». Утверждение о факте, которого бот не видел.
+  const ROUTER = JSON.stringify({
+    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+  });
+
+  const exp = runPlan(ROUTER, REGISTRY, {
+    topic_kind: 'Выгрузка данных', question: 'Нужны телефоны подрядчиков',
+  });
+  check('мастер-витрина прочитана',
+    exp.files.includes('kb/tables/mdm-employee-structure-d.md'));
+  check('её инвентарь добран кодом', exp.dd.some((d) => d.urn === URN_TABLE));
+  check('и видно, что добрал именно код', exp.dd_added_by_code.includes(URN_TABLE));
+  // Пустой hint намеренно: без фильтра приходит ПОЛНЫЙ список имён полей
+  // одним запросом. Вопрос стоял «есть ли такое поле вообще» — тут нужна
+  // полнота, а не угаданный за роутера фильтр.
+  check('фильтр не выдуман за роутера',
+    exp.dd.find((d) => d.urn === URN_TABLE).hint === '');
+  check('витрина названа в tables_read',
+    exp.tables_read.some((t) => t.urn === URN_TABLE));
+
+  // Гейт: обычный вопрос инвентарь не тянет. 289 имён — это 3 КБ шума
+  // и расхода на КАЖДОМ обращении там, где отвечает статья.
+  const ask = runPlan(ROUTER, REGISTRY, { question: 'Что такое текучесть?' });
+  check('обычный вопрос инвентарь не тянет', ask.dd.length === 0);
+  check('и tables_read пуст', ask.tables_read.length === 0);
+
+  // Роутер назвал витрину сам, со своим фильтром — его не затираем:
+  // фильтр даёт ещё и описания полей, а пустой их не даёт.
+  const withHint = runPlan(JSON.stringify({
+    domains: ['headcount-structure'], articles: [],
+    dd: [{ urn: URN_TABLE, hint: 'телефон' }], no_question: false,
+  }), REGISTRY, { topic_kind: 'Выгрузка данных', question: 'телефоны' });
+  check('фильтр роутера сохранён',
+    withHint.dd.find((d) => d.urn === URN_TABLE).hint === 'телефон');
+  check('дубля объекта нет',
+    withHint.dd.filter((d) => d.urn === URN_TABLE).length === 1);
+
+  // ------------------------------------- инвентарь не дошёл: сказать вслух
+  const mat = runMaterials(exp, [{ content: b64('# Витрина') }], []);
+  check('витрина без инвентаря названа',
+    mat.materials.includes('СОСТАВ ПОЛЕЙ не получен'));
+  check('запрет на «в витрине нет поля» назван',
+    /в витрине нет поля/.test(mat.materials));
+  check('и она в отдельном поле выхода',
+    mat.tables_no_meta.includes(URN_TABLE));
+
+  // Инвентарь пришёл — заметки нет. Строка, которая печатается всегда,
+  // перестаёт читаться.
+  const ok = runMaterials(exp, [{ content: b64('# Витрина') }],
+    [{ dd_meta: 'ПОЛЯ: mdm_employee_rk, contact_main_phone_no' }]);
+  check('инвентарь пришёл — заметки нет',
+    !ok.materials.includes('СОСТАВ ПОЛЕЙ не получен'));
+  check('и поле пустое', ok.tables_no_meta.length === 0);
+}
+
+// ====================================================================== 26
+line('26. «КАК НАПИСАТЬ ЗАПРОС» — это вопрос, а не заявка на выгрузку');
+{
+  // Живой прогон 2026-08-27: «Можешь подсказать, как написать select, чтобы
+  // выгрузить сотрудника, его управленческий юнит и его юнит из
+  // функциональной структуры?» Формы в чате нет, режим выгрузки включился
+  // фолбэком «среди прочитанного есть плейбук» — и на просьбу написать
+  // запрос бот выдал согласование состава полей и ТЗ, а SQL не написал.
+  const Q = 'Можешь подсказать, как написать select, чтобы выгрузить ' +
+            'сотрудника, его управленческий юнит и его юнит из функциональной структуры?';
+  const ROUTER = JSON.stringify({
+    domains: ['headcount-structure'],
+    articles: ['kb/process/export-playbook.md'], dd: [], no_question: false,
+  });
+
+  const p = runPlan(ROUTER, REGISTRY, { question: Q });
+  check('признак «просят запрос» поднят', p.is_query_help === true);
+  // Конвенции запросов роутер выбрать не может — их нет в реестре. До этой
+  // правки sql-conventions.md не добирал никто, и на вопрос про запрос
+  // у автора не было ни одной статьи о том, как его положено писать.
+  check('конвенции запросов добраны кодом',
+    p.files.includes('kb/process/sql-conventions.md'));
+  check('и видно, что добрал код', p.added_query.length === 1);
+  check('инвентарь витрины тоже добран', p.dd.some((d) => d.urn === URN_TABLE));
+
+  const mat = runMaterials(p, [{ content: b64('# Плейбук') }, { content: b64('# Витрина') }],
+    [{ dd_meta: 'ПОЛЯ: mdm_employee_rk' }]);
+  check('режим выгрузки погашен', mat.is_export === false);
+  check('правил режима выгрузки в промпте нет', !mat.mode_rules);
+  check('признак доехал до выхода', mat.is_query_help === true);
+
+  // Тему проставил ЧЕЛОВЕК — это факт, и догадкой он не перебивается:
+  // заявка на файл со словом «select» в тексте режим не теряет.
+  const form = runPlan(ROUTER, REGISTRY, {
+    topic_kind: 'Выгрузка данных', question: Q,
+  });
+  const formMat = runMaterials(form, [{ content: b64('# Плейбук') }], []);
+  check('тема из формы сильнее признака', formMat.is_export === true);
+  check('правила режима при этом на месте', Boolean(formMat.mode_rules));
+
+  // Обычная выгрузка без просьбы про запрос — режим на месте, как и был.
+  const plain = runPlan(ROUTER, REGISTRY, { question: 'Нужна выгрузка по текучести' });
+  check('обычная выгрузка режим не теряет',
+    runMaterials(plain, [{ content: b64('# Плейбук') }], []).is_export === true);
+  check('и конвенции ей не добираются',
+    !plain.files.includes('kb/process/sql-conventions.md'));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
