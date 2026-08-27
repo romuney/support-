@@ -1,0 +1,507 @@
+{
+  "name": "Support Bot · Adapter Channel",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "posted"
+        ],
+        "postedFilters": {
+          "channels": [
+            {
+              "nameAuto": {
+                "__rl": true,
+                "mode": "name",
+                "value": "hr-report-ask"
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.mattermostTrigger",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        300
+      ],
+      "id": "time-trigger",
+      "name": "Time Trigger",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Нормализация события Time и решение, обращение это или нет.\n//\n// Форма события зависит от версии ноды и типа события: пост приходит либо\n// объектом на верхнем уровне, либо JSON-СТРОКОЙ в data.post. Без распаковки\n// все поля читаются как undefined, а условия вида `x ?? '' === ''` при этом\n// не падают, а ПРОХОДЯТ — фильтр молча пропускает всё.\nconst PREFIXES     = [\"Cross Data |\"];\nconst REQUIRE_ROOT = true;\nconst DROP_BOT     = false;\nconst REQUIRE_DM   = false;\nconst ALLOWLIST    = [];\n\nconst asObj = (v) => {\n  if (!v) return {};\n  if (typeof v === 'string') { try { return JSON.parse(v); } catch (e) { return {}; } }\n  return v;\n};\n\nconst src  = $json || {};\nconst data = asObj(src.data ?? {});\nconst post = asObj(src.post ?? data.post ?? {});\n\nconst message = String(post.message ?? '');\nconst rootId  = String(post.root_id ?? '');\nconst postId  = String(post.id ?? '');\n\n// Первая строка без markdown-обвязки: intake-воркфлоу может выделять тему\n// жирным, и тогда сообщение начинается со звёздочек, а не с «Cross Data».\nconst head = message.split('\\n')[0].replace(/^[\\s>*_#`~]+/, '').trim();\nconst topic = PREFIXES.find(\n  (p) => head.toLowerCase().startsWith(String(p).toLowerCase())\n) || '';\n\n// -------------------------------------------------- разбор intake-формы\n//\n// Обращение приходит не текстом, а заполненной формой:\n//\n//   Cross Data | Вопрос по отчетам от пользователя @Anna Sokolova\n//   Выбери домен:\n//   Стоимость и расходы на персонал\n//   Укажи ссылку на отчет:\n//   https://proteus.tcsbank.ru/superset/dashboard/…\n//   Напиши свой вопрос:\n//   привет! подскажите, долились ли бюджеты…\n//\n// Три из этих полей — самые надёжные сигналы, какие вообще есть: их проставил\n// человек, а не вывела модель. Домен глазами заказчика и ссылка на отчёт\n// позволяют КОДОМ увидеть и промах роутера, и пробел базы, не платя за это\n// вторым вызовом модели.\n//\n// Разбор общий, а не по списку известных полей: у каждой темы формы свои поля\n// (у выгрузки — бизнес-задача, состав данных, чувствительность), и список\n// разъедется молча при первой правке формы. Поэтому метка — это короткая\n// строка, кончающаяся двоеточием, а её значение — всё до следующей метки.\nconst LABEL_RE = /^[^\\n]{0,60}:$/;\n\nconst sections = [];              // [{ label, value }] в порядке появления\n{\n  let label = '';\n  let buf = [];\n  const flush = () => {\n    if (label) sections.push({ label, value: buf.join('\\n').trim() });\n    buf = [];\n  };\n  // Шапку пропускаем: тема и автор разбираются отдельно ниже.\n  for (const raw of message.split('\\n').slice(1)) {\n    const l = raw.replace(/^[\\s>*_#`~]+/, '').replace(/[\\s*_`~]+$/, '').trim();\n    if (l && LABEL_RE.test(l)) { flush(); label = l.slice(0, -1).trim(); continue; }\n    buf.push(raw);\n  }\n  flush();\n}\n\nconst section = (re) => (sections.find((s) => re.test(s.label)) || {}).value || '';\n\n// Тема без префикса и без хвоста «от пользователя @X». В телеметрии тема\n// берётся из префикса целиком (kind), здесь нужна человекочитаемая часть:\n// она печатается шапкой в канале джуна вместо цитаты обращения.\nconst afterPrefix = topic ? head.slice(topic.length).trim() : head;\n// Хвост «от пользователя @X» отрезается. Без \\b намеренно: в JS границы слова\n// определены по ASCII, и \\bот перед кириллической «о» не совпадает НИКОГДА —\n// проверка была зелёной по подстроке и молча не работала.\nconst authorAt = afterPrefix.search(/(?:^|[\\s(,·|])от\\s+пользовател/i);\nconst topicKind = (authorAt === -1 ? afterPrefix : afterPrefix.slice(0, authorAt))\n  .replace(/[\\s|·—-]+$/, '').trim();\n\n// Автор — из шапки формы, а НЕ из sender_name: постит intake-воркфлоу, и\n// sender_name это он, а не человек, задавший вопрос. Имя может быть и логином\n// (@i.ivanov), и двумя словами (@Anna Sokolova), поэтому берём всё после «@»\n// до конца шапки и ограничиваем тремя словами: длиннее — это уже не имя.\nconst atPos = afterPrefix.indexOf('@');\nconst formAuthor = atPos === -1\n  ? ''\n  : afterPrefix.slice(atPos + 1).split(/[|·]/)[0].trim()\n      .split(/\\s+/).slice(0, 3).join(' ');\n\nconst formDomain = section(/домен/i);\n\n// Ссылки на отчёт. Берём из полей, где метка говорит про ссылку или отчёт,\n// а если таких полей нет — из всего текста: ссылку могли просто вставить\n// в вопрос. Две штуки максимум: больше — это уже не «вопрос по отчёту».\nconst linkFields = sections\n  .filter((s) => /ссылк|отч[её]т|дашборд|отчет/i.test(s.label))\n  .map((s) => s.value)\n  .join('\\n');\nconst urls = String(linkFields || message).match(/https?:\\/\\/\\S+/g) || [];\nconst reportUrl = urls.slice(0, 2).map((u) => u.replace(/[),.;]+$/, ''));\n\n// Текст вопроса. Пусто — берём весь пост без шапки: терять вопрос из-за\n// нового варианта формы нельзя, а пустой вопрос читается как «бот не знает».\nconst questionText = section(/вопрос|проблем|задач|запрос/i)\n  || message.split('\\n').slice(1).join('\\n').trim()\n  || message.trim();\n\n// Передача данных за пределы группы компаний.\n//\n// Единственное поле формы, у которого цена ошибки — не «черновик получился\n// хуже», а файл, ушедший наружу без согласования ИБ. В фидбеке аналитика\n// такой ответ стоял в 5 обращениях из 22 выгрузок, и в 4 из них правильным\n// ответом было «сначала согласование в ~sec_analytics_ask». Правило было\n// отдано модели словами, и она его пропускала — как пропускала и лимит\n// итераций, и мастеров домена. Поэтому признак считает код.\n//\n// РАЗБОР ИДЁТ ПО СТРОКАМ, А НЕ ПО sections. Подпись этого поля —\n// «Выгрузка нужна для использования исключительно внутри группы компаний:» —\n// это 71 символ, а LABEL_RE ограничен 60: в sections она не попадает вовсе\n// и молча приклеивается значением к предыдущему полю. Поднимать лимит\n// нельзя: длинная строка вопроса, кончающаяся двоеточием, начала бы резать\n// question_text. Дешевле разобрать это одно поле отдельно.\n//\n// ПОЛЯРНОСТЬ ВЫВОДИТСЯ ИЗ ПОДПИСИ, А НЕ УГАДЫВАЕТСЯ ПО ОТВЕТУ. Сейчас форма\n// спрашивает «нужна исключительно внутри группы компаний», и «нет» там\n// означает передачу наружу. Переформулируют в «данные передаются за пределы\n// контура» — и то же «нет» будет означать ровно обратное. Подпись, из которой\n// полярность не читается, даёт «не разобрано», а не догадку: перепутанная\n// полярность здесь тише и дороже всего остального в этом флоу.\n// Кириллический класс выписан явно: \\w в JS — это [A-Za-z0-9_], и «групп\\w*»\n// не совпадает с «группы» НИКОГДА. Та же ошибка, что \\b перед кириллицей,\n// и такая же тихая: проверка по подстроке была бы зелёной.\nconst EXT_LABEL_RE = /групп[а-яё]*\\s+компан|контур|за\\s+предел|третьим\\s+лицам|внешн|подрядчик/i;\nconst EXT_INSIDE_RE = /исключительно\\s+внутри|только\\s+внутри|внутри\\s+групп/i;\nconst EXT_OUTSIDE_RE = /за\\s+предел|вне\\s+контур|третьим\\s+лицам|внешн|подрядчик/i;\n// Границы слова через \\b здесь не годятся: в JS они определены по ASCII,\n// и \\bда перед кириллицей не совпадает никогда — ровно на этом уже один раз\n// молча потерялся разбор шапки формы.\nconst EXT_YES_RE = /^да(?:[\\s,.:;!)]|$)/i;\nconst EXT_NO_RE = /^нет(?:[\\s,.:;!)]|$)/i;\n\nlet externalTransfer = '';\nlet externalTransferRaw = '';\n{\n  const lines = message.split('\\n')\n    .map((l) => l.replace(/^[\\s>*_#`~]+/, '').replace(/[\\s*_`~]+$/, '').trim());\n  for (let i = 0; i < lines.length; i++) {\n    const l = lines[i];\n    // Двоеточие обязательно: так отсекается проза заказчика, где «группа\n    // компаний» может встретиться в самом вопросе. Подпись формы его несёт.\n    if (!l.endsWith(':') || !EXT_LABEL_RE.test(l)) continue;\n    const label = l.slice(0, -1).trim();\n    let answer = '';\n    for (let j = i + 1; j < lines.length; j++) {\n      if (!lines[j]) continue;\n      // Следующая подпись вместо ответа значит, что поле оставили пустым.\n      answer = lines[j].endsWith(':') ? '' : lines[j];\n      break;\n    }\n    const yes = EXT_YES_RE.test(answer);\n    const no = EXT_NO_RE.test(answer);\n    if (EXT_INSIDE_RE.test(label)) externalTransfer = no ? 'yes' : yes ? 'no' : '';\n    else if (EXT_OUTSIDE_RE.test(label)) externalTransfer = yes ? 'yes' : no ? 'no' : '';\n    externalTransferRaw = (label + ': ' + answer).replace(/\\s+/g, ' ').slice(0, 200);\n    break;\n  }\n}\n\n// Готовая строка для промпта роутера: код читает поля, промпт читает текст.\nconst formContext = [\n  topicKind ? 'Тема обращения (выбрана человеком в форме): ' + topicKind : '',\n  formDomain ? 'Домен (выбран человеком в форме): ' + formDomain : '',\n  reportUrl.length ? 'Ссылка на отчёт из формы: ' + reportUrl.join(' ') : '',\n].filter(Boolean).join('\\n');\n\n// Порядок проверок — от самых дешёвых и однозначных к содержательным, чтобы\n// в reason попадала первая настоящая причина, а не последняя по списку.\nlet reason = '';\nif (!message.trim()) {\n  reason = 'пустое сообщение';\n} else if (String(post.type ?? '')) {\n  // Системные сообщения (вход-выход в канал, смена темы) имеют непустой\n  // type вида system_*. Отвечать на них нечего.\n  reason = 'системное сообщение: ' + post.type;\n} else if (DROP_BOT && String(post.props?.from_bot ?? '') === 'true') {\n  reason = 'сообщение бота';\n} else if (REQUIRE_ROOT && rootId && rootId !== postId) {\n  // Реплика в треде обращением не является. Mattermost у КОРНЕВОГО поста\n  // иногда проставляет root_id равным его же id — это всё ещё корень.\n  reason = 'реплика в треде';\n} else if (PREFIXES.length && !topic) {\n  // Обращения приходят из intake-воркфлоу с префиксом темы. Всё остальное —\n  // обсуждение вокруг обращения либо вопрос к чужой команде HC Data.\n  reason = 'не наша тема: ' + (head.slice(0, 60) || '(пусто)');\n} else if (REQUIRE_DM &&\n           String(src.channel_type ?? data.channel_type ?? post.channel_type ?? '') !== 'D') {\n  reason = 'не личный диалог';\n} else if (ALLOWLIST.length &&\n           !ALLOWLIST.includes(String(src.sender_name ?? '').replace(/^@/, ''))) {\n  reason = 'отправитель не в списке';\n}\n\nreturn [{ json: {\n  event: src.event ?? data.event ?? '',\n  post,\n  // В ядро уходит ПОЛНЫЙ пост, а не question_text: поля формы для автора\n  // содержательны (у выгрузки в них вся суть запроса), и урезать вход модели\n  // здесь нечего — экономия нулевая, а риск потерять условие задачи есть.\n  question: message,\n  topic,\n  // Разобранная форма. Пустые значения — норма: в личке формы нет вовсе,\n  // а вариант формы мог измениться. Поэтому form_parsed — отдельный флаг,\n  // и по нему видно, разбор промахнулся или полей просто не было.\n  topic_kind: topicKind,\n  form_author: formAuthor,\n  form_domain: formDomain,\n  report_url: reportUrl,\n  question_text: questionText,\n  form_context: formContext,\n  // 'yes' — файл уходит за пределы группы компаний, 'no' — только внутри,\n  // '' — поля в форме не нашлось или полярность подписи не читается.\n  // Три состояния, а не булево: «не разобрано» и «внутри» — разные вещи,\n  // и подставлять второе вместо первого значит молча снять требование ИБ.\n  external_transfer: externalTransfer,\n  // Что именно прочитано. Диагностика на случай, когда форму переформулируют:\n  // по этому полю видно, подпись не нашлась или не разобрался ответ.\n  external_transfer_raw: externalTransferRaw,\n  form_parsed: Boolean(formDomain || reportUrl.length || sections.length),\n  channel_id: post.channel_id ?? data.channel_id ?? '',\n  channel_name: src.channel_name ?? data.channel_name ?? '',\n  sender_name: String(src.sender_name ?? '').replace(/^@/, ''),\n  pass: !reason,\n  reason,\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        300
+      ],
+      "id": "guard-channel",
+      "name": "Guard channel"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pass",
+              "leftValue": "={{ $json.pass }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        200,
+        300
+      ],
+      "id": "our-request",
+      "name": "Our request"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "quV6Ec1hmobZefBX",
+          "mode": "id",
+          "cachedResultName": "Support Bot Core"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "question": "={{ $json.question }}",
+            "mode": "channel",
+            "topic_kind": "={{ $('Guard channel').first().json.topic_kind ?? '' }}",
+            "form_domain": "={{ $('Guard channel').first().json.form_domain ?? '' }}",
+            "report_url": "={{ ($('Guard channel').first().json.report_url ?? []).join(' ') }}",
+            "form_context": "={{ $('Guard channel').first().json.form_context ?? '' }}",
+            "external_transfer": "={{ $('Guard channel').first().json.external_transfer ?? '' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "question",
+              "displayName": "question",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "mode",
+              "displayName": "mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "topic_kind",
+              "displayName": "topic_kind",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "form_domain",
+              "displayName": "form_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "report_url",
+              "displayName": "report_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "form_context",
+              "displayName": "form_context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "external_transfer",
+              "displayName": "external_transfer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        300
+      ],
+      "id": "call-core",
+      "name": "Call core"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst CONF = { high: 'высокая', medium: 'средняя', none: 'нет ответа' };\n// Винительный падеж для строки «бот заявил …»: «заявил высокая» читается\n// как опечатка и отвлекает от смысла строки.\nconst CONF_ACC = { high: 'высокую', medium: 'среднюю', none: '«нет ответа»' };\n// Светофор у уверенности. Решение пользователя: по одному взгляду на канал\n// должно быть видно, проблемный это тред или ответ можно брать и копировать,\n// не разворачивая служебный блок.\n// Белый — для unknown: модель отклонилась от формата, и это не «посередине»,\n// а «непонятно»; рядом в треде печатается parse_error.\nconst CONF_DOT = { high: '🟢', medium: '🟡', none: '🔴' };\nconst confDot = (k) => CONF_DOT[k] || '⚪';\n\n// Корневой пост: строка обращения в канале джуна.\n//\n// ОБРАЩЕНИЕ НЕ ЦИТИРУЕТСЯ ЦЕЛИКОМ. Раньше здесь печаталось '> ' + a.question,\n// а question — это весь пост intake-формы: шапка, «Выбери домен», ссылка на\n// отчёт и текст вопроса. Именно эта цитата разгоняла посты к лимиту 4000\n// символов, на котором пост черновика падал. Но и совсем без темы канал читался\n// как список ссылок: чтобы понять, о чём обращение, приходилось открывать\n// тред. Поэтому здесь одна строка — начало вопроса из формы, обрезанное\n// по длине; полный текст остаётся по ссылке за один клик.\nconst a = $json;\nconst src = $('Guard channel').first().json;\nconst post = src.post ?? {};\n\nconst link = post.id\n  ? 'https://time.tbank.ru/tinkoff/pl/' + post.id\n  : '';\n\n// Светофор приклеен к теме, а не отделён точкой: он читается как значок\n// строки, а не как её первое поле.\nconst head = [\n  confDot(a.confidence_key) + ' **' +\n    (src.topic_kind || 'Вопрос из ~' + (src.channel_name || 'hr-report-ask')) + '**',\n  src.form_author ? '@' + src.form_author : '',\n  link ? '[открыть обращение](' + link + ')' : '',\n].filter(Boolean).join(' · ');\n\nconst lines = [head];\n\nconst SUBJ_MAX = 160;\nlet subj = String(src.question_text ?? '').replace(/\\s+/g, ' ').trim();\nif (subj.length > SUBJ_MAX) subj = subj.slice(0, SUBJ_MAX).trimEnd() + '…';\nif (subj) lines.push('_' + subj + '_');\n\n// Уверенность и, если она понижена кодом, — чем именно. Причина здесь, а не\n// только в треде: по ней джун решает, разворачивать тред или брать черновик\n// как есть, и ради этого решения пост и существует.\nlet conf = 'Уверенность: **' + (CONF[a.confidence_key] || a.confidence || '—') + '**';\nif (a.confidence_capped) {\n  conf += ' ← бот заявил ' + (CONF_ACC[a.confidence_claimed] || a.confidence_claimed);\n}\nlines.push(conf);\nif (a.confidence_capped_reason) lines.push('_Почему: ' + a.confidence_capped_reason + '_');\nif (a.parse_error) lines.push('⚠️ **Разбор ответа:** ' + a.parse_error);\n\n// Что искать в треде. Названо явно: свёрнутый тред в Mattermost показывает\n// число ответов, а не их состав, и без этой строки непонятно, есть ли там\n// готовое к отправке сообщение.\nlines.push('_В треде: разбор · сообщение заказчику' +\n  (String(a.tech_spec ?? '').trim() ? ' · ТЗ для аналитика' : '') + '._');\n\n// Кроме текста шапка отдаёт контекст для кнопок обратной связи: нода поста\n// подставляет его в context кнопок, а вебхук получает обратно как есть.\n// thread_id — id ИСХОДНОГО обращения: по нему оценка склеивается с обращением\n// в телеметрии. Пустой (обращение без id) — оценка всё равно запишется,\n// просто не привяжется к треду, и это видно в самой записи.\n//\n// ТЕМА УЕЗЖАЕТ ПОЛНЫМ ЗАГОЛОВКОМ, а не куском после префикса.\n//\n// В шапке печатается человекочитаемая часть («Выгрузка данных»), и раньше\n// ровно она уходила в контекст кнопки под именем `kind`. В телеметрии `kind` —\n// аналитический ключ (`export`), тот же, что пишет обращение; в итоге одна\n// колонка держала два словаря сразу, и разбивка по темам разошлась бы на\n// «обращения» и «оценки» как на разные темы. Классификацию делает вебхук\n// кнопок — он собирается из того же списка тем, что и нормализатор, — а бот\n// по-прежнему про список тем не знает и отдаёт заголовок как есть.\nconst topicTitle = [String(src.topic ?? '').trim(), String(src.topic_kind ?? '').trim()]\n  .filter(Boolean).join(' ').trim();\n\nreturn [{ json: {\n  text: lines.join('\\n'),\n  thread_id: String(post.id ?? ''),\n  topic: topicTitle,\n  confidence_key: String(a.confidence_key ?? ''),\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "id": "build-header",
+      "name": "Build header"
+    },
+    {
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "stonis_hakcs_2"
+        },
+        "message": "={{ $json.text }}",
+        "attachments": [
+          {
+            "text": "Помог ли ответ? Оценка идёт в разбор качества — по ней правятся промпты и база знаний.",
+            "actions": {
+              "item": [
+                {
+                  "type": "button",
+                  "name": "👍 Помогло",
+                  "integration": {
+                    "item": {
+                      "url": "https://n8n.t-tech.team/webhook/bot-feedback",
+                      "context": {
+                        "property": [
+                          {
+                            "name": "action",
+                            "value": "helpful"
+                          },
+                          {
+                            "name": "thread_id",
+                            "value": "={{ $json.thread_id }}"
+                          },
+                          {
+                            "name": "topic",
+                            "value": "={{ $json.topic }}"
+                          },
+                          {
+                            "name": "confidence",
+                            "value": "={{ $json.confidence_key }}"
+                          },
+                          {
+                            "name": "prompt_version",
+                            "value": "2b07588b"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "button",
+                  "name": "👎 Не помогло",
+                  "integration": {
+                    "item": {
+                      "url": "https://n8n.t-tech.team/webhook/bot-feedback",
+                      "context": {
+                        "property": [
+                          {
+                            "name": "action",
+                            "value": "not_helpful"
+                          },
+                          {
+                            "name": "thread_id",
+                            "value": "={{ $json.thread_id }}"
+                          },
+                          {
+                            "name": "topic",
+                            "value": "={{ $json.topic }}"
+                          },
+                          {
+                            "name": "confidence",
+                            "value": "={{ $json.confidence_key }}"
+                          },
+                          {
+                            "name": "prompt_version",
+                            "value": "2b07588b"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "button",
+                  "name": "✍️ Написать подробнее",
+                  "integration": {
+                    "item": {
+                      "url": "https://n8n.t-tech.team/webhook/bot-feedback",
+                      "context": {
+                        "property": [
+                          {
+                            "name": "action",
+                            "value": "detail"
+                          },
+                          {
+                            "name": "thread_id",
+                            "value": "={{ $json.thread_id }}"
+                          },
+                          {
+                            "name": "topic",
+                            "value": "={{ $json.topic }}"
+                          },
+                          {
+                            "name": "confidence",
+                            "value": "={{ $json.confidence_key }}"
+                          },
+                          {
+                            "name": "prompt_version",
+                            "value": "2b07588b"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        920,
+        300
+      ],
+      "id": "post-header",
+      "name": "Post header",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Разбивка длинного текста на посты Mattermost.\n//\n// 3900, а не 4000: лимит считается сервером в символах, и запас нужен на\n// маркер «(1/2)» и на markdown, который мы добавляем сами. Упереться в лимит\n// повторно значит снова уронить последний узел — уже после того, как ядро\n// отработало и ответ собран.\nconst MM_LIMIT = 3900;\n// Больше четырёх сообщений на один черновик — это не длинный ответ, а сбой:\n// спамить канал джуна нельзя, поэтому хвост обрезается с явной пометкой.\nconst MM_MAX_PARTS = 4;\n\nfunction mmChunks(text) {\n  const s = String(text ?? '').trim();\n  if (s.length <= MM_LIMIT) return [s];\n\n  const chunks = [];\n  let rest = s;\n  // Режем по границе строки, а если её нет — по слову: разрыв посреди\n  // markdown-ссылки или таблицы ломает разметку в обеих половинах.\n  while (rest.length > MM_LIMIT && chunks.length < MM_MAX_PARTS - 1) {\n    let at = rest.lastIndexOf('\\n', MM_LIMIT);\n    if (at < MM_LIMIT * 0.5) at = rest.lastIndexOf(' ', MM_LIMIT);\n    if (at < MM_LIMIT * 0.5) at = MM_LIMIT;\n    chunks.push(rest.slice(0, at).trimEnd());\n    rest = rest.slice(at).trimStart();\n  }\n  if (rest.length > MM_LIMIT) {\n    const kept = rest.slice(0, MM_LIMIT - 80).trimEnd();\n    rest = kept + '\\n\\n✂️ обрезано ' + (rest.length - kept.length) +\n           ' символов: лимит поста Mattermost.';\n  }\n  chunks.push(rest);\n  return chunks;\n}\n\n// Нумерация обязательна: без неё несколько постов подряд читаются как\n// несколько разных ответов на одно обращение.\nfunction mmSplit(text) {\n  const chunks = mmChunks(text);\n  if (chunks.length < 2) return chunks;\n  return chunks.map((c, i) => '**(' + (i + 1) + '/' + chunks.length + ')**\\n' + c);\n}\n\n// Нода mattermost отправляет по посту на входной элемент, поэтому разбивка\n// возвращается элементами, а порядок сохраняется исполнением по элементам.\nconst mmItems = (text) => mmSplit(text).map((t) => ({ json: { text: t } }));\n\n// РАЗНЫЕ БЛОКИ — РАЗНЫМИ ПОСТАМИ.\n//\n// Сообщение заказчику и ТЗ для аналитика адресованы разным людям, и джун\n// пересылает первое, не трогая второе. Пока они ехали одним постом, переслать\n// было нечего: ни целиком, ни куском. Отдельный пост копируется целиком\n// и кнопкой «Copy Text», а заголовок остаётся первой строкой — его джун\n// снимает одним движением, в отличие от чересполосицы бизнеса и техники.\n//\n// Общий предохранитель на число постов свой: посекционного мало, три секции\n// по четыре части — это двенадцать сообщений подряд в канале джуна.\nconst MM_MAX_POSTS = 6;\n\nfunction mmSections(sections) {\n  const items = [];\n  let dropped = 0;\n  for (const s of sections) {\n    const body = String(s.body ?? '').trim();\n    if (!body) continue;\n    const chunks = mmChunks(body);\n    chunks.forEach((c, i) => {\n      const title = String(s.title ?? '').trim();\n      const mark = chunks.length > 1 ? ' (' + (i + 1) + '/' + chunks.length + ')' : '';\n      const head = title ? '**' + title + mark + '**\\n' : (mark ? '**' + mark.trim() + '**\\n' : '');\n      if (items.length < MM_MAX_POSTS) items.push({ json: { text: head + c } });\n      else dropped++;\n    });\n  }\n  // Молча потерянный хвост — тот же тихий отказ: по виду канала ответ полный.\n  if (dropped && items.length) {\n    items[items.length - 1].json.text +=\n      '\\n\\n✂️ не отправлено частей: ' + dropped + ' (предел ' + MM_MAX_POSTS +\n      ' сообщений на одно обращение).';\n  }\n  return items.length ? items : [{ json: { text: '_ответ пустой_' } }];\n}\n\nconst CONF = { high: 'высокая', medium: 'средняя', none: 'нет ответа' };\n// Винительный падеж для строки «бот заявил …»: «заявил высокая» читается\n// как опечатка и отвлекает от смысла строки.\nconst CONF_ACC = { high: 'высокую', medium: 'среднюю', none: '«нет ответа»' };\n// Светофор у уверенности. Решение пользователя: по одному взгляду на канал\n// должно быть видно, проблемный это тред или ответ можно брать и копировать,\n// не разворачивая служебный блок.\n// Белый — для unknown: модель отклонилась от формата, и это не «посередине»,\n// а «непонятно»; рядом в треде печатается parse_error.\nconst CONF_DOT = { high: '🟢', medium: '🟡', none: '🔴' };\nconst confDot = (k) => CONF_DOT[k] || '⚪';\n\n// Ответы в тред к шапке обращения.\n//\n// РАЗНЫЕ БЛОКИ — РАЗНЫМИ ПОСТАМИ, и это свойство сохраняется: джун копирует\n// сообщение заказчику ЦЕЛИКОМ кнопкой «Copy Text» и отправляет в тред\n// обращения, ТЗ оставляет себе, служебное не пересылает никогда. Пока они\n// ехали одним постом, копировать было нечего — ни целиком, ни куском.\n//\n// Входной элемент здесь — ответ Mattermost на публикацию шапки, поэтому\n// разбор берётся у ядра по имени ноды, а не из $json.\nconst a = $('Call core').first().json;\n\nconst parts = [];\n\n// Передача вне контура — первой строкой, раньше основания и источников.\n// Всё остальное в этом блоке говорит, насколько черновику можно верить;\n// эта строка говорит, что его нельзя отправлять как есть. Порядок здесь\n// и есть способ это различить.\nif (a.ib_missing) {\n  parts.push('🔒 **Передача вне группы компаний, а согласования ИБ ' +\n    'в черновике нет.** В форме указано, что данные уходят наружу — ' +\n    'дописать перед отправкой: файл не передаём, пока ИБ не согласовала, ' +\n    'заявка в ~sec_analytics_ask.');\n} else if (a.ib_required) {\n  parts.push('🔒 **Передача вне группы компаний:** согласование ИБ ' +\n    '(~sec_analytics_ask) обязательно, в черновике оно названо.');\n}\n\nif (Array.isArray(a.confidence_basis) && a.confidence_basis.length) {\n  parts.push('**Основание:** ' + a.confidence_basis.join(' · '));\n}\nif (a.sources) parts.push('**Источники:** ' + a.sources.replace(/\\n/g, ' · '));\nif (a.gaps) parts.push('**Чего не хватило:** ' + a.gaps.replace(/\\n/g, ' '));\n\n// Техническое в сообщении заказчику. Печатается списком, а не вырезается:\n// вырезанное имя поля оставило бы фразу без смысла, а править текст модели\n// кодом нельзя — в канал уехало бы то, чего никто не писал.\nif (Array.isArray(a.draft_leaks) && a.draft_leaks.length) {\n  parts.push('⚠️ **Вычистить перед отправкой:** ' + a.draft_leaks.join(', ') +\n    ' — заказчику имена таблиц и полей не нужны.');\n}\n\n// Длина черновика. Мерит код, режет человек: править текст модели кодом\n// нельзя, а молчать о полотне — значит отправить заказчику ровно то, на что\n// он уже жаловался.\nif (a.draft_too_long) {\n  parts.push('✂️ **Черновик длинный:** ' + a.draft_too_long + ' знаков. ' +\n    'Правило режима — до 1500 без списка полей; лишнее обычно это повторы ' +\n    'и расшифровки очевидного.');\n}\n\n// Задача для базы — готовый список правок, а не впечатление. Собран кодом\n// из фактов в «Parse answer»: см. там, почему не просьбой к модели.\nif (Array.isArray(a.kb_tasks) && a.kb_tasks.length) {\n  parts.push('');\n  parts.push('**Задача для базы**');\n  for (const t of a.kb_tasks) parts.push('— ' + t);\n}\n\n// Заголовок ТЗ печатается только когда блок есть. Для обычного вопроса\n// ТЗ не бывает вовсе, и пустой заголовок читался бы как «бот не дописал».\nreturn mmSections([\n  { title: 'Разбор', body: parts.join('\\n') },\n  { title: 'Сообщение заказчику — скопировать в тред',\n    body: a.draft || '_черновик пустой_' },\n  { title: 'ТЗ для аналитика — заказчику не отправлять', body: a.tech_spec },\n]);\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        300
+      ],
+      "id": "build-thread",
+      "name": "Build thread"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Событие «бот ответил» для лога телеметрии.\n//\n// Ключ идемпотентности — обращение плюс версия промптов: повторный прогон\n// того же обращения на той же версии перезапишет строку, а прогон после\n// правки промпта добавит новую. Это ровно то, что нужно для сверки\n// «правка промпта → оценки кнопками».\nconst a = $('Call core').first().json;\nconst src = $('Guard channel').first().json;\nconst postId = String((src.post ?? {}).id ?? '');\n\nreturn [{ json: {\n  event: 'bot_answered',\n  event_id: 'bot_answered:' + postId + ':' + \"2b07588b\",\n  thread_id: postId,\n  event_ts: Date.now(),\n  actor: 'core',\n  source: 'core',\n  payload: {\n    // Домены роутера — то, ради чего врезка и делалась.\n    domains: Array.isArray(a.domains) ? a.domains : [],\n    // Пара «заявлено / действует»: по ней считается калибровка модели.\n    // По одному полю не видно ни завышения, ни частоты понижений.\n    confidence_claimed: a.confidence_claimed || '',\n    confidence_key: a.confidence_key || '',\n    confidence_capped: a.confidence_capped === true,\n    capped_reason: a.confidence_capped_reason || '',\n    prompt_version: \"2b07588b\",\n    is_export: a.is_export === true,\n    // Из чего собран ответ: по этим числам видно, что чинить — базу или промпт.\n    // Имя поля — articles_read, а не articles: support_request.sql (CTE bot)\n    // читает именно $.articles_read, и расхождение имён оставило бы колонку\n    // NULL даже после импорта — тихая ошибка, которую по виду флоу не увидеть.\n    articles_read: Array.isArray(a.articles_read) ? a.articles_read : [],\n    // dd_count — план роутера, dd_received — факт. Порознь они бесполезны:\n    // отказ ветки каталога 2026-08-26 две недели выглядел в логе как норма\n    // ровно потому, что писался один только план.\n    dd_count: a.dd_count || 0,\n    dd_received: a.dd_received || 0,\n    // Узел каталога не выполнялся, хотя объекты планировались. Отдельный\n    // класс отказа: чинится в n8n, а не в базе знаний.\n    dd_never_ran: a.dd_never_ran === true,\n    kb_tasks: Array.isArray(a.kb_tasks) ? a.kb_tasks.length : 0,\n    draft_len: a.draft_len || 0,\n    draft_leaks: Array.isArray(a.draft_leaks) ? a.draft_leaks.length : 0,\n    // Передача вне контура. Пишется с первого дня, хотя витрина эти поля\n    // пока не читает: посчитать задним числом, как часто требование ИБ\n    // возникало и как часто модель его пропускала, будет уже неоткуда —\n    // в отличие от BOT_USER_IDS, который фильтруется при пересчёте.\n    external_transfer: a.external_transfer || '',\n    ib_required: a.ib_required === true,\n    ib_missing: a.ib_missing === true,\n    parse_error: a.parse_error || '',\n    // Тоже читается витриной ($.router_error) — раньше не писался вовсе.\n    router_error: a.router_error || '',\n    // Домен глазами заказчика против доменов бота — расхождение видно\n    // без обращения к базе знаний.\n    form_domain: a.form_domain || '',\n  },\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        480
+      ],
+      "id": "answer-event",
+      "name": "Answer event"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "28ExyYBVz53J1bMu",
+          "mode": "id",
+          "cachedResultName": "Telemetry · Ingest"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        920,
+        480
+      ],
+      "id": "to-ingest",
+      "name": "To Ingest"
+    },
+    {
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "stonis_hakcs_2"
+        },
+        "message": "={{ $json.text }}",
+        "attachments": [],
+        "otherOptions": {
+          "root_id": "={{ $('Post header').first().json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        300
+      ],
+      "id": "post-in-thread",
+      "name": "Post in thread",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Time Trigger": {
+      "main": [
+        [
+          {
+            "node": "Guard channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard channel": {
+      "main": [
+        [
+          {
+            "node": "Our request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Our request": {
+      "main": [
+        [
+          {
+            "node": "Call core",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Call core": {
+      "main": [
+        [
+          {
+            "node": "Build header",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build header": {
+      "main": [
+        [
+          {
+            "node": "Post header",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Answer event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post header": {
+      "main": [
+        [
+          {
+            "node": "Build thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build thread": {
+      "main": [
+        [
+          {
+            "node": "Post in thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer event": {
+      "main": [
+        [
+          {
+            "node": "To Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

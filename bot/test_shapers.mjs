@@ -1,0 +1,629 @@
+// Прогон шейперов DD Lookup.json на подставных данных DD.
+// Проверяет: полный инвентарь без search, фильтр search, промах фильтра,
+// пустой ответ, HTTP-ошибки, разные варианты обёртки массива.
+import fs from 'fs';
+
+const wf = JSON.parse(fs.readFileSync('DD Lookup.json', 'utf8'));
+const js = (n) => wf.nodes.find((x) => x.name === n).parameters.jsCode;
+
+// dd_column_cards (одна карточка на колонку) сменился на два отдельных
+// запроса — dd_column_summary и dd_column_attrs (entityFields на /entity/{urn}
+// перестал их отдавать, см. build_dd_flow.py). Тесты по-прежнему собираются
+// вокруг ОДНОЙ фикстуры «карточка» {fqn, summary, attributes} — cards === null
+// означает, что узлы в прогоне не выполнялись (Pick columns/Need column cards
+// отсеяли), и $() должна бросить, как n8n на невыполненной ноде; иначе она
+// здесь же разбирается на summaries[]/attrsList[], а имена полей для
+// Pick columns.all() восстанавливаются из fqn через shortNameLocal — в реальном
+// флоу оба запроса идут по ОДНОМУ и тому же списку targets, порядок тот же.
+// pick — то, что вернула Pick columns (mode/total_cols), для .first(): не
+// передан — используется первый восстановленный из cards элемент, а если
+// и cards нет — {}, как и раньше по умолчанию это mode: 'by_name'.
+function shortNameLocal(o) {
+  const fqn = (o && (o.fqn || o.name)) || '';
+  const parts = String(fqn).split('.');
+  return parts[parts.length - 1] || '';
+}
+
+// entityAttrs — ответ dd_entity_attrs (атрибуты ТАБЛИЦЫ, не колонки), для
+// «КОММЕНТАРИЙ ИЗ DD». Не передан — как и раньше, {} по умолчанию: comment
+// пуст, строка не печатается.
+function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = null) {
+  const pickList = cards !== null ? cards.map((c) => ({ field: shortNameLocal((c && c.body) || c || {}) })) : [];
+  const $ = (name) => {
+    if (name === 'dd_column_summary') {
+      if (cards === null) throw new Error('node not executed');
+      return {
+        all: () =>
+          cards.map((c) => {
+            const b = (c && c.body) || c || {};
+            const s = b.summary;
+            const data = s && typeof s === 'object' ? s.data ?? '' : typeof s === 'string' ? s : '';
+            return { json: { statusCode: c ? c.statusCode : 200, body: { data } } };
+          }),
+      };
+    }
+    if (name === 'dd_column_attrs') {
+      if (cards === null) throw new Error('node not executed');
+      return {
+        all: () =>
+          cards.map((c) => {
+            const b = (c && c.body) || c || {};
+            return { json: { statusCode: c ? c.statusCode : 200, body: b.attributes || {} } };
+          }),
+      };
+    }
+    if (name === 'Pick columns') {
+      return {
+        first: () => ({ json: pick !== null ? pick : pickList[0] || null }),
+        all: () => pickList.map((json) => ({ json })),
+      };
+    }
+    return {
+      first: () => ({
+        json: {
+          'When called by agent': inputs,
+          dd_entity_card: card,
+          dd_entity_attrs: entityAttrs,
+          dd_columns: cols,
+        }[name],
+      }),
+    };
+  };
+  return new Function('$', js('Shape table meta'))($)[0].json.dd_meta;
+}
+
+// Прогон ноды Pick columns: что она отдаст дальше по флоу.
+function runPick(inputs, cols) {
+  const $ = (name) => ({
+    first: () => ({
+      json: { 'When called by agent': inputs, dd_columns: cols }[name],
+    }),
+  });
+  return new Function('$', js('Pick columns'))($).map((i) => i.json);
+}
+
+function runReport(inputs, markdown, attrs, links) {
+  const $ = (name) => ({
+    first: () => ({
+      json: {
+        'When called by agent': inputs,
+        dd_report_markdown: markdown,
+        dd_report_attrs: attrs,
+        dd_report_links: links,
+      }[name],
+    }),
+  });
+  return new Function('$', js('Shape report meta'))($)[0].json.dd_meta;
+}
+
+const mkCols = (n) =>
+  Array.from({ length: n }, (_, i) => ({
+    fqn: `emart.mdm_employee_structure_d.field_${i}`,
+    summary: { data: i % 3 ? `описание поля ${i}` : '' },
+    attributes: [{ key: 'dataType', value: i % 2 ? 'text' : 'date' }],
+  }));
+
+const cols210 = {
+  statusCode: 200,
+  body: {
+    items: mkCols(210).concat([
+      {
+        fqn: 'emart.mdm_employee_structure_d.emp_grade_desc',
+        summary: { data: 'грейд сотрудника | с пайпом внутри' },
+        attributes: [{ key: 'dataType', value: 'text' }],
+      },
+    ]),
+  },
+};
+
+// dd_entity_card бьёт в /entity/{urn}/summary напрямую (entityFields на
+// /entity/{urn} перестал отдавать displayName/summary, см. build_dd_flow.py),
+// поэтому тело ответа — просто { data }, без displayName/fqn.
+const card = {
+  statusCode: 200,
+  body: { data: 'сотрудник на каждый\nкалендарный день' },
+};
+
+// РЕАЛЬНАЯ форма ответа /related/columns, подтверждена живым запросом 2026-08-06.
+// Сущность вложена в entity; summary и attributes не приходят вовсе, хотя
+// entityFields передан. totalCount 267 при отданных 4 записях.
+const REAL_COLS = [
+  'business_dt',
+  'mdm_employee_rk',
+  'company_hire_dt',
+  'company_fire_dt',
+].map((n, i) => ({
+  relationId: `rel-${i}`,
+  entity: {
+    id: `id-${i}`,
+    urn: `urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.${n}`,
+    system: 'tables.greenplum',
+    type: 'COLUMN',
+    fqn: `emart.mdm_employee_structure_d.${n}`,
+  },
+}));
+
+const URN = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d';
+const line = (s) => console.log('\n' + '='.repeat(70) + '\n' + s + '\n' + '='.repeat(70));
+
+// НАСТОЯЩАЯ карточка колонки, скопирована из живого ответа 2026-08-06.
+const REAL_CARD_BUSINESS_DT = {
+  statusCode: 200,
+  body: {
+    id: 'c-1',
+    urn: 'urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.business_dt',
+    system: 'tables.greenplum',
+    type: 'COLUMN',
+    fqn: 'emart.mdm_employee_structure_d.business_dt',
+    summary: { data: 'Дата среза' },
+    attributes: {
+      keys: { type: 'text-list', data: ['PK'] },
+      source: { type: 'text', data: '[EMARTI.MDM_EMPLOYEE_C_STRUCTURE_MAPPED_D.business_dt](https://dd…)' },
+      comment: {
+        type: 'text',
+        data: 'business_dt генерируется от даты найма сотрудника в компанию до даты увольнения.\n* если сотрудник был нанят 10.10.2023, то в business_dt=\'10.10.2023\' первая запись.\nВитрина подневно развернута с 01.01.2021.',
+      },
+      to_delete: { type: 'boolean', data: false },
+      column_type: { type: 'text', data: 'date' },
+      can_be_accessed: { type: 'boolean', data: true },
+      versioning_type: { type: 'text', data: 'BSN' },
+      ordinal_position: { type: 'number', data: 1 },
+    },
+  },
+};
+
+line('00. НАСТОЯЩАЯ КАРТОЧКА КОЛОНКИ — тип, описание, комментарий');
+let real = runTable(
+  { urn: URN, search: 'business_dt' },
+  card,
+  { statusCode: 200, body: { totalCount: 267, data: REAL_COLS } },
+  [REAL_CARD_BUSINESS_DT],
+);
+console.log(real);
+console.log('\nПРОВЕРКИ:');
+console.log('  тип «date», не [object Object]:', /\(date\)/.test(real) && !/object Object/.test(real));
+console.log('  versioning_type НЕ выдан за тип:', !/BSN/.test(real));
+console.log('  описание «Дата среза»:          ', /Дата среза/.test(real));
+console.log('  комментарий владельца есть:     ', /подневно развернута/.test(real));
+console.log('  ключ PK показан:                ', /\[PK\]/.test(real));
+
+line('00б. Pick columns — какие URN уйдут за карточками');
+console.log('пустой search:', JSON.stringify(runPick({ urn: URN, search: '' }, { statusCode: 200, body: { data: REAL_COLS } })));
+console.log('search=hire: ', JSON.stringify(runPick({ urn: URN, search: 'hire' }, { statusCode: 200, body: { data: REAL_COLS } })));
+
+line('00в. КОММЕНТАРИЙ ТАБЛИЦЫ (dd_entity_attrs) — печатается, если отличается от summary');
+// dd_entity_card отдаёт только summary; comment таблицы — на dd_entity_attrs,
+// добавлен по просьбе после фикса entityFields (см. AGENTS.md): в интерфейсе
+// DD у таблицы, как и у колонки, есть поле «Комментарий», отдельное от
+// summary, и раньше оно не запрашивалось вовсе.
+const tableAttrs = {
+  statusCode: 200,
+  body: {
+    comment: { type: 'text', data: 'Витрина считается только по активным юр. договорам, уволенные не попадают.' },
+    owner: { type: 'text', data: 'CrossData Team' },
+  },
+};
+const withComment = runTable(
+  { urn: URN, search: '' },
+  card,
+  { statusCode: 200, body: { totalCount: 267, data: REAL_COLS } },
+  null,
+  null,
+  tableAttrs,
+);
+console.log('\nПРОВЕРКИ:');
+console.log('  комментарий из DD показан:    ', /КОММЕНТАРИЙ ИЗ DD: Витрина считается только/.test(withComment));
+
+// Comment совпадает с summary дословно — дублировать незачем.
+const sameAsSummary = runTable(
+  { urn: URN, search: '' },
+  card,
+  { statusCode: 200, body: { totalCount: 267, data: REAL_COLS } },
+  null,
+  null,
+  { statusCode: 200, body: { comment: { type: 'text', data: card.body.data } } },
+);
+console.log('  дубль summary не печатается:  ', (sameAsSummary.match(/сотрудник на каждый календарный день/g) || []).length === 1);
+
+// Атрибутов у таблицы нет вовсе — как и раньше, строка просто не появляется.
+const noComment = runTable(
+  { urn: URN, search: '' },
+  card,
+  { statusCode: 200, body: { totalCount: 267, data: REAL_COLS } },
+);
+console.log('  без атрибутов — без строки:  ', !/КОММЕНТАРИЙ ИЗ DD/.test(noComment));
+
+line('0. РЕАЛЬНАЯ ФОРМА ОТВЕТА DD — entity внутри, без описаний, totalCount 267');
+real = runTable({ urn: URN, search: '' }, card, {
+  statusCode: 200,
+  body: { totalCount: 267, data: REAL_COLS },
+});
+console.log(real);
+console.log('\nПРОВЕРКИ:');
+console.log('  поля распакованы из entity:', /business_dt, mdm_employee_rk/.test(real));
+console.log('  сказано «получено 4 из 267»:', /получено 4 из 267/.test(real));
+console.log('  список назван НЕПОЛНЫМ:     ', /НЕПОЛНЫЙ/.test(real));
+console.log('  предложен шаг 2 с фильтром: ', /вызови dd_lookup ещё раз/.test(real));
+console.log('  подробностей нет (шаг 1):   ', !/ПОДРОБНО ПО ПОЛЯМ/.test(real));
+
+line('0б. РЕАЛЬНАЯ ФОРМА + фильтр: таблицы с прочерками быть не должно');
+real = runTable({ urn: URN, search: 'dt' }, card, {
+  statusCode: 200,
+  body: { totalCount: 267, data: REAL_COLS },
+});
+console.log(real);
+console.log('\nПРОВЕРКИ:');
+console.log('  нет пустой таблицы с «—»:', !/\| — \| — \|/.test(real));
+console.log('  найдены поля по фильтру: ', /business_dt, company_hire_dt, company_fire_dt/.test(real));
+
+line('1. ШАГ 1: БЕЗ ФИЛЬТРА — полный инвентарь 211 имён, обрезки нет');
+let out = runTable({ urn: URN, search: '' }, card, cols210);
+let lines = out.split('\n');
+console.log(lines.slice(0, 7).join('\n'));
+console.log('   ...');
+console.log(lines.slice(-4).join('\n'));
+console.log('\nПРОВЕРКИ:');
+console.log('  все 211 имён в тексте:', /field_209/.test(out) && /emp_grade_desc/.test(out));
+console.log('  нет слова СКРЫТО:     ', !/СКРЫТО/.test(out));
+console.log('  размер, КБ:           ', (Buffer.byteLength(out) / 1024).toFixed(1));
+
+line('2. ШАГ 2: ФИЛЬТР grade — таблица с типом и описанием');
+console.log(runTable({ urn: URN, search: 'grade' }, card, cols210));
+
+line('3. ФИЛЬТР ПРОМАХНУЛСЯ — должен вернуть полный инвентарь как подсказку');
+out = runTable({ urn: URN, search: 'зарплата' }, card, cols210);
+lines = out.split('\n');
+console.log(lines.slice(0, 9).join('\n'));
+console.log('   ...');
+console.log('\nПРОВЕРКИ:');
+console.log('  инвентарь приложен:   ', /field_100/.test(out));
+console.log('  сказано, что поля нет:', /такого названия в таблице нет|поля с таким/.test(out));
+
+line('4. DD вернул пусто (другой ключ связи)');
+console.log(runTable({ urn: URN, search: '' }, card, { statusCode: 200, body: {} }));
+
+line('5. HTTP 404 по колонкам + 401 по карточке');
+console.log(
+  runTable(
+    { urn: URN, search: '' },
+    { statusCode: 401, body: {} },
+    { statusCode: 404, body: {} },
+  ),
+);
+
+line('6. Обёртка массива = сырой массив, без items');
+console.log(runTable({ urn: URN, search: 'field_1' }, card, { statusCode: 200, body: mkCols(3) }));
+
+line('7. Обёртка = data, attributes объектом, summary строкой');
+console.log(
+  runTable({ urn: URN, search: '' }, card, {
+    statusCode: 200,
+    body: {
+      data: [
+        { fqn: 'a.b.business_dt', summary: 'дата среза', attributes: { dataType: 'date' } },
+        { fqn: 'a.b.mdm_employee_rk', summary: 'ключ', attributes: { columnType: 'bigint' } },
+      ],
+    },
+  }),
+);
+
+line('8. ФИЛЬТР нашёл 111 полей, карточек приходит 12 — сказать про остальные 99');
+// Pick columns режет до MAX_CARDS=12, поэтому карточек приходит ровно 12.
+const cards12 = Array.from({ length: 12 }, (_, i) => ({
+  statusCode: 200,
+  body: {
+    fqn: `emart.mdm_employee_structure_d.field_1${i === 0 ? '' : i}`,
+    summary: { data: `описание поля 1${i === 0 ? '' : i}` },
+    attributes: { column_type: { type: 'text', data: 'text' } },
+  },
+}));
+out = runTable({ urn: URN, search: 'field_1' }, card, cols210, cards12);
+lines = out.split('\n');
+console.log(lines.slice(0, 6).join('\n'));
+console.log('   ...');
+console.log(lines.slice(-5).join('\n'));
+console.log('\nПРОВЕРКИ:');
+console.log('  сказано про 99 без описаний:', /описания получены по 12/.test(out) && /остальным 99/.test(out));
+console.log('  подробности по 12 есть:     ', /ПОДРОБНО ПО ПОЛЯМ \(12\)/.test(out));
+
+line('8б. ПОИСК ПО СМЫСЛУ — живой кейс: hint «причины» не совпадает ни с одним\nименем колонки латиницей, но dismissal_reason_desc в описании есть');
+// Ровно воспроизводит найденный баг: hrmart.legal_position_dismissal_reason,
+// 4 поля, hint по-русски. Раньше Pick columns при 0 совпадений по имени
+// не запрашивала ни одной карточки, и описание не приходило вовсе.
+const dismissalCols = {
+  statusCode: 200,
+  body: {
+    totalCount: 4,
+    data: [
+      'legal_position_rk',
+      'fire_dt',
+      'mdm_employee_rk',
+      'dismissal_reason_desc',
+    ].map((n, i) => ({
+      relationId: `rel-${i}`,
+      entity: {
+        urn: `urn:dd:tables:greenplum:column:hrmart.legal_position_dismissal_reason.${n}`,
+        type: 'COLUMN',
+        fqn: `hrmart.legal_position_dismissal_reason.${n}`,
+      },
+    })),
+  },
+};
+const dismissalCard = {
+  statusCode: 200,
+  body: { displayName: 'hrmart.legal_position_dismissal_reason', fqn: 'hrmart.legal_position_dismissal_reason' },
+};
+const dismissalPick = runPick({ urn: URN, search: 'причины' }, dismissalCols);
+const dismissalCards = dismissalPick.map((t) => ({
+  statusCode: 200,
+  body: {
+    fqn: t.field === 'dismissal_reason_desc'
+      ? 'hrmart.legal_position_dismissal_reason.dismissal_reason_desc'
+      : `hrmart.legal_position_dismissal_reason.${t.field}`,
+    summary: {
+      data: t.field === 'dismissal_reason_desc'
+        ? 'Причины увольнения текстом от сотрудника'
+        : `техническое поле ${t.field}`,
+    },
+    attributes: { column_type: { type: 'text', data: 'text' } },
+  },
+}));
+out = runTable(
+  { urn: URN, search: 'причины' },
+  dismissalCard,
+  dismissalCols,
+  dismissalCards,
+  dismissalPick[0],
+);
+console.log('Pick columns режим:', dismissalPick[0].mode);
+console.log(out);
+console.log('\nПРОВЕРКИ:');
+console.log('  режим by_meaning выбран:      ', dismissalPick[0].mode === 'by_meaning');
+console.log('  карточки заказаны на все поля:', dismissalPick.length === 4);
+console.log('  найдено по смыслу:            ', /НАЙДЕНО ПО СМЫСЛУ: 1/.test(out));
+console.log('  нужное поле в ответе:         ', /dismissal_reason_desc/.test(out));
+console.log('  описание по-русски пришло:    ', /Причины увольнения текстом от сотрудника/.test(out));
+console.log('  нерелевантные поля не показаны:', !/техническое поле/.test(out));
+
+line('8в. ПОИСК ПО СМЫСЛУ — ни имя, ни описание не совпали');
+const dismissalPickMiss = runPick({ urn: URN, search: 'зарплата' }, dismissalCols);
+const dismissalCardsMiss = dismissalPickMiss.map((t) => ({
+  statusCode: 200,
+  body: {
+    fqn: `hrmart.legal_position_dismissal_reason.${t.field}`,
+    summary: { data: `служебное поле ${t.field}, к зарплате отношения не имеет` },
+  },
+}));
+out = runTable(
+  { urn: URN, search: 'зарплата' },
+  dismissalCard,
+  dismissalCols,
+  dismissalCardsMiss,
+  dismissalPickMiss[0],
+);
+console.log('\nПРОВЕРКИ:');
+console.log('  сказано, что не встретилось:  ', /не встретилось ни в одном/.test(out));
+console.log('  инвентарь имён приложен:      ', /dismissal_reason_desc/.test(out) && /ВСЕ ПОЛЯ ТАБЛИЦЫ/.test(out));
+
+line('8г. ПОИСК ПО СМЫСЛУ на широкой таблице — проверяются ВСЕ поля, без потолка');
+// Живой баг: таблица на 289 колонок, потолок в 60 карточек обрывал поиск
+// до того, как дошёл до искомого поля — «не встретилось» означало «не
+// долистали», а не «такого поля нет». Нужное поле здесь на позиции 100,
+// заведомо за старым потолком.
+const N_WIDE = 150;
+const wideCols = {
+  statusCode: 200,
+  body: {
+    totalCount: N_WIDE,
+    data: Array.from({ length: N_WIDE }, (_, i) => ({
+      relationId: `rel-${i}`,
+      entity: {
+        urn: `urn:dd:tables:greenplum:column:emart.wide_table.field_${i}`,
+        type: 'COLUMN',
+        fqn: `emart.wide_table.field_${i}`,
+      },
+    })),
+  },
+};
+const wideCard = { statusCode: 200, body: { fqn: 'emart.wide_table', displayName: 'emart.wide_table' } };
+const widePick = runPick({ urn: URN, search: 'декрет' }, wideCols);
+const wideCards = widePick.map((t) => ({
+  statusCode: 200,
+  body: {
+    fqn: `emart.wide_table.${t.field}`,
+    summary: {
+      data: t.field === 'field_100' ? 'Признак: сотрудница в декретном отпуске' : `служебное поле ${t.field}`,
+    },
+  },
+}));
+out = runTable({ urn: URN, search: 'декрет' }, wideCard, wideCols, wideCards, widePick[0]);
+console.log('\nПРОВЕРКИ:');
+console.log('  Pick columns не режет по 60:  ', widePick.length === N_WIDE);
+console.log('  проверены ВСЕ поля:           ', new RegExp(`проверены ${N_WIDE} из ${N_WIDE} полей`).test(out));
+console.log('  нет упоминания потолка:       ', !/потолок/.test(out));
+console.log('  поле за старым потолком найдено:', /field_100/.test(out) && /декретном отпуске/.test(out));
+
+// ====================================================================== 8д
+line('8д. ДВА ПОНЯТИЯ В ОДНОМ ФИЛЬТРЕ и запрет судить об отсутствии по блоку');
+// Живой отказ 2026-08-26. Вопрос был про логин И рабочую почту, роутер отдал
+// одну иглу «логин» — и бот уверенно ответил, что рабочей почты в витрине
+// нет. Поле wrk_email_address_txt с описанием «Рабочая почта» там есть.
+// Два независимых инварианта: фильтр принимает несколько слов, а блок
+// результатов прямо говорит, что судить по нему об отсутствии нельзя.
+const MIX = {
+  statusCode: 200,
+  body: {
+    totalCount: 3,
+    data: ['ad_login', 'wrk_email_address_txt', 'business_dt'].map((f) => ({
+      entity: {
+        urn: `urn:dd:tables:greenplum:column:emart.mix.${f}`,
+        type: 'COLUMN',
+        fqn: `emart.mix.${f}`,
+      },
+    })),
+  },
+};
+const mixCard = { statusCode: 200, body: { fqn: 'emart.mix' } };
+const DESCR = {
+  ad_login: 'AD логин',
+  wrk_email_address_txt: 'Рабочая почта',
+  business_dt: 'Дата среза',
+};
+const mixRun = (search) => {
+  const pick = runPick({ urn: URN, search }, MIX);
+  const cards = pick.map((t) => ({
+    statusCode: 200,
+    body: { fqn: `emart.mix.${t.field}`, summary: { data: DESCR[t.field] || '' } },
+  }));
+  return { out: runTable({ urn: URN, search }, mixCard, MIX, cards, pick[0]), pick };
+};
+
+const one = mixRun('логин');
+console.log('\nПРОВЕРКИ:');
+console.log('  одна игла: логин найден:      ', /ad_login/.test(one.out));
+console.log('  одна игла: почта НЕ найдена:  ', !/wrk_email_address_txt/.test(one.out));
+console.log('  но сказано, что показаны не все:',
+  /Показаны ТОЛЬКО поля, совпавшие/.test(one.out));
+console.log('  и запрещено судить об отсутствии:',
+  /об отсутствии в таблице ДРУГОГО поля/.test(one.out));
+
+const two = mixRun('логин, почта');
+console.log('  две иглы: логин найден:       ', /ad_login/.test(two.out));
+console.log('  две иглы: почта найдена:      ', /wrk_email_address_txt/.test(two.out));
+console.log('  две иглы: лишнее не притянуло:', !/business_dt/.test(two.out));
+
+// Склонение: «почты» не содержит подстроку «почта», а описание — «Рабочая почта».
+const infl = mixRun('почты');
+console.log('  склонение: «почты» → найдено: ', /wrk_email_address_txt/.test(infl.out));
+
+// Формы ответов подтверждены живым запросом 2026-08-13 на report:1728:
+// markdown — плоский объект {ключ: {data}} без обёртки type; attribute —
+// {ключ: {type, data}}, как у карточки колонки; link — объект по КЛЮЧУ
+// КАТЕГОРИИ ({reports: {url}}), а не массив [{name,url}].
+const REPORT_URN = 'urn:dd:reports:reports:report:1728';
+const mdFull = {
+  statusCode: 200,
+  body: {
+    summary: { data: 'Отчёт поможет для решения следующих задач: выгрузка атрибутов.' },
+    how_to_read: { data: 'Дашборд состоит из трёх блоков: настройка, справка, данные.' },
+    additional_info: { data: 'source_table: [sse_crossdata.mdm_employee_d](https://dd/…)' },
+  },
+};
+const attrsFull = {
+  statusCode: 200,
+  body: {
+    period: { type: 'text', data: 'Ежедневно' },
+    status: { type: 'enum', data: 'Активен' },
+    developers_team: { type: 'text', data: 'CrossData Team' },
+  },
+};
+const linksFull = {
+  statusCode: 200,
+  body: { reports: { url: 'https://proteus.tcsbank.ru/superset/dashboard/hr-executive-detail-employee' } },
+};
+
+line('9. ОТЧЁТ — все три ручки отработали');
+console.log(runReport({ urn: REPORT_URN }, mdFull, attrsFull, linksFull));
+
+line('10. ОТЧЁТ — markdown-блоков в DD нет вовсе');
+console.log(
+  runReport(
+    { urn: REPORT_URN },
+    { statusCode: 200, body: {} },
+    attrsFull,
+    linksFull,
+  ),
+);
+
+line('10б. ОТЧЁТ — одна из ручек упала (401), остальные отработали');
+{
+  const out = runReport(
+    { urn: REPORT_URN },
+    mdFull,
+    { statusCode: 401, body: { message: 'unauthorized' } },
+    linksFull,
+  );
+  console.log(out);
+  console.log('\nПРОВЕРКИ:');
+  console.log('  ошибка атрибутов названа:  ', /ОШИБКИ DD:.*атрибуты/.test(out));
+  console.log('  markdown при этом виден:   ', /НАЗНАЧЕНИЕ:/.test(out));
+}
+
+// ==========================================================================
+// 11. ГРУППЫ ДОСТУПА: три состояния, которые нельзя путать
+//
+// Для запроса на выгрузку это готовый раздел сообщения заказчику: какие поля
+// по умолчанию не выгружаются и требуют согласования. Цена ошибки
+// несимметрична — принять «признака нет» за «поле открыто» значит уверенно
+// сказать заказчику, что согласование не нужно, и ошибиться именно на ПДн.
+let ddFails = 0;
+const checkS = (name, ok) => {
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}`);
+  if (!ok) ddFails++;
+};
+
+line('11. ГРУППЫ ДОСТУПА');
+{
+  const colUrn = (n) => ({
+    entity: { urn: `${URN.replace(':table:', ':column:')}.${n}`,
+              fqn: `emart.mdm_employee_structure_d.${n}` },
+  });
+  const cols = { statusCode: 200,
+                 body: { totalCount: 2, data: [colUrn('fio_nm'), colUrn('grade_nm')] } };
+  const mkCard = (n, attrs) => ({
+    statusCode: 200,
+    body: { fqn: `emart.mdm_employee_structure_d.${n}`,
+            summary: { data: `описание ${n}` }, attributes: attrs },
+  });
+
+  // Признак есть, группы перечислены → поле закрыто.
+  const closed = runTable({ urn: URN, search: 'nm' }, card, cols, [
+    mkCard('fio_nm', { column_type: { type: 'text', data: 'text' },
+                       access_groups: { type: 'text-list', data: ['HR_PII_READ'] } }),
+    mkCard('grade_nm', { column_type: { type: 'text', data: 'text' },
+                         access_groups: { type: 'text-list', data: [] } }),
+  ]);
+  checkS('закрытое поле помечено у самого поля', /fio_nm[\s\S]*ЗАКРЫТО группами HR_PII_READ/.test(closed));
+  checkS('сводка называет закрытые', /ГРУППЫ ДОСТУПА: закрыто полей 1 из 2/.test(closed));
+  checkS('сводка называет имя атрибута', /атрибута «access_groups»/.test(closed));
+  // Якорь «— » обязателен: без него совпадает упоминание поля в списке
+  // «ПОДОШЛИ ПОЛЯ» выше, и проверка ловит чужую пометку.
+  checkS('открытое поле не помечено', !/— grade_nm[\s\S]*ЗАКРЫТО/.test(closed));
+
+  // Признак есть, групп нет ни у кого → закрытых нет, и это утверждение.
+  const open = runTable({ urn: URN, search: 'nm' }, card, cols, [
+    mkCard('fio_nm', { access_groups: { type: 'text-list', data: [] } }),
+    mkCard('grade_nm', { access_groups: { type: 'text-list', data: [] } }),
+  ]);
+  checkS('групп нет — сказано прямо', /ГРУППЫ ДОСТУПА: среди 2 полей закрытых нет/.test(open));
+
+  // Признака нет вовсе → НЕИЗВЕСТНО, и молчать об этом нельзя.
+  const unknown = runTable({ urn: URN, search: 'nm' }, card, cols, [
+    mkCard('fio_nm', { column_type: { type: 'text', data: 'text' } }),
+    mkCard('grade_nm', { column_type: { type: 'text', data: 'text' } }),
+  ]);
+  checkS('признака нет — назван неизвестным', /признака нет в метаданных/.test(unknown));
+  checkS('признака нет — запрет на вывод «открыто»',
+    /Считать эти поля открытыми НЕЛЬЗЯ/.test(unknown));
+
+  // can_be_accessed: {boolean, true} есть на НАСТОЯЩЕЙ карточке колонки.
+  // Свободный поиск по /access/ находил его и печатал «закрыто группами true»
+  // у открытого поля — тот же класс ошибки, что versioning_type вместо типа.
+  const real = runTable({ urn: URN, search: 'business_dt' }, card,
+    { statusCode: 200, body: { totalCount: 267, data: REAL_COLS } }, [REAL_CARD_BUSINESS_DT]);
+  checkS('can_be_accessed не выдан за группы доступа', !/ЗАКРЫТО группами true/i.test(real));
+  checkS('на настоящей карточке признак признан отсутствующим',
+    /признака нет в метаданных/.test(real));
+
+  // Инвентарь без фильтра: карточек не запрашивали, значит про закрытость
+  // не знаем ничего. Молчание здесь прочиталось бы как «поля открыты».
+  const inv = runTable({ urn: URN, search: '' }, card,
+    { statusCode: 200, body: { totalCount: 2, data: [colUrn('fio_nm'), colUrn('grade_nm')] } });
+  checkS('инвентарь: сказано, что не запрашивались',
+    /ГРУППЫ ДОСТУПА: не запрашивались/.test(inv));
+}
+
+console.log(`\n${'='.repeat(70)}`);
+console.log(ddFails ? `ПРОВАЛОВ: ${ddFails}` : 'ПРОВЕРКИ ГРУПП ДОСТУПА ПРОШЛИ');
+console.log('='.repeat(70));
+process.exit(ddFails ? 1 : 0);

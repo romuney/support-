@@ -1,0 +1,616 @@
+{
+  "name": "DD Lookup",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "urn"
+            },
+            {
+              "name": "search"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        300
+      ],
+      "id": "dd-subflow-trigger",
+      "name": "When called by agent"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-table",
+              "leftValue": "={{ $json.urn }}",
+              "rightValue": ":table:",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20,
+        300
+      ],
+      "id": "dd-router",
+      "name": "Route by object type"
+    },
+    {
+      "parameters": {
+        "url": "=https://dd.t-tech.team/api/v3/entity/{{ encodeURIComponent($('When called by agent').first().json.urn) }}/summary",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        260,
+        200
+      ],
+      "id": "dd-http-dd_entity_card",
+      "name": "dd_entity_card",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://dd.t-tech.team/api/v3/entity/{{ encodeURIComponent($('When called by agent').first().json.urn) }}/attribute",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        260,
+        260
+      ],
+      "id": "dd-http-dd_entity_attrs",
+      "name": "dd_entity_attrs",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://dd.t-tech.team/api/v3/entity/{{ encodeURIComponent($('When called by agent').first().json.urn) }}/related/columns",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "entityFields",
+              "value": "displayName"
+            },
+            {
+              "name": "entityFields",
+              "value": "summary"
+            },
+            {
+              "name": "entityFields",
+              "value": "attributes"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        200
+      ],
+      "id": "dd-http-dd_columns",
+      "name": "dd_columns",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Общие помощники. Форма ответа DD по вложенным коллекциям на момент сборки\n// не подтверждена живым запуском, поэтому массив ищется по нескольким\n// известным вариантам обёртки.\nfunction unwrap(body) {\n  if (Array.isArray(body)) return body;\n  if (!body || typeof body !== 'object') return [];\n  for (const k of ['items', 'data', 'content', 'entities', 'result', 'results']) {\n    if (Array.isArray(body[k])) return body[k];\n  }\n  for (const v of Object.values(body)) {\n    if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;\n  }\n  return [];\n}\n\n// Реальная форма ответа /related/{key}, подтверждена живым запросом 2026-08-06:\n//   { totalCount: 267, data: [ { relationId, entity: { id, urn, system, type, fqn } } ] }\n// Сущность вложена в entity, на верхнем уровне лежит связь. Без этой распаковки\n// shortName() не находит fqn и инвентарь получается пустым — ровно так шейпер\n// и молчал на первой версии.\nfunction nodesOf(body) {\n  return unwrap(body).map((x) =>\n    x && typeof x === 'object' && x.entity && typeof x.entity === 'object' ? x.entity : x,\n  );\n}\n\n// Фильтр — СПИСОК игл, а не одна.\n//\n// Живой прогон 2026-08-26. Вопрос: «какое поле хранит логин и есть ли рабочая\n// почта». Роутер отдаёт один hint на объект, ушёл «логин» — и поиска по слову\n// «почта» не было вовсе. Бот увидел в блоке «проверены 289 из 289 полей»,\n// прочитал это как «я видел все поля» и уверенно ответил, что рабочей почты\n// в витрине нет. Поле `wrk_email_address_txt` с описанием «Рабочая почта»\n// в ней есть — проверено вручную. Утверждение об ОТСУТСТВИИ поля опаснее\n// всего, что бот говорит: в режиме выгрузки на нём строится раздел «Чего\n// не будет», и заказчик узнаёт о пропаже атрибута после сдачи файла.\n//\n// В режиме by_meaning карточки всех колонок и так прочитаны, поэтому вторая\n// игла не стоит ни одного лишнего запроса — только ещё одного сравнения.\n//\n// Обрезка до основы: сравнение идёт подстрокой, а русские слова склоняются.\n// `'рабочей почты'.includes('почта')` — ложь. Режем хвост в два символа, но\n// не короче пяти букв, чтобы «дата» не превратилась в «дат» и не совпала\n// с половиной таблицы. Тот же приём уже стоит в проверке покрытия домена.\nfunction needlesOf(search) {\n  return String(search || '')\n    .toLowerCase()\n    .split(/[,;\\n]+/)\n    .map((s) => s.trim())\n    .filter(Boolean)\n    .map((s) => (/^[а-яё]+$/.test(s) && s.length >= 5 ? s.slice(0, s.length - 2) : s));\n}\n\n// Совпала хотя бы одна игла. Пустой список игл не совпадает ни с чем:\n// «фильтра не задавали» и «фильтр не совпал» — разные вещи, и вызывающий\n// обязан различать их сам, до вызова.\nfunction matchesAny(text, needles) {\n  const t = String(text || '').toLowerCase();\n  return needles.some((n) => n && t.includes(n));\n}\n\nfunction shortName(o) {\n  const fqn = o.fqn || o.name || '';\n  const parts = String(fqn).split('.');\n  return parts[parts.length - 1] || '';\n}\n\nfunction descOf(o) {\n  const s = o.summary;\n  if (typeof s === 'string') return s;\n  if (s && typeof s === 'object') return s.data || s.value || s.text || '';\n  return o.description || '';\n}\n\n// Подтверждённая форма attributes на карточке колонки (2026-08-06):\n//   attributes: { column_type: { type: 'text', data: 'date' },\n//                 comment:     { type: 'text', data: '…длинное описание…' },\n//                 keys:        { type: 'text-list', data: ['PK'] }, … }\n// Значение лежит в .data, а не в самом атрибуте. Без этой распаковки typeOf()\n// возвращал строку «[object Object]» и она попадала в ответ агенту как тип поля.\nfunction attrData(attrs, key) {\n  if (!attrs || typeof attrs !== 'object') return '';\n  const a = attrs[key];\n  if (a === undefined || a === null) return '';\n  const d = a && typeof a === 'object' && 'data' in a ? a.data : a;\n  if (d === null || d === undefined) return '';\n  if (Array.isArray(d)) return d.join(', ');\n  if (typeof d === 'object') return '';\n  return String(d);\n}\n\nfunction typeOf(o) {\n  const a = o.attributes;\n  if (!a) return '';\n  if (Array.isArray(a)) {\n    const hit = a.find((x) => /type/i.test(x.key || x.name || ''));\n    return hit ? String(hit.value ?? hit.data ?? '') : '';\n  }\n  if (typeof a === 'object') {\n    // Только явные ключи. Свободный поиск по /type/i цеплял versioning_type\n    // и выдавал «BSN» за тип данных — пустой тип честнее неверного.\n    return (\n      attrData(a, 'column_type') || attrData(a, 'data_type') || attrData(a, 'dataType')\n    );\n  }\n  return '';\n}\n\nfunction oneLine(s) {\n  return String(s || '').replace(/\\s*\\n\\s*/g, ' ').replace(/\\|/g, '\\\\|').trim();\n}\n\n// ---------------------------------------------------------- группы доступа\n//\n// Часть полей закрыта группами доступа: выгрузить их можно, но сначала нужно\n// согласование. Для запроса на выгрузку это то, что обязано попасть\n// в сообщение заказчику отдельным разделом — иначе согласование состоится,\n// а потом окажется, что половину состава дать нельзя.\n//\n// Различаются ТРИ состояния, и путать их нельзя:\n//   признак есть, группы перечислены  → поле закрыто;\n//   признак есть, групп нет           → поле не закрыто;\n//   признака нет вовсе                → НЕИЗВЕСТНО.\n// Третье молча приравнять к «не закрыто» — самая дорогая ошибка из трёх:\n// бот уверенно скажет, что согласование не нужно, и ошибётся именно на ПДн.\n//\n// Точное имя атрибута в DD живым запросом не подтверждено, поэтому сначала\n// проверяются явные ключи ACCESS_KEYS, а потом — любой ключ, похожий на\n// признак доступа. Найденное имя ПЕЧАТАЕТСЯ в блоке метаданных: первый же\n// живой прогон покажет настоящее имя, и его надо будет вписать в ACCESS_KEYS\n// в build_dd_flow.py. Угадывание с печатью имени лучше молчания: промах\n// виден, а не выдаёт себя за факт.\nconst ACCESS_KEYS = [\"access_groups\", \"access_group\", \"ad_groups\", \"ad_group\", \"security_groups\", \"access\"];\nconst ACCESS_RE = /(access|permission|_group|group_|rls|warden|sensitiv|pii|confiden|secur|дост|груп|конфиденц|чувствит)/i;\n\nfunction accessOf(attrs) {\n  const none = { known: false, key: '', groups: '' };\n  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return none;\n  for (const k of ACCESS_KEYS) {\n    if (Object.prototype.hasOwnProperty.call(attrs, k)) {\n      return { known: true, key: k, groups: attrData(attrs, k) };\n    }\n  }\n  // Эвристика жёстко ограничена, и вот почему. На настоящей карточке колонки\n  // (business_dt, 2026-08-06) есть атрибут can_be_accessed: {boolean, true} —\n  // свободный поиск по /access/ находил ИМЕННО ЕГО и печатал «закрыто\n  // группами true» у открытого поля. Ровно та же ошибка, из-за которой\n  // versioning_type когда-то выдавался за тип данных: пустой признак честнее\n  // неверного. Поэтому флаги вида can_/is_/has_ и булевы значения отброшены —\n  // группы доступа это список имён, а не «да».\n  for (const k of Object.keys(attrs)) {\n    if (!ACCESS_RE.test(k) || /^(can|is|has)_/i.test(k)) continue;\n    const a = attrs[k];\n    const declared = a && typeof a === 'object' ? String(a.type || '') : '';\n    if (/bool/i.test(declared)) continue;\n    const v = attrData(attrs, k);\n    if (/^(true|false)$/i.test(v)) continue;\n    return { known: true, key: k, groups: v };\n  }\n  return none;\n}\n\nfunction httpFail(res, label) {\n  const code = res && res.statusCode;\n  if (code === undefined) return null;\n  if (code < 400) return null;\n  if (code === 401) return `${label}: HTTP 401 — истёк Service Account, метаданные недоступны`;\n  if (code === 404) return `${label}: HTTP 404 — URN неверный или у объекта нет такой связи`;\n  return `${label}: HTTP ${code}`;\n}\n\nconst MAX_CARDS = 12;\n\nconst inp = $('When called by agent').first().json;\nconst needle = String(inp.search || '').trim().toLowerCase();\nconst needles = needlesOf(inp.search);\n\nconst colRes = $('dd_columns').first().json;\nconst nodes = nodesOf((colRes && colRes.body) || colRes);\n\nconst cols = nodes\n  .map((c) => ({ field: shortName(c), urn: c.urn || '' }))\n  .filter((c) => c.field && c.urn);\n\n// Пустой search — только инвентарь, карточки не нужны.\nif (!needle) {\n  return [{ json: { column_urn: '', picked: 0, matched: 0, mode: 'none' } }];\n}\n\n// Шаг 1: имя колонки латиницей иногда всё же совпадает с hint (business_dt,\n// grade и т.п.) — дёшево проверить в первую очередь, и это оставляет старое\n// поведение нетронутым для технических запросов.\nconst byName = cols.filter((c) => matchesAny(c.field, needles));\n\nlet targets;\nlet mode;\nif (byName.length) {\n  targets = byName.slice(0, MAX_CARDS);\n  mode = 'by_name';\n} else {\n  // Колонка называется латиницей (dismissal_reason_desc), а спрашивают\n  // по-русски («причины увольнения») — по имени это никогда не совпадёт,\n  // не вопрос порога, а разных алфавитов. /related/columns описаний не\n  // отдаёт (подтверждено), значит единственный способ найти поле по смыслу —\n  // прочитать карточки ВСЕХ колонок таблицы и сравнить с описанием ПОСЛЕ\n  // фетча, в Shape table meta. Раньше здесь стоял потолок в 60 карточек:\n  // на таблице шире 60 колонок (живой кейс — 289) он обрывал поиск\n  // до того, как дошёл до искомого поля, и «не встретилось» означало не\n  // «такого поля нет», а «до него не долистали» — тихий отказ под видом\n  // ответа. Цена — один HTTP-запрос на колонку, но она разовая и на\n  // запрос пользователя, а не на каждое сообщение в канале.\n  targets = cols;\n  mode = 'by_meaning';\n}\n\nif (!targets.length) {\n  return [{ json: { column_urn: '', picked: 0, matched: byName.length, mode } }];\n}\n\nconst totalCols = cols.length;\n\nreturn targets.map((t) => ({\n  json: {\n    column_urn: t.urn,\n    field: t.field,\n    picked: targets.length,\n    matched: byName.length,\n    mode,\n    total_cols: totalCols,\n  },\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        200
+      ],
+      "id": "dd-code-Pick columns",
+      "name": "Pick columns"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-urn",
+              "leftValue": "={{ $json.column_urn }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        200
+      ],
+      "id": "dd-need-cards",
+      "name": "Need column cards"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent($json.column_urn) + '/summary' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1140,
+        60
+      ],
+      "id": "dd-http-dd_column_summary",
+      "name": "dd_column_summary",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent($('Pick columns').item.json.column_urn) + '/attribute' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1140,
+        220
+      ],
+      "id": "dd-http-dd_column_attrs",
+      "name": "dd_column_attrs",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Общие помощники. Форма ответа DD по вложенным коллекциям на момент сборки\n// не подтверждена живым запуском, поэтому массив ищется по нескольким\n// известным вариантам обёртки.\nfunction unwrap(body) {\n  if (Array.isArray(body)) return body;\n  if (!body || typeof body !== 'object') return [];\n  for (const k of ['items', 'data', 'content', 'entities', 'result', 'results']) {\n    if (Array.isArray(body[k])) return body[k];\n  }\n  for (const v of Object.values(body)) {\n    if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;\n  }\n  return [];\n}\n\n// Реальная форма ответа /related/{key}, подтверждена живым запросом 2026-08-06:\n//   { totalCount: 267, data: [ { relationId, entity: { id, urn, system, type, fqn } } ] }\n// Сущность вложена в entity, на верхнем уровне лежит связь. Без этой распаковки\n// shortName() не находит fqn и инвентарь получается пустым — ровно так шейпер\n// и молчал на первой версии.\nfunction nodesOf(body) {\n  return unwrap(body).map((x) =>\n    x && typeof x === 'object' && x.entity && typeof x.entity === 'object' ? x.entity : x,\n  );\n}\n\n// Фильтр — СПИСОК игл, а не одна.\n//\n// Живой прогон 2026-08-26. Вопрос: «какое поле хранит логин и есть ли рабочая\n// почта». Роутер отдаёт один hint на объект, ушёл «логин» — и поиска по слову\n// «почта» не было вовсе. Бот увидел в блоке «проверены 289 из 289 полей»,\n// прочитал это как «я видел все поля» и уверенно ответил, что рабочей почты\n// в витрине нет. Поле `wrk_email_address_txt` с описанием «Рабочая почта»\n// в ней есть — проверено вручную. Утверждение об ОТСУТСТВИИ поля опаснее\n// всего, что бот говорит: в режиме выгрузки на нём строится раздел «Чего\n// не будет», и заказчик узнаёт о пропаже атрибута после сдачи файла.\n//\n// В режиме by_meaning карточки всех колонок и так прочитаны, поэтому вторая\n// игла не стоит ни одного лишнего запроса — только ещё одного сравнения.\n//\n// Обрезка до основы: сравнение идёт подстрокой, а русские слова склоняются.\n// `'рабочей почты'.includes('почта')` — ложь. Режем хвост в два символа, но\n// не короче пяти букв, чтобы «дата» не превратилась в «дат» и не совпала\n// с половиной таблицы. Тот же приём уже стоит в проверке покрытия домена.\nfunction needlesOf(search) {\n  return String(search || '')\n    .toLowerCase()\n    .split(/[,;\\n]+/)\n    .map((s) => s.trim())\n    .filter(Boolean)\n    .map((s) => (/^[а-яё]+$/.test(s) && s.length >= 5 ? s.slice(0, s.length - 2) : s));\n}\n\n// Совпала хотя бы одна игла. Пустой список игл не совпадает ни с чем:\n// «фильтра не задавали» и «фильтр не совпал» — разные вещи, и вызывающий\n// обязан различать их сам, до вызова.\nfunction matchesAny(text, needles) {\n  const t = String(text || '').toLowerCase();\n  return needles.some((n) => n && t.includes(n));\n}\n\nfunction shortName(o) {\n  const fqn = o.fqn || o.name || '';\n  const parts = String(fqn).split('.');\n  return parts[parts.length - 1] || '';\n}\n\nfunction descOf(o) {\n  const s = o.summary;\n  if (typeof s === 'string') return s;\n  if (s && typeof s === 'object') return s.data || s.value || s.text || '';\n  return o.description || '';\n}\n\n// Подтверждённая форма attributes на карточке колонки (2026-08-06):\n//   attributes: { column_type: { type: 'text', data: 'date' },\n//                 comment:     { type: 'text', data: '…длинное описание…' },\n//                 keys:        { type: 'text-list', data: ['PK'] }, … }\n// Значение лежит в .data, а не в самом атрибуте. Без этой распаковки typeOf()\n// возвращал строку «[object Object]» и она попадала в ответ агенту как тип поля.\nfunction attrData(attrs, key) {\n  if (!attrs || typeof attrs !== 'object') return '';\n  const a = attrs[key];\n  if (a === undefined || a === null) return '';\n  const d = a && typeof a === 'object' && 'data' in a ? a.data : a;\n  if (d === null || d === undefined) return '';\n  if (Array.isArray(d)) return d.join(', ');\n  if (typeof d === 'object') return '';\n  return String(d);\n}\n\nfunction typeOf(o) {\n  const a = o.attributes;\n  if (!a) return '';\n  if (Array.isArray(a)) {\n    const hit = a.find((x) => /type/i.test(x.key || x.name || ''));\n    return hit ? String(hit.value ?? hit.data ?? '') : '';\n  }\n  if (typeof a === 'object') {\n    // Только явные ключи. Свободный поиск по /type/i цеплял versioning_type\n    // и выдавал «BSN» за тип данных — пустой тип честнее неверного.\n    return (\n      attrData(a, 'column_type') || attrData(a, 'data_type') || attrData(a, 'dataType')\n    );\n  }\n  return '';\n}\n\nfunction oneLine(s) {\n  return String(s || '').replace(/\\s*\\n\\s*/g, ' ').replace(/\\|/g, '\\\\|').trim();\n}\n\n// ---------------------------------------------------------- группы доступа\n//\n// Часть полей закрыта группами доступа: выгрузить их можно, но сначала нужно\n// согласование. Для запроса на выгрузку это то, что обязано попасть\n// в сообщение заказчику отдельным разделом — иначе согласование состоится,\n// а потом окажется, что половину состава дать нельзя.\n//\n// Различаются ТРИ состояния, и путать их нельзя:\n//   признак есть, группы перечислены  → поле закрыто;\n//   признак есть, групп нет           → поле не закрыто;\n//   признака нет вовсе                → НЕИЗВЕСТНО.\n// Третье молча приравнять к «не закрыто» — самая дорогая ошибка из трёх:\n// бот уверенно скажет, что согласование не нужно, и ошибётся именно на ПДн.\n//\n// Точное имя атрибута в DD живым запросом не подтверждено, поэтому сначала\n// проверяются явные ключи ACCESS_KEYS, а потом — любой ключ, похожий на\n// признак доступа. Найденное имя ПЕЧАТАЕТСЯ в блоке метаданных: первый же\n// живой прогон покажет настоящее имя, и его надо будет вписать в ACCESS_KEYS\n// в build_dd_flow.py. Угадывание с печатью имени лучше молчания: промах\n// виден, а не выдаёт себя за факт.\nconst ACCESS_KEYS = [\"access_groups\", \"access_group\", \"ad_groups\", \"ad_group\", \"security_groups\", \"access\"];\nconst ACCESS_RE = /(access|permission|_group|group_|rls|warden|sensitiv|pii|confiden|secur|дост|груп|конфиденц|чувствит)/i;\n\nfunction accessOf(attrs) {\n  const none = { known: false, key: '', groups: '' };\n  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return none;\n  for (const k of ACCESS_KEYS) {\n    if (Object.prototype.hasOwnProperty.call(attrs, k)) {\n      return { known: true, key: k, groups: attrData(attrs, k) };\n    }\n  }\n  // Эвристика жёстко ограничена, и вот почему. На настоящей карточке колонки\n  // (business_dt, 2026-08-06) есть атрибут can_be_accessed: {boolean, true} —\n  // свободный поиск по /access/ находил ИМЕННО ЕГО и печатал «закрыто\n  // группами true» у открытого поля. Ровно та же ошибка, из-за которой\n  // versioning_type когда-то выдавался за тип данных: пустой признак честнее\n  // неверного. Поэтому флаги вида can_/is_/has_ и булевы значения отброшены —\n  // группы доступа это список имён, а не «да».\n  for (const k of Object.keys(attrs)) {\n    if (!ACCESS_RE.test(k) || /^(can|is|has)_/i.test(k)) continue;\n    const a = attrs[k];\n    const declared = a && typeof a === 'object' ? String(a.type || '') : '';\n    if (/bool/i.test(declared)) continue;\n    const v = attrData(attrs, k);\n    if (/^(true|false)$/i.test(v)) continue;\n    return { known: true, key: k, groups: v };\n  }\n  return none;\n}\n\nfunction httpFail(res, label) {\n  const code = res && res.statusCode;\n  if (code === undefined) return null;\n  if (code < 400) return null;\n  if (code === 401) return `${label}: HTTP 401 — истёк Service Account, метаданные недоступны`;\n  if (code === 404) return `${label}: HTTP 404 — URN неверный или у объекта нет такой связи`;\n  return `${label}: HTTP ${code}`;\n}\n\nconst inp = $('When called by agent').first().json;\nconst urn = String(inp.urn || '');\nconst needle = String(inp.search || '').trim().toLowerCase();\nconst needles = needlesOf(inp.search);\n\nconst cardRes = $('dd_entity_card').first().json;\nconst entityAttrsRes = $('dd_entity_attrs').first().json;\nconst colRes = $('dd_columns').first().json;\n\nconst out = [];\nconst problems = [];\n\nconst f1 = httpFail(cardRes, 'описание таблицы');\nconst f0 = httpFail(entityAttrsRes, 'атрибуты таблицы');\nconst f2 = httpFail(colRes, 'колонки');\nif (f1) problems.push(f1);\nif (f0) problems.push(f0);\nif (f2) problems.push(f2);\n\n// dd_entity_card теперь бьёт в /summary напрямую (см. build_dd_flow.py):\n// entityFields на карточке /entity/{urn} перестал отдавать displayName/summary,\n// поэтому здесь нет ни того, ни другого — только { data: '...' }. Ярлык\n// объекта строим из urn, а не card.displayName/card.fqn, которых в этом\n// ответе больше нет.\nconst card = (cardRes && cardRes.body) || cardRes || {};\nout.push(`ОБЪЕКТ DD: ${urn}`);\nout.push(`URN: ${urn}`);\nconst cardDesc = oneLine(card.data || '');\nif (cardDesc) out.push(`ОПИСАНИЕ ИЗ DD: ${cardDesc}`);\n\n// Комментарий важнее summary — так же, как у колонки (см. AGENTS.md):\n// summary таблицы это короткая подпись, а comment на карточке таблицы\n// в интерфейсе DD подписан «Комментарий» и часто несёт то, из-за чего\n// данные считают неверно. Печатаем, только если он отличается от summary —\n// иначе одна и та же фраза дублируется под двумя заголовками.\nconst entityAttrs = (entityAttrsRes && entityAttrsRes.body) || entityAttrsRes || {};\nconst entityComment = oneLine(attrData(entityAttrs, 'comment'));\nif (entityComment && entityComment !== cardDesc) out.push(`КОММЕНТАРИЙ ИЗ DD: ${entityComment}`);\n\nconst colBody = (colRes && colRes.body) || colRes;\nconst rows = nodesOf(colBody)\n  .map((c) => ({\n    field: shortName(c),\n    type: typeOf(c),\n    desc: oneLine(descOf(c)),\n  }))\n  .filter((r) => r.field);\n\nconst total = rows.length;\n\n// Описания и атрибуты отобранных колонок. Раньше — одна карточка на колонку\n// (dd_column_cards), но entityFields на /entity/{urn} перестал их отдавать\n// (см. build_dd_flow.py), поэтому теперь два отдельных запроса на колонку:\n// dd_column_summary (/summary) и dd_column_attrs (/attribute). Поле-имя\n// оба ответа не несут вовсе — берём его из Pick columns, по тому же индексу:\n// оба запроса идут по ОДНОМУ и тому же списку targets, порядок не расходится.\n// Ноды может не быть в этом прогоне (пустой search или ни одного совпадения) —\n// тогда $() бросает, и это нормальный путь.\nlet targets = [];\ntry {\n  targets = $('Pick columns').all().map((i) => i.json);\n} catch (e) {\n  targets = [];\n}\nlet summaries = [];\ntry {\n  summaries = $('dd_column_summary').all().map((i) => i.json);\n} catch (e) {\n  summaries = [];\n}\nlet attrsResList = [];\ntry {\n  attrsResList = $('dd_column_attrs').all().map((i) => i.json);\n} catch (e) {\n  attrsResList = [];\n}\n\nconst details = targets\n  .map((t, i) => {\n    const sumRes = summaries[i];\n    const attrRes = attrsResList[i];\n    const sumBody = (sumRes && sumRes.body) || sumRes || {};\n    const attrs = (attrRes && attrRes.body) || attrRes || {};\n    const failed = httpFail(sumRes, 'описание колонки') || httpFail(attrRes, 'атрибуты колонки');\n    return {\n      field: t.field || '',\n      type: typeOf({ attributes: attrs }),\n      desc: oneLine(sumBody.data || ''),\n      // comment у колонки — развёрнутое пояснение, часто важнее краткого summary:\n      // именно там описаны границы генерации business_dt и подобные ловушки.\n      comment: oneLine(attrData(attrs, 'comment')),\n      keys: attrData(attrs, 'keys'),\n      access: accessOf(attrs),\n      failed,\n    };\n  })\n  .filter((d) => d.field || d.failed);\n\n// Сколько колонок у объекта по мнению DD. Расходится с числом полученных —\n// значит, ответ обрезан лимитом и нужна пагинация по afterUrn.\nconst declared =\n  colBody && typeof colBody === 'object' && Number.isFinite(colBody.totalCount)\n    ? colBody.totalCount\n    : null;\n\n// /related/columns отдаёт только идентификаторы колонок: ни summary,\n// ни attributes, хотя entityFields передан. Описания и типы — отдельными\n// запросами к суб-ресурсам колонки, dd_column_summary и dd_column_attrs.\nconst cardsFailed = details.filter((d) => d.failed);\n\n// Полный инвентарь имён: печатается и как самостоятельный ответ на пустой\n// search, и как подсказка, когда фильтр ничего не нашёл.\nfunction inventory(reason) {\n  out.push('');\n  out.push(reason);\n  out.push('');\n  out.push(rows.map((r) => r.field).join(', '));\n  out.push('');\n  out.push(\n    'Типы и описания полей здесь не показаны, чтобы список пришёл целиком. ' +\n      'Нужны тип и описание — вызови dd_lookup ещё раз со словом-фильтром ' +\n      'search, выбрав его ИЗ ЭТОГО списка.',\n  );\n  // Признак групп доступа живёт на карточке колонки, а карточки в этом режиме\n  // не запрашивались. Сказать об этом обязательно: иначе «в метаданных про\n  // закрытость ничего нет» прочитается как «поля открыты», и в согласование\n  // с заказчиком уедет состав, половину которого выдать нельзя.\n  out.push('');\n  out.push(\n    'ГРУППЫ ДОСТУПА: не запрашивались — они лежат на карточках полей, ' +\n      'а карточки в этом режиме не запрашивались. Считать поля открытыми ' +\n      'по этому ответу НЕЛЬЗЯ.',\n  );\n}\n\n// Подробности по отобранным полям: тип, описание, развёрнутый комментарий.\n// Список передаётся явно: при поиске по смыслу показываем не все прочитанные\n// карточки, а только те, что реально совпали с hint по описанию.\nfunction detailBlock(list) {\n  out.push('');\n  out.push(`ПОДРОБНО ПО ПОЛЯМ (${list.length}):`);\n  for (const d of list) {\n    if (d.failed) {\n      out.push('');\n      out.push(`— ${d.field || 'поле'}: ${d.failed}`);\n      continue;\n    }\n    out.push('');\n    out.push(`— ${d.field}${d.type ? ` (${d.type})` : ''}${d.keys ? ` [${d.keys}]` : ''}`);\n    out.push(`  описание: ${d.desc || '— в DD не заполнено'}`);\n    if (d.comment && d.comment !== d.desc) {\n      out.push(`  комментарий из DD: ${d.comment}`);\n    }\n    if (d.access && d.access.known && d.access.groups) {\n      out.push(`  доступ: ЗАКРЫТО группами ${d.access.groups} — по умолчанию не выгружается`);\n    }\n  }\n  accessBlock(list);\n}\n\n// Сводка по группам доступа. Отдельным блоком, а не только строками у полей:\n// для запроса на выгрузку это готовый раздел сообщения заказчику, и собирать\n// его перечитыванием инвентаря автор не обязан.\nfunction accessBlock(list) {\n  const answered = list.filter((d) => !d.failed && d.access && d.access.known);\n  const closed = answered.filter((d) => d.access.groups);\n  out.push('');\n  if (!answered.length) {\n    out.push(\n      `ГРУППЫ ДОСТУПА: признака нет в метаданных ни у одного из ${list.length} ` +\n        'полей. Считать эти поля открытыми НЕЛЬЗЯ — каталог признак не вернул. ' +\n        'Перед выгрузкой доступ надо проверить отдельно.',\n    );\n    return;\n  }\n  const key = answered[0].access.key;\n  if (closed.length) {\n    out.push(\n      `ГРУППЫ ДОСТУПА: закрыто полей ${closed.length} из ${answered.length} — ` +\n        closed.map((d) => `${d.field} (${d.access.groups})`).join(', ') + '.',\n    );\n  } else {\n    out.push(`ГРУППЫ ДОСТУПА: среди ${answered.length} полей закрытых нет.`);\n  }\n  out.push(\n    `  Признак взят из атрибута «${key}». Поля, не названные здесь, по данным ` +\n      'каталога группами доступа не закрыты — но запрет на персональные данные ' +\n      'действует независимо от каталога.',\n  );\n  if (answered.length < list.length) {\n    out.push(\n      `  По ${list.length - answered.length} полям признак не пришёл: ` +\n        'их закрытость неизвестна.',\n    );\n  }\n}\n\nif (problems.length) {\n  out.push('');\n  out.push(`ОШИБКИ DD: ${problems.join('; ')}`);\n  out.push('Состав полей считать неизвестным, не выдумывать и не угадывать.');\n} else if (!total) {\n  out.push('');\n  out.push('ПОЛЯ ИЗ DD: 0');\n  out.push('DD не вернул ни одного поля. Считать состав полей неизвестным,');\n  out.push('а не пустым: возможно, у объекта другой ключ связи.');\n} else if (!needle) {\n  out.push('');\n  if (declared !== null && declared > total) {\n    out.push(\n      `ПОЛЯ: получено ${total} из ${declared}. Список НЕПОЛНЫЙ — ответ обрезан ` +\n        'лимитом. Не выдавай его за полный состав таблицы.',\n    );\n  } else {\n    out.push(`ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ: ${total}. Список полный, ничего не скрыто.`);\n  }\n  inventory('ВСЕ ПОЛЯ ТАБЛИЦЫ:');\n} else {\n  // Режим решает Pick columns: имя колонки латиницей — редко то же самое\n  // слово, которым спрашивает человек по-русски, и by_meaning — обычный,\n  // а не аварийный путь.\n  let pick = {};\n  try {\n    pick = $('Pick columns').first().json || {};\n  } catch (e) {\n    pick = {};\n  }\n  const mode = pick.mode || 'by_name';\n  const totalCols = Number.isFinite(pick.total_cols) ? pick.total_cols : total;\n\n  if (mode === 'by_meaning') {\n    // Имя поля не совпало с hint — ожидаемо, если hint дан по смыслу\n    // по-русски. Карточки прочитаны по ВСЕМ полям таблицы (без потолка —\n    // см. Pick columns), сравниваем hint с их описанием и комментарием,\n    // а не с именем.\n    const checked = details.length;\n    // checked < totalCols здесь — не потолок (его больше нет), а часть\n    // запросов карточек не вернула ответ. Молчать об этом нельзя: иначе\n    // «не встретилось» читается как «такого поля нет», хотя часть полей\n    // попросту не проверена.\n    const incomplete = checked < totalCols;\n    const matched = details.filter(\n      (d) =>\n        !d.failed &&\n        (matchesAny(d.field, needles) ||\n          matchesAny(d.desc, needles) ||\n          matchesAny(d.comment, needles)),\n    );\n    out.push('');\n    out.push(\n      `ПОИСК ПО СМЫСЛУ «${inp.search}»: имя поля латиницей не совпало, искали ` +\n        `по описаниям — проверены ${checked} из ${totalCols} полей` +\n        (incomplete ? `, по остальным ${totalCols - checked} карточка не пришла` : '') +\n        '.',\n    );\n    if (matched.length) {\n      out.push('');\n      out.push(`НАЙДЕНО ПО СМЫСЛУ: ${matched.length}`);\n      detailBlock(matched);\n      // Обязательная оговорка о границах этого блока.\n      //\n      // Раньше её не было, и строка «проверены 289 из 289 полей» читалась\n      // моделью как «я видел все 289 полей». На вопрос про логин И почту бот\n      // получил карточки только полей про логин — а про почту уверенно\n      // ответил, что её в витрине нет. Поле там было. Проверено 289 полей\n      // относится к ФИЛЬТРУ, а не к тому, что показано ниже: несовпавшие\n      // поля в блок не попадают вовсе, и судить по нему об отсутствии\n      // другого понятия нельзя.\n      out.push('');\n      out.push(\n        `Показаны ТОЛЬКО поля, совпавшие с «${inp.search}» — остальные ` +\n          `${checked - matched.length} проверенных полей в этот блок не попали, ` +\n          'ни именами, ни описаниями. Судить по нему об отсутствии в таблице ' +\n          'ДРУГОГО поля или понятия нельзя: его просто не искали.',\n      );\n    } else {\n      out.push('');\n      out.push(\n        `«${inp.search}» не встретилось ни в одном из ${checked} проверенных описаний.` +\n          (incomplete\n            ? ` По ${totalCols - checked} полям карточка не пришла — среди них искомое ` +\n              'может быть.'\n            : ' Похоже, такого поля или значения в таблице нет.'),\n      );\n      inventory('ВСЕ ПОЛЯ ТАБЛИЦЫ (имена, без описаний — проверь среди них похожее):');\n    }\n  } else {\n    const hit = rows.filter((r) => matchesAny(r.field, needles));\n    out.push('');\n    out.push(`ПОЛЯ ПО ИМЕНИ «${inp.search}»: ${hit.length} из ${total}`);\n\n    if (!hit.length) {\n      inventory(\n        `Ни одно из ${total} полей не подошло под фильтр «${inp.search}». ` +\n          'Значит, поля с таким названием в таблице нет — не подбирай похожее ' +\n          'наугад, а выбери нужное из полного списка ниже.',\n      );\n    } else {\n      out.push('');\n      out.push('ПОДОШЛИ ПОЛЯ:');\n      out.push(hit.map((r) => r.field).join(', '));\n\n      if (details.length) {\n        detailBlock(details);\n        const noCard = hit.length - details.length;\n        if (noCard > 0) {\n          out.push('');\n          out.push(\n            `ВНИМАНИЕ: под фильтр попало ${hit.length} полей, описания получены ` +\n              `по ${details.length}. По остальным ${noCard} описание не запрашивалось — ` +\n              'сузь search, если нужны именно они.',\n          );\n        }\n      } else {\n        out.push('');\n        out.push(\n          'Описания по этим полям получить не удалось. Имена полей верны — ' +\n            'они из каталога, а смысл возьми из статьи kb/.',\n        );\n      }\n    }\n  }\n}\n\nout.push('');\nout.push(\n  'НАПОМИНАНИЕ: это инвентарь из DD — состав полей и, если каталог их отдал, ' +\n    'типы и описания. Гранулярность, правила джойна, тип среза и запреты — ' +\n    'в статье kb/tables/.',\n);\n\nreturn [{ json: { dd_meta: out.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        200
+      ],
+      "id": "dd-code-Shape table meta",
+      "name": "Shape table meta"
+    },
+    {
+      "parameters": {
+        "url": "=https://dd.t-tech.team/api/v3/entity/{{ encodeURIComponent($('When called by agent').first().json.urn) }}/markdown",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        260,
+        380
+      ],
+      "id": "dd-http-dd_report_markdown",
+      "name": "dd_report_markdown",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://dd.t-tech.team/api/v3/entity/{{ encodeURIComponent($('When called by agent').first().json.urn) }}/attribute",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        260,
+        440
+      ],
+      "id": "dd-http-dd_report_attrs",
+      "name": "dd_report_attrs",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://dd.t-tech.team/api/v3/entity/{{ encodeURIComponent($('When called by agent').first().json.urn) }}/link",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        260,
+        500
+      ],
+      "id": "dd-http-dd_report_links",
+      "name": "dd_report_links",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Общие помощники. Форма ответа DD по вложенным коллекциям на момент сборки\n// не подтверждена живым запуском, поэтому массив ищется по нескольким\n// известным вариантам обёртки.\nfunction unwrap(body) {\n  if (Array.isArray(body)) return body;\n  if (!body || typeof body !== 'object') return [];\n  for (const k of ['items', 'data', 'content', 'entities', 'result', 'results']) {\n    if (Array.isArray(body[k])) return body[k];\n  }\n  for (const v of Object.values(body)) {\n    if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;\n  }\n  return [];\n}\n\n// Реальная форма ответа /related/{key}, подтверждена живым запросом 2026-08-06:\n//   { totalCount: 267, data: [ { relationId, entity: { id, urn, system, type, fqn } } ] }\n// Сущность вложена в entity, на верхнем уровне лежит связь. Без этой распаковки\n// shortName() не находит fqn и инвентарь получается пустым — ровно так шейпер\n// и молчал на первой версии.\nfunction nodesOf(body) {\n  return unwrap(body).map((x) =>\n    x && typeof x === 'object' && x.entity && typeof x.entity === 'object' ? x.entity : x,\n  );\n}\n\n// Фильтр — СПИСОК игл, а не одна.\n//\n// Живой прогон 2026-08-26. Вопрос: «какое поле хранит логин и есть ли рабочая\n// почта». Роутер отдаёт один hint на объект, ушёл «логин» — и поиска по слову\n// «почта» не было вовсе. Бот увидел в блоке «проверены 289 из 289 полей»,\n// прочитал это как «я видел все поля» и уверенно ответил, что рабочей почты\n// в витрине нет. Поле `wrk_email_address_txt` с описанием «Рабочая почта»\n// в ней есть — проверено вручную. Утверждение об ОТСУТСТВИИ поля опаснее\n// всего, что бот говорит: в режиме выгрузки на нём строится раздел «Чего\n// не будет», и заказчик узнаёт о пропаже атрибута после сдачи файла.\n//\n// В режиме by_meaning карточки всех колонок и так прочитаны, поэтому вторая\n// игла не стоит ни одного лишнего запроса — только ещё одного сравнения.\n//\n// Обрезка до основы: сравнение идёт подстрокой, а русские слова склоняются.\n// `'рабочей почты'.includes('почта')` — ложь. Режем хвост в два символа, но\n// не короче пяти букв, чтобы «дата» не превратилась в «дат» и не совпала\n// с половиной таблицы. Тот же приём уже стоит в проверке покрытия домена.\nfunction needlesOf(search) {\n  return String(search || '')\n    .toLowerCase()\n    .split(/[,;\\n]+/)\n    .map((s) => s.trim())\n    .filter(Boolean)\n    .map((s) => (/^[а-яё]+$/.test(s) && s.length >= 5 ? s.slice(0, s.length - 2) : s));\n}\n\n// Совпала хотя бы одна игла. Пустой список игл не совпадает ни с чем:\n// «фильтра не задавали» и «фильтр не совпал» — разные вещи, и вызывающий\n// обязан различать их сам, до вызова.\nfunction matchesAny(text, needles) {\n  const t = String(text || '').toLowerCase();\n  return needles.some((n) => n && t.includes(n));\n}\n\nfunction shortName(o) {\n  const fqn = o.fqn || o.name || '';\n  const parts = String(fqn).split('.');\n  return parts[parts.length - 1] || '';\n}\n\nfunction descOf(o) {\n  const s = o.summary;\n  if (typeof s === 'string') return s;\n  if (s && typeof s === 'object') return s.data || s.value || s.text || '';\n  return o.description || '';\n}\n\n// Подтверждённая форма attributes на карточке колонки (2026-08-06):\n//   attributes: { column_type: { type: 'text', data: 'date' },\n//                 comment:     { type: 'text', data: '…длинное описание…' },\n//                 keys:        { type: 'text-list', data: ['PK'] }, … }\n// Значение лежит в .data, а не в самом атрибуте. Без этой распаковки typeOf()\n// возвращал строку «[object Object]» и она попадала в ответ агенту как тип поля.\nfunction attrData(attrs, key) {\n  if (!attrs || typeof attrs !== 'object') return '';\n  const a = attrs[key];\n  if (a === undefined || a === null) return '';\n  const d = a && typeof a === 'object' && 'data' in a ? a.data : a;\n  if (d === null || d === undefined) return '';\n  if (Array.isArray(d)) return d.join(', ');\n  if (typeof d === 'object') return '';\n  return String(d);\n}\n\nfunction typeOf(o) {\n  const a = o.attributes;\n  if (!a) return '';\n  if (Array.isArray(a)) {\n    const hit = a.find((x) => /type/i.test(x.key || x.name || ''));\n    return hit ? String(hit.value ?? hit.data ?? '') : '';\n  }\n  if (typeof a === 'object') {\n    // Только явные ключи. Свободный поиск по /type/i цеплял versioning_type\n    // и выдавал «BSN» за тип данных — пустой тип честнее неверного.\n    return (\n      attrData(a, 'column_type') || attrData(a, 'data_type') || attrData(a, 'dataType')\n    );\n  }\n  return '';\n}\n\nfunction oneLine(s) {\n  return String(s || '').replace(/\\s*\\n\\s*/g, ' ').replace(/\\|/g, '\\\\|').trim();\n}\n\n// ---------------------------------------------------------- группы доступа\n//\n// Часть полей закрыта группами доступа: выгрузить их можно, но сначала нужно\n// согласование. Для запроса на выгрузку это то, что обязано попасть\n// в сообщение заказчику отдельным разделом — иначе согласование состоится,\n// а потом окажется, что половину состава дать нельзя.\n//\n// Различаются ТРИ состояния, и путать их нельзя:\n//   признак есть, группы перечислены  → поле закрыто;\n//   признак есть, групп нет           → поле не закрыто;\n//   признака нет вовсе                → НЕИЗВЕСТНО.\n// Третье молча приравнять к «не закрыто» — самая дорогая ошибка из трёх:\n// бот уверенно скажет, что согласование не нужно, и ошибётся именно на ПДн.\n//\n// Точное имя атрибута в DD живым запросом не подтверждено, поэтому сначала\n// проверяются явные ключи ACCESS_KEYS, а потом — любой ключ, похожий на\n// признак доступа. Найденное имя ПЕЧАТАЕТСЯ в блоке метаданных: первый же\n// живой прогон покажет настоящее имя, и его надо будет вписать в ACCESS_KEYS\n// в build_dd_flow.py. Угадывание с печатью имени лучше молчания: промах\n// виден, а не выдаёт себя за факт.\nconst ACCESS_KEYS = [\"access_groups\", \"access_group\", \"ad_groups\", \"ad_group\", \"security_groups\", \"access\"];\nconst ACCESS_RE = /(access|permission|_group|group_|rls|warden|sensitiv|pii|confiden|secur|дост|груп|конфиденц|чувствит)/i;\n\nfunction accessOf(attrs) {\n  const none = { known: false, key: '', groups: '' };\n  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return none;\n  for (const k of ACCESS_KEYS) {\n    if (Object.prototype.hasOwnProperty.call(attrs, k)) {\n      return { known: true, key: k, groups: attrData(attrs, k) };\n    }\n  }\n  // Эвристика жёстко ограничена, и вот почему. На настоящей карточке колонки\n  // (business_dt, 2026-08-06) есть атрибут can_be_accessed: {boolean, true} —\n  // свободный поиск по /access/ находил ИМЕННО ЕГО и печатал «закрыто\n  // группами true» у открытого поля. Ровно та же ошибка, из-за которой\n  // versioning_type когда-то выдавался за тип данных: пустой признак честнее\n  // неверного. Поэтому флаги вида can_/is_/has_ и булевы значения отброшены —\n  // группы доступа это список имён, а не «да».\n  for (const k of Object.keys(attrs)) {\n    if (!ACCESS_RE.test(k) || /^(can|is|has)_/i.test(k)) continue;\n    const a = attrs[k];\n    const declared = a && typeof a === 'object' ? String(a.type || '') : '';\n    if (/bool/i.test(declared)) continue;\n    const v = attrData(attrs, k);\n    if (/^(true|false)$/i.test(v)) continue;\n    return { known: true, key: k, groups: v };\n  }\n  return none;\n}\n\nfunction httpFail(res, label) {\n  const code = res && res.statusCode;\n  if (code === undefined) return null;\n  if (code < 400) return null;\n  if (code === 401) return `${label}: HTTP 401 — истёк Service Account, метаданные недоступны`;\n  if (code === 404) return `${label}: HTTP 404 — URN неверный или у объекта нет такой связи`;\n  return `${label}: HTTP ${code}`;\n}\n\nconst inp = $('When called by agent').first().json;\nconst urn = String(inp.urn || '');\n\nconst mdRes = $('dd_report_markdown').first().json;\nconst mdProblem = httpFail(mdRes, 'markdown-блоки');\nconst md = (mdRes && mdRes.body) || mdRes || {};\n\nconst attrRes = $('dd_report_attrs').first().json;\nconst attrProblem = httpFail(attrRes, 'атрибуты');\nconst attrs = (attrRes && attrRes.body) || attrRes || {};\n\nconst linkRes = $('dd_report_links').first().json;\nconst linkProblem = httpFail(linkRes, 'ссылки');\nconst links = (linkRes && linkRes.body) || linkRes || {};\n\nconst out = [];\nout.push(`ОБЪЕКТ DD: отчёт ${urn}`);\n\n// Смысл отчёта — ТОЛЬКО в markdown-блоках DD, не в git: владелец правит их\n// прямо в DD, и здесь всегда актуальная версия. Имена блоков подтверждены\n// живым запросом 2026-08-13 на report:1728: summary, how_to_read,\n// additional_info (в additional_info лежит и связь с витриной-источником).\n// Печатаем ЛЮБОЙ пришедший блок, а не только эти три по имени — новый блок,\n// заведённый в DD позже, не должен требовать правки этого кода.\nconst MD_LABELS = {\n  summary: 'НАЗНАЧЕНИЕ',\n  how_to_read: 'КАК ИСПОЛЬЗОВАТЬ',\n  additional_info: 'ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ',\n};\nconst mdKeys = md && typeof md === 'object' ? Object.keys(md) : [];\nif (mdKeys.length) {\n  for (const k of mdKeys) {\n    const text = attrData(md, k).trim();\n    if (!text) continue;\n    out.push('');\n    out.push(`${MD_LABELS[k] || k.toUpperCase()}:`);\n    out.push(text);\n  }\n} else {\n  out.push('');\n  out.push(\n    '— в DD не заполнено ни одного markdown-блока (summary/how_to_read/' +\n      'additional_info). Это пробел на стороне владельца отчёта, а не ' +\n      'отсутствие ответа.',\n  );\n}\n\nconst period = attrData(attrs, 'period');\nconst status = attrData(attrs, 'status');\nconst team = attrData(attrs, 'developers_team') || attrData(attrs, 'data_team');\nconst factsLine = [\n  period && `обновление: ${period}`,\n  status && `статус: ${status}`,\n  team && `команда: ${oneLine(team)}`,\n]\n  .filter(Boolean)\n  .join(' · ');\nif (factsLine) {\n  out.push('');\n  out.push(`АТРИБУТЫ DD: ${factsLine}`);\n}\n\nconst linkKeys = links && typeof links === 'object' ? Object.keys(links) : [];\nconst linkLines = linkKeys\n  .map((k) => [k, links[k] && links[k].url])\n  .filter(([, url]) => url);\nif (linkLines.length) {\n  out.push('');\n  out.push('ГДЕ ОТКРЫТЬ:');\n  for (const [k, url] of linkLines) out.push(`— ${oneLine(k)}: ${url}`);\n}\n\nconst problems = [mdProblem, attrProblem, linkProblem].filter(Boolean);\nif (problems.length) {\n  out.push('');\n  out.push(`ОШИБКИ DD: ${problems.join('; ')}`);\n  out.push('Метаданные считать недоступными частично, не выдумывать недостающее.');\n}\n\nreturn [{ json: { dd_meta: out.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        440
+      ],
+      "id": "dd-code-Shape report meta",
+      "name": "Shape report meta"
+    }
+  ],
+  "connections": {
+    "When called by agent": {
+      "main": [
+        [
+          {
+            "node": "Route by object type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by object type": {
+      "main": [
+        [
+          {
+            "node": "dd_entity_card",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dd_report_markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_entity_card": {
+      "main": [
+        [
+          {
+            "node": "dd_entity_attrs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_entity_attrs": {
+      "main": [
+        [
+          {
+            "node": "dd_columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_columns": {
+      "main": [
+        [
+          {
+            "node": "Pick columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick columns": {
+      "main": [
+        [
+          {
+            "node": "Need column cards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Need column cards": {
+      "main": [
+        [
+          {
+            "node": "dd_column_summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shape table meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_column_summary": {
+      "main": [
+        [
+          {
+            "node": "dd_column_attrs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_column_attrs": {
+      "main": [
+        [
+          {
+            "node": "Shape table meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_report_markdown": {
+      "main": [
+        [
+          {
+            "node": "dd_report_attrs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_report_attrs": {
+      "main": [
+        [
+          {
+            "node": "dd_report_links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "dd_report_links": {
+      "main": [
+        [
+          {
+            "node": "Shape report meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}

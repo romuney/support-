@@ -1,0 +1,1514 @@
+// Прогон Code-нод ядра и адаптеров на подставных ответах агента.
+// Проверяет: разбор четырёх блоков, отсутствующие и необязательные блоки,
+// сломанный формат, слово-ярлык внутри черновика, сборку сообщений
+// для канала джуна, чата и лички.
+//
+// Запуск: node test_adapters.mjs
+import fs from 'fs';
+
+const load = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
+const js = (wf, n) => {
+  const node = wf.nodes.find((x) => x.name === n);
+  if (!node) throw new Error(`нет ноды ${n} в ${wf.name}`);
+  return node.parameters.jsCode;
+};
+
+const core = load('Support Bot Core.json');
+const channel = load('Adapter Channel.json');
+const chat = load('Adapter Chat.json');
+const dm = load('Adapter DM.json');
+
+// Настоящий реестр: проверка «домен формы не покрыт» должна ломаться, когда
+// таблица «Домены» в kb/index.md изменится, а не только когда изменится код.
+// База знаний лежит уровнем выше и в двух возможных местах — см. тот же
+// резолв в test_pipeline.mjs.
+const REGISTRY_PATHS = ['../executive-support/kb/index.md', '../kb/index.md'];
+const REGISTRY_AT = REGISTRY_PATHS.find((p) => fs.existsSync(p));
+if (!REGISTRY_AT) {
+  console.error('не найден реестр базы знаний, искали: ' + REGISTRY_PATHS.join(', '));
+  process.exit(1);
+}
+const REGISTRY = fs.readFileSync(REGISTRY_AT, 'utf8');
+
+// --- Parse answer: на входе выход агента, на выходе структура.
+// plan — выход ноды Plan: оттуда берётся доменная разбивка для телеметрии.
+// mat  — выход Build materials: факты, по которым код ПОНИЖАЕТ заявленную
+//        моделью уверенность. По умолчанию материалы есть и всё сошлось —
+//        иначе каждая старая проверка разбора блоков ловила бы понижение.
+// registry — текст kb/index.md: по нему проверяется, покрыт ли домен формы.
+const MAT_OK = {
+  has_materials: true,
+  masters_only: false,
+  asks_report: false,
+  report_seen: false,
+  articles_read: ['kb/metrics/turnover.md'],
+  articles_failed: [],
+  dd_objects: [],
+  dd_failed: [],
+  router_picked: ['kb/metrics/turnover.md'],
+};
+
+function runParse(
+  output,
+  inputs = { question: 'вопрос', mode: 'channel' },
+  plan = {},
+  mat = MAT_OK,
+  registry = REGISTRY,
+) {
+  const $ = (name) => {
+    if (name === 'When called by adapter') return { first: () => ({ json: inputs }) };
+    if (name === 'Plan') return { first: () => ({ json: plan }) };
+    if (name === 'Build materials') return { first: () => ({ json: mat }) };
+    if (name === 'Decode registry') return { first: () => ({ json: { full: registry } }) };
+    throw new Error('node not executed: ' + name);
+  };
+  // AI Agent отдаёт { output: '...' } — парсер читает именно это поле.
+  const fn = new Function('$', '$json', js(core, 'Parse answer'));
+  return fn($, { output })[0].json;
+}
+
+// --- Канал джуна: шапка в канал + ответы в тред к ней.
+//
+// Сборщиков теперь два, и проверяются они по отдельности: «Build header» даёт
+// ровно один короткий пост (строка обращения в канале), «Build thread» — посты
+// в тред к нему. Ради этого разделения всё и делалось: канал должен читаться
+// списком обращений, а не полотном из трёх постов на каждое.
+//
+// Сборщики возвращают НЕСКОЛЬКО элементов, если текст не влезает в лимит поста
+// Mattermost (4000 символов): нода отправляет по посту на элемент. Хелперы
+// с суффиксом Parts отдают элементы, обычные — склеенный текст, чтобы проверки
+// содержания не зависели от разбивки.
+const channelCtx = (post, channelName, guard) => (name) => {
+  if (name === 'Guard channel')
+    return { first: () => ({ json: { post, channel_name: channelName, ...guard } }) };
+  throw new Error('node not executed: ' + name);
+};
+
+function runChannelHead(parsed, post = {}, channelName = 'hr-report-ask', guard = {}) {
+  const items = new Function('$', '$json', js(channel, 'Build header'))(
+    channelCtx(post, channelName, guard), parsed);
+  if (items.length !== 1) throw new Error('шапка должна быть одним постом');
+  return items[0].json.text;
+}
+
+// Вход «Build thread» — ответ Mattermost на публикацию шапки, поэтому разбор
+// он берёт у ядра по имени ноды, а не из $json.
+function runChannelParts(parsed, post = {}, channelName = 'hr-report-ask', guard = {}) {
+  const $ = (name) => {
+    if (name === 'Call core') return { first: () => ({ json: parsed }) };
+    return channelCtx(post, channelName, guard)(name);
+  };
+  return new Function('$', '$json', js(channel, 'Build thread'))($, { id: 'root1' })
+    .map((i) => i.json.text);
+}
+// Весь ответ по обращению: шапка плюс тред. Проверки содержания смотрят сюда,
+// чтобы не зависеть от того, в каком именно посте оказалась строка.
+const runChannelMsg = (...a) => [runChannelHead(...a), ...runChannelParts(...a)].join('\n');
+
+function runChatMsg(parsed) {
+  return new Function('$json', js(chat, 'Build reply'))(parsed)[0].json.output;
+}
+
+const runDmParts = (parsed) =>
+  new Function('$json', js(dm, 'Build DM reply'))(parsed).map((i) => i.json.text);
+const runDmMsg = (parsed) => runDmParts(parsed).join('\n');
+
+function runDmLogParts(parsed) {
+  const $ = (name) => {
+    if (name === 'Call core') return { first: () => ({ json: parsed }) };
+    throw new Error('node not executed: ' + name);
+  };
+  return new Function('$', js(dm, 'Build DM log'))($).map((i) => i.json.text);
+}
+const runDmLog = (parsed) => runDmLogParts(parsed).join('\n');
+
+// --- Guard: прогон Code-ноды отсева на событии Time.
+// Проверяется поведением, а не поиском подстроки в параметрах: прежний
+// IF-фильтр содержал и префикс, и root_id, и всё равно пропускал в живом
+// канале каждую реплику — при `post` в виде JSON-строки условия читали
+// undefined и проходили. Такой отказ виден только прогоном.
+function runGuard(wf, name, event) {
+  return new Function('$json', js(wf, name))(event)[0].json;
+}
+const guardChannel = (event) => runGuard(channel, 'Guard channel', event);
+const guardDm = (event) => runGuard(dm, 'Guard DM', event);
+
+let fails = 0;
+function check(label, cond) {
+  if (!cond) fails++;
+  console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${label}`);
+}
+const line = (t) => console.log('\n' + '='.repeat(70) + '\n' + t + '\n' + '='.repeat(70));
+
+// ====================================================================== 1
+line('1. Полный ответ из четырёх блоков');
+{
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Численность считается по legal_employee_flg = 1
+на дату business_dt.
+ИСТОЧНИКИ: kb/metrics/legal-headcount.md
+Data Detective: mdm_employee_structure_d
+УВЕРЕННОСТЬ: средняя
+ЧЕГО НЕ ХВАТИЛО: нет статьи в kb/metrics/ с определением ССЧ`);
+  check('черновик без ярлыка', p.draft.startsWith('Численность считается'));
+  check('черновик многострочный', p.draft.includes('на дату business_dt'));
+  check('черновик не съел ИСТОЧНИКИ', !p.draft.includes('kb/metrics'));
+  check('источники двумя строками', p.sources.includes('legal-headcount') && p.sources.includes('Data Detective'));
+  check('уверенность medium', p.confidence_key === 'medium');
+  check('пробел записан', p.gaps.includes('ССЧ'));
+  check('нет ошибки разбора', p.parse_error === '');
+}
+
+// ====================================================================== 2
+line('2. Высокая уверенность, необязательные блоки опущены');
+{
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Чеклист согласования выгрузки: цель, гранулярность, период.
+ИСТОЧНИКИ: kb/process/export-playbook.md
+УВЕРЕННОСТЬ: высокая`);
+  check('уверенность high', p.confidence_key === 'high');
+  check('пробелов нет', p.gaps === '');
+  check('нет ошибки разбора', p.parse_error === '');
+}
+
+// ====================================================================== 3
+line('3. Нет ответа: прочерк в ИСТОЧНИКАХ не тащим дальше');
+{
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Вопрос не задан
+ИСТОЧНИКИ: —
+УВЕРЕННОСТЬ: нет ответа
+ЧЕГО НЕ ХВАТИЛО: вопрос не сформулирован`);
+  check('уверенность none', p.confidence_key === 'none');
+  check('прочерк вычищен', p.sources === '');
+  check('пробел сохранён', p.gaps.includes('не сформулирован'));
+}
+
+// ====================================================================== 4
+line('4. Слово-ярлык внутри черновика не разрезает блок');
+{
+  // Модель вполне может написать «источники» в тексте ответа. Разрез должен
+  // происходить только по ярлыку с начала строки.
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Уточни у заказчика источники данных: нужна
+юридическая или управленческая численность.
+ИСТОЧНИКИ: kb/recipes/structure-choice.md
+УВЕРЕННОСТЬ: высокая`);
+  check('черновик целиком', p.draft.includes('юридическая или управленческая'));
+  check('источники только настоящие', p.sources === 'kb/recipes/structure-choice.md');
+}
+
+// ====================================================================== 5
+line('5. Формат сломан целиком — отдаём сырой текст, а не пустоту');
+{
+  const p = runParse('Привет! Численность считается по флагу legal_employee_flg.');
+  check('текст не потерян', p.draft.includes('legal_employee_flg'));
+  check('ошибка разбора названа', /не найдено ни одного блока/.test(p.parse_error));
+  check('уверенность unknown', p.confidence_key === 'unknown');
+}
+
+// ====================================================================== 6
+line('6. Пустой ответ агента');
+{
+  const p = runParse('');
+  check('черновик пуст', p.draft === '');
+  check('ошибка разбора названа', p.parse_error !== '');
+}
+
+// ====================================================================== 7
+line('7. Блоки в другом порядке и с лишними пробелами');
+{
+  const p = runParse(`  УВЕРЕННОСТЬ :  средняя
+ЧЕРНОВИК ОТВЕТА:  Стаж в атрибуте считается через gaps & islands.
+ИСТОЧНИКИ:  kb/recipes/attribute-tenure.md`);
+  check('черновик найден', p.draft.startsWith('Стаж в атрибуте'));
+  check('уверенность medium', p.confidence_key === 'medium');
+  check('источники найдены', p.sources.includes('attribute-tenure'));
+}
+
+// ====================================================================== 8
+line('8. Канал джуна: шапка обращения и разбор в треде');
+{
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Возьми legal_position_d, там несколько оформлений на человека.
+ИСТОЧНИКИ: kb/tables/legal-position-d.md
+УВЕРЕННОСТЬ: средняя
+ЧЕГО НЕ ХВАТИЛО: нет статьи про management_position_d`, {
+    question: 'сколько людей оформлено в юните?',
+    mode: 'channel',
+  });
+  const args = [
+    p,
+    { id: '18hwrdmk6bstf8n8pp8pswxbd1', message: 'сколько людей оформлено в юните?' },
+    'hr-report-ask',
+    { topic_kind: 'Вопрос по отчетам', form_author: 'Anna Sokolova',
+      question_text: 'сколько людей оформлено в юните?' },
+  ];
+  const head = runChannelHead(...args);
+  const msg = runChannelMsg(...args);
+  console.log(head + '\n---\n' + runChannelParts(...args).join('\n---\n'));
+
+  // Шапка — то, что видно в канале не разворачивая тред. В ней ровно четыре
+  // вещи: светофор, чьё обращение, о чём и куда идти. Всё остальное — в тред.
+  check('светофор у средней — жёлтый', head.startsWith('🟡'));
+  check('тема из формы в шапке', head.includes('Вопрос по отчетам'));
+  check('автор из формы в шапке', head.includes('@Anna Sokolova'));
+  check('ссылка на обращение', head.includes('time.tbank.ru/tinkoff/pl/18hwrdmk6bstf8n8pp8pswxbd1'));
+  check('уверенность по-русски', head.includes('Уверенность: **средняя**'));
+  check('краткая тема в шапке', head.includes('сколько людей оформлено'));
+  check('шапка короткая', head.length < 400);
+  // Ради чего разделение: в канале не должно быть ни черновика, ни разбора.
+  check('в шапке нет черновика', !head.includes('legal_position_d'));
+  check('в шапке нет источников', !head.includes('kb/tables/'));
+
+  check('черновик есть', msg.includes('legal_position_d'));
+  check('источники есть', msg.includes('kb/tables/legal-position-d.md'));
+  check('пробел есть', msg.includes('management_position_d'));
+  // Обращение НЕ цитируется целиком: цитата всего поста формы была чистым
+  // дублированием — именно она разгоняла посты к лимиту 4000 символов.
+  check('вопрос НЕ процитирован целиком', !msg.includes('> сколько людей оформлено'));
+  // Уверенность не понижена — значит и строки «← бот заявил» быть не должно:
+  // в обычном случае это шум.
+  check('нет пометки о понижении', !msg.includes('бот заявил'));
+  check('основание напечатано', msg.includes('Основание:'));
+}
+
+// ====================================================================== 9
+line('9. Канал джуна: пост без id — ссылки нет, но сообщение собирается');
+{
+  const p = runParse('ЧЕРНОВИК ОТВЕТА: Ответ\nУВЕРЕННОСТЬ: высокая');
+  const msg = runChannelMsg(p, {});
+  check('нет битой ссылки', !msg.includes('открыть обращение'));
+  check('черновик на месте', msg.includes('Ответ'));
+  check('светофор у высокой — зелёный', runChannelHead(p, {}).startsWith('🟢'));
+  const none = runParse('ЧЕРНОВИК ОТВЕТА: Ответа нет\nУВЕРЕННОСТЬ: нет ответа');
+  check('светофор у «нет ответа» — красный', runChannelHead(none, {}).startsWith('🔴'));
+  // Модель отклонилась от формата — это не «посередине», а «непонятно»,
+  // и цвет должен отличаться от жёлтого, иначе сигнал теряется.
+  const broken = runParse('Просто текст без блоков');
+  check('светофор у сломанного формата — белый', runChannelHead(broken, {}).startsWith('⚪'));
+}
+
+// ====================================================================== 10
+line('10. Личка: без путей kb/, без DD, со строкой уверенности');
+{
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Численность в этом разрезе считается по управленческой структуре.
+ИСТОЧНИКИ: kb/metrics/active-headcount.md
+Data Detective: mdm_employee_structure_d
+УВЕРЕННОСТЬ: средняя
+ЧЕГО НЕ ХВАТИЛО: нет статьи про ССЧ`);
+  const msg = runDmMsg(p);
+  console.log(msg);
+  check('черновик есть', msg.includes('управленческой структуре'));
+  check('нет путей kb/', !msg.includes('kb/'));
+  check('нет Data Detective', !/Data Detective|DD\b/.test(msg));
+  check('нет блока «чего не хватило»', !msg.includes('ССЧ'));
+  check('предупреждение об уверенности', msg.includes('Уверенность средняя'));
+}
+
+// ====================================================================== 11
+line('11. Личка: высокая уверенность — без предупреждения');
+{
+  const p = runParse('ЧЕРНОВИК ОТВЕТА: Готовый чеклист выгрузки.\nУВЕРЕННОСТЬ: высокая');
+  const msg = runDmMsg(p);
+  check('предупреждения нет', !msg.includes('⚠️'));
+  check('черновик есть', msg.includes('чеклист'));
+}
+
+// ====================================================================== 12
+line('12. Личка: нет ответа — честно отправляем к людям');
+{
+  const p = runParse('ЧЕРНОВИК ОТВЕТА: В базе знаний ответа нет.\nУВЕРЕННОСТЬ: нет ответа\nЧЕГО НЕ ХВАТИЛО: нет статьи');
+  const msg = runDmMsg(p);
+  check('направляет к команде', msg.includes('уточнить у команды HR-аналитики'));
+}
+
+// ====================================================================== 13
+line('13. Лог лички в канал джуна: вопрос и пробел, без черновика');
+{
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Длинный ответ про численность, который в лог не нужен.
+УВЕРЕННОСТЬ: средняя
+ЧЕГО НЕ ХВАТИЛО: нет статьи про management_position_d`, {
+    question: 'а декрет где смотреть?',
+    mode: 'dm',
+  });
+  const log = runDmLog(p);
+  console.log(log);
+  check('помечено как личка', log.includes('**Личка**'));
+  check('вопрос есть', log.includes('декрет'));
+  check('пробел есть', log.includes('management_position_d'));
+  check('черновика нет', !log.includes('Длинный ответ'));
+}
+
+// ====================================================================== 14
+line('14. Ошибка разбора доходит до джуна, а не тонет');
+{
+  const p = runParse('Просто текст без блоков');
+  const msg = runChannelMsg(p, { id: 'abc' });
+  check('предупреждение в канале', msg.includes('Разбор ответа'));
+  const log = runDmLog(p);
+  check('предупреждение в логе лички', log.includes('Разбор ответа'));
+}
+
+// ====================================================================== 15
+line('15. Чат: полный вывод для того, кто правит промпт');
+{
+  const p = runParse(`ЧЕРНОВИК ОТВЕТА: Ответ
+ИСТОЧНИКИ: kb/metrics/turnover.md
+УВЕРЕННОСТЬ: средняя
+ЧЕГО НЕ ХВАТИЛО: нет статьи`);
+  const msg = runChatMsg(p);
+  check('источники видны', msg.includes('kb/metrics/turnover.md'));
+  check('пробел виден', msg.includes('ЧЕГО НЕ ХВАТИЛО'));
+}
+
+// ====================================================================== 16
+line('16. Проводка адаптеров: связи и фильтры');
+{
+  const t = channel.nodes.find((n) => n.name === 'Time Trigger');
+  check('канал слушаем hr-report-ask',
+    JSON.stringify(t.parameters.postedFilters).includes('hr-report-ask'));
+  const post = channel.nodes.find((n) => n.name === 'Post header');
+  check('пишем в stonis_hakcs_2', JSON.stringify(post.parameters.channelId).includes('stonis_hakcs_2'));
+  check('слушаем и пишем разные каналы',
+    JSON.stringify(t.parameters).includes('hr-report-ask') &&
+    !JSON.stringify(post.parameters.channelId).includes('hr-report-ask'));
+
+  // Тред: ответы уходят к ИМЕННО ЭТОЙ шапке. Без root_id всё вернулось бы
+  // к полотну из трёх постов подряд, и по виду флоу это неотличимо —
+  // посты бы отправлялись, просто мимо треда.
+  const inThread = channel.nodes.find((n) => n.name === 'Post in thread');
+  check('канал: шапка постится одна', post.parameters.otherOptions.root_id === undefined);
+  check('канал: остальное — ответом в тред к шапке',
+    inThread.parameters.otherOptions.root_id === "={{ $('Post header').first().json.id }}");
+  check('канал: тред в том же канале',
+    JSON.stringify(inThread.parameters.channelId).includes('stonis_hakcs_2'));
+  check('канал: порядок шапка → тред',
+    channel.connections['Post header'].main[0][0].node === 'Build thread' &&
+    channel.connections['Build thread'].main[0][0].node === 'Post in thread');
+
+  // Guard — Code-нода, поэтому проверяется ПРОГОНОМ, а не поиском подстроки.
+  // Прежние проверки includes('root_id') были зелёными и на той версии,
+  // которая в живом канале пропускала все реплики: условие присутствовало,
+  // но при `post` в виде JSON-строки читало undefined и проходило всегда.
+  check('канал: guard — Code-нода', channel.nodes.find(
+    (n) => n.name === 'Guard channel').type === 'n8n-nodes-base.code');
+  check('канал: ворота по pass есть',
+    JSON.stringify(channel.nodes.find((n) => n.name === 'Our request').parameters)
+      .includes('pass'));
+  // Ложная ветка ворот никуда не ведёт — отсеянное сообщение не идёт дальше.
+  check('канал: ложная ветка ворот пустая',
+    channel.connections['Our request'].main[1].length === 0);
+  check('канал: вопрос в ядро из нормализованного поля',
+    JSON.stringify(channel.nodes.find((n) => n.name === 'Call core').parameters)
+      .includes('$json.question'));
+
+  const dmT = dm.nodes.find((n) => n.name === 'Time Trigger DM');
+  check('DM-триггер без фильтра каналов',
+    !JSON.stringify(dmT.parameters.postedFilters).includes('nameAuto'));
+  check('DM: guard — Code-нода', dm.nodes.find(
+    (n) => n.name === 'Guard DM').type === 'n8n-nodes-base.code');
+  check('DM: ложная ветка ворот пустая',
+    dm.connections['DM allowed'].main[1].length === 0);
+
+  const reply = dm.nodes.find((n) => n.name === 'Reply in DM');
+  check('DM: ответ в тот же канал', JSON.stringify(reply.parameters.channelId).includes('channel_id'));
+
+  // Ядро: конвейер вместо tool-loop
+  const router = core.nodes.find((n) => n.name === 'Router');
+  const author = core.nodes.find((n) => n.name === 'Author');
+  check('роутер берёт вопрос со входа ядра',
+    router.parameters.text.includes('When called by adapter'));
+  check('автор берёт вопрос со входа ядра',
+    author.parameters.text.includes('When called by adapter'));
+  check('в ядре нет chatTrigger', !core.nodes.some((n) => n.type.includes('chatTrigger')));
+  check('ядро отдаёт разбор', core.connections['Author'].main[0][0].node === 'Parse answer');
+
+  // Главное свойство конвейера: у агентов НЕТ инструментов. Инструменты и есть
+  // tool-loop, из-за которого один вопрос стоил 242k токенов.
+  check('в ядре нет ai_tool-связей',
+    !Object.values(core.connections).some((c) => c.ai_tool));
+  check('в ядре нет toolWorkflow/gitlabTool узлов',
+    !core.nodes.some((n) => /Tool$|toolWorkflow/.test(n.type)));
+  for (const a of [router, author]) {
+    check(`${a.name}: maxIterations = 1`, a.parameters.maxIterations === 1);
+  }
+
+  // Ни один ВЫХОД не ветвится на два узла.
+  //
+  // В n8n нет неявного слияния: если один выход ведёт в два узла, обе ветви
+  // выполняются, и всё, где они снова сходятся, выполняется ДВАЖДЫ. Для
+  // «Author» это два разных ответа на один вопрос и двойной расход токенов.
+  //
+  // Сходящиеся ветви IF (у «Need DD» два входа, у «Build materials» тоже) —
+  // наоборот, нормальный случай: они взаимоисключающие, управление приходит
+  // ровно по одной. Поэтому проверяется веер на выходе, а не число входов.
+  const fanout = [];
+  for (const [from, c] of Object.entries(core.connections)) {
+    (c.main ?? []).forEach((branch, i) => {
+      if ((branch ?? []).length > 1) {
+        fanout.push([`${from}[${i}]`, branch.map((t) => t.node)]);
+      }
+    });
+  }
+  check(`ни один выход не ветвится${fanout.length ? ': ' + JSON.stringify(fanout) : ''}`,
+    fanout.length === 0);
+
+  // ВХОДЫ ЯДРА И ТО, ЧТО ПЕРЕДАЮТ АДАПТЕРЫ, — один список.
+  //
+  // Расхождение здесь тихое: n8n не падает на поле, которого нет в объявленных
+  // входах, — оно просто не доедет. Поля формы приедут пустыми, правило
+  // про непокрытые отчёты не сработает, уверенность не понизится, и по виду
+  // флоу это неотличимо от «всё в порядке». Ровно та ошибка, из-за которой
+  // адаптер после правки ядра нужно переимпортировать.
+  const coreInputs = core.nodes.find((n) => n.name === 'When called by adapter')
+    .parameters.workflowInputs.values.map((v) => v.name);
+  check('ядро объявляет поля формы',
+    ['topic_kind', 'form_domain', 'report_url', 'form_context']
+      .every((k) => coreInputs.includes(k)));
+  for (const [wf, name] of [[channel, 'канал'], [dm, 'личка'], [chat, 'чат']]) {
+    const call = wf.nodes.find((n) => n.name === 'Call core').parameters.workflowInputs;
+    check(`${name}: передаёт ровно объявленные ядром поля`,
+      JSON.stringify(Object.keys(call.value).sort()) ===
+        JSON.stringify([...coreInputs].sort()));
+    check(`${name}: схема входов совпадает с ядром`,
+      JSON.stringify(call.schema.map((s) => s.id)) === JSON.stringify(coreInputs));
+  }
+  // В канале и личке поля формы берутся из guard'а по имени ноды: опечатка
+  // в имени даст пустое поле, а не ошибку.
+  for (const [wf, guardName] of [[channel, 'Guard channel'], [dm, 'Guard DM']]) {
+    const v = wf.nodes.find((n) => n.name === 'Call core').parameters.workflowInputs.value;
+    check(`${guardName}: поля формы берутся из этой ноды`,
+      v.form_domain.includes(`$('${guardName}')`) &&
+      wf.nodes.some((n) => n.name === guardName));
+    // Массив ссылок склеивается в строку: типизированные входы — только скаляры.
+    check(`${guardName}: report_url уезжает строкой`, v.report_url.includes('.join('));
+  }
+
+  // Промпты вклеены текстом, а не литеральными «\n» из json.dumps.
+  for (const a of [router, author]) {
+    check(`${a.name}: промпт с настоящими переводами строк`,
+      !a.parameters.text.includes('\\n') && a.parameters.text.split('\n').length > 20);
+    check(`${a.name}: комментарии разработчика срезаны`,
+      !a.parameters.text.includes('<!--'));
+    check(`${a.name}: плейсхолдеры заполнены`,
+      !/\{\{[A-Z_]+\}\}/.test(a.parameters.text));
+  }
+
+  // У каждого агента свой узел модели: один нельзя развести на двух.
+  const models = Object.entries(core.connections)
+    .filter(([, c]) => c.ai_languageModel)
+    .map(([name, c]) => [name, c.ai_languageModel[0][0].node]);
+  check('два разных узла модели', models.length === 2
+    && new Set(models.map((m) => m[0])).size === 2
+    && new Set(models.map((m) => m[1])).size === 2);
+
+  // Реестр попадает только роутеру: автор платил бы за него зря.
+  check('реестр только в промпте роутера',
+    router.parameters.text.includes('Decode registry')
+    && !author.parameters.text.includes('Decode registry'));
+
+  // Все три адаптера зовут одно ядро
+  for (const [name, w] of [['channel', channel], ['chat', chat], ['dm', dm]]) {
+    const c = w.nodes.find((n) => n.name === 'Call core');
+    check(`${name}: зовёт ядро`, c && c.type === 'n8n-nodes-base.executeWorkflow');
+    check(`${name}: ждёт результат`, c.parameters.options.waitForSubWorkflow === true);
+  }
+}
+
+// ====================================================================== 17
+// Формат из живого прогона 2026-08-07. Агент НЕ печатает ярлык ЧЕРНОВИК ОТВЕТА,
+// а ИСТОЧНИКИ и УВЕРЕННОСТЬ приходят одной строкой. Первая версия парсера
+// на этом теряла весь текст ответа и отправляла в канал пустое сообщение —
+// через чат этого не видно, потому что чат показывает сырой вывод агента.
+line('17. ЖИВОЙ ФОРМАТ: без ярлыка черновика, ИСТОЧНИКИ и УВЕРЕННОСТЬ в строку');
+{
+  const p = runParse(`Юридическая численность считается по формуле:
+
+legal_employee_flg = 1 AND company_fire_flg = 0
+
+Считать нужно через count(distinct mdm_employee_rk), так как у одного сотрудника
+может быть несколько оформлений (например, совместительство).
+
+Если нужно уточнить по конкретному подразделению — дайте знать.
+
+ИСТОЧНИКИ: kb/metrics/legal-headcount.md, kb/tables/mdm-employee-structure-d.md, kb/recipes/structure-choice.md УВЕРЕННОСТЬ: высокая`);
+  check('черновик не потерян', p.draft.includes('legal_employee_flg = 1 AND company_fire_flg = 0'));
+  check('черновик целиком, включая хвост', p.draft.includes('дайте знать'));
+  check('черновик без служебного', !p.draft.includes('ИСТОЧНИКИ'));
+  check('источники отделены', p.sources.includes('structure-choice.md'));
+  check('УВЕРЕННОСТЬ не утекла в источники', !p.sources.includes('УВЕРЕННОСТЬ'));
+  check('уверенность high', p.confidence_key === 'high');
+  check('это не считается ошибкой разбора', p.parse_error === '');
+
+  // Главное следствие: в канал джуна уходит непустое осмысленное сообщение.
+  const msg = runChannelMsg(p, { id: 'abc123', message: 'как считается юридическая численность' });
+  check('в канал ушёл черновик', msg.includes('count(distinct mdm_employee_rk)'));
+  check('нет пометки о пустом черновике', !msg.includes('_черновик пустой_'));
+}
+
+// ====================================================================== 18
+line('18. ЖИВОЙ ФОРМАТ: ответ по полям из DD');
+{
+  const p = runParse(`В ультраширокой витрине сотрудников (mdm_employee_structure_d) 267 полей.
+
+Идентификация и ПДн — business_dt, mdm_employee_rk, full_nm, ad_login и др.
+
+Важно: витрина содержит персональные данные, поэтому при выгрузке нужно
+фильтровать состав полей.
+
+ИСТОЧНИКИ: kb/tables/mdm-employee-structure-d.md, Data Detective: emart.mdm_employee_structure_d УВЕРЕННОСТЬ: высокая`);
+  check('черновик не потерян', p.draft.includes('267 полей'));
+  check('предупреждение о ПДн сохранилось', p.draft.includes('персональные данные'));
+  check('DD в источниках', p.sources.includes('Data Detective'));
+  check('уверенность high', p.confidence_key === 'high');
+  check('без ошибки разбора', p.parse_error === '');
+
+  // В личку служебное не уходит даже при таком формате.
+  const dmMsg = runDmMsg(p);
+  check('личка: нет путей kb/', !dmMsg.includes('kb/'));
+  check('личка: нет Data Detective', !dmMsg.includes('Data Detective'));
+  check('личка: черновик есть', dmMsg.includes('267 полей'));
+}
+
+// ====================================================================== 19
+line('19. Слово «источники» строчными внутри черновика блок не разрезает');
+{
+  // Регистр ярлыка несёт смысл: служебный ярлык только в верхнем регистре.
+  const p = runParse(`Уточни у заказчика источники данных: нужна юридическая
+или управленческая численность.
+
+ИСТОЧНИКИ: kb/recipes/structure-choice.md УВЕРЕННОСТЬ: высокая`);
+  check('черновик целиком', p.draft.includes('источники данных'));
+  check('источники только настоящие', p.sources === 'kb/recipes/structure-choice.md');
+}
+
+// ===================================================================== 20
+line('20. Ядро отдаёт доменную разбивку — стык с телеметрией');
+{
+  // Роутер уже определил домен по таблице «Домены» реестра, а Plan добрал
+  // мастеров. Телеметрии этого достаточно для кластеризации обращений, и
+  // вторая LLM не нужна — но домены должны ДОЕХАТЬ до выхода ядра.
+  const p = runParse(
+    'Текст ответа\n\nИСТОЧНИКИ: kb/metrics/hiring.md\nУВЕРЕННОСТЬ: высокая',
+    { question: 'сколько наняли в июле', mode: 'channel' },
+    { domains: ['movement'], files: ['kb/metrics/hiring.md'], dd_count: 1, router_error: '' },
+  );
+  check('домены на выходе ядра', JSON.stringify(p.domains) === '["movement"]');
+  check('прочитанные статьи на выходе',
+    p.articles_read.includes('kb/metrics/hiring.md'));
+  check('число объектов DD на выходе', p.dd_count === 1);
+  check('confidence_key для калибровки', p.confidence_key === 'high');
+  // Калибровка считается по ПАРЕ «заявлено / действует»: без заявленного
+  // значения не увидеть, что модель систематически завышает, а без
+  // действующего — что её понижал код.
+  check('confidence_claimed для калибровки', p.confidence_claimed === 'high');
+
+  // Пустой список значит «роутер домен не определил» — сигнал о пробеле
+  // в реестре. Подставлять сюда заглушку нельзя: пробел перестанет быть виден.
+  const empty = runParse('Текст\n\nУВЕРЕННОСТЬ: нет ответа', undefined, {});
+  check('без доменов — пустой массив, а не выдумка',
+    Array.isArray(empty.domains) && empty.domains.length === 0);
+  check('router_error пробрасывается', empty.router_error === '');
+}
+
+// ===================================================================== 21
+line('21. Guard канала: что проходит и что отсеивается');
+{
+  // Форма события: пост объектом на верхнем уровне.
+  const req = (message, extra = {}) => ({
+    event: 'posted',
+    channel_name: 'hr-report-ask',
+    post: { id: 'p1', type: '', root_id: '', message, ...extra },
+  });
+
+  const ok = guardChannel(req('Cross Data | Выгрузка данных\nНужны командировки за год'));
+  check('обращение проходит', ok.pass === true);
+  check('тема распознана', ok.topic === 'Cross Data |');
+  check('вопрос нормализован', ok.question.includes('командировки'));
+  check('причины отсева нет', ok.reason === '');
+
+  // ГЛАВНЫЙ КЕЙС: реплика в треде. Из-за неё бот писал черновик на каждое
+  // сообщение обсуждения — по одному обращению выходил веер черновиков.
+  const reply = guardChannel(req('а можно ещё город отправления?',
+    { id: 'p2', root_id: 'p1' }));
+  check('реплика в треде отсеяна', reply.pass === false);
+  check('причина названа', reply.reason === 'реплика в треде');
+
+  // Реплика в треде, начинающаяся с префикса (кто-то скопировал шапку):
+  // всё равно не обращение — решает root_id, а не текст.
+  const quoted = guardChannel(req('Cross Data | Выгрузка данных — дубль',
+    { id: 'p3', root_id: 'p1' }));
+  check('реплика с префиксом тоже отсеяна', quoted.pass === false);
+
+  // Mattermost у КОРНЕВОГО поста иногда проставляет root_id равным его же id.
+  const selfRoot = guardChannel(req('Cross Data | Вопрос по отчетам\nгде декрет?',
+    { id: 'p1', root_id: 'p1' }));
+  check('root_id == id — это всё ещё корень', selfRoot.pass === true);
+
+  // Чужая команда: тема формы есть, но обращение адресовано DWH HR.
+  const dwh = guardChannel(req('Вопрос команде HC Data (ex. DWH HR) | реплика (prod_v_ods) не актуальна'));
+  check('чужая команда отсеяна', dwh.pass === false);
+  // Старое имя команды в истории канала — отсев по префиксу от переименования
+  // не зависит, и это его главное свойство.
+  const dwhOld = guardChannel(req('Вопрос команде DWH HR | реплика prod_v_ods не актуальна'));
+  check('старое имя чужой команды тоже отсеяно', dwhOld.pass === false);
+  // Текущие темы формы проходят все четыре, включая «Другое».
+  for (const topic of ['Выгрузка данных', 'Вопрос по отчетам', 'Нет доступа к отчету',
+                       'Другое ( Если не нашлось подходящей категории )']) {
+    check('тема «' + topic.slice(0, 20) + '…» проходит',
+      guardChannel(req('Cross Data | ' + topic + ' от пользователя @A\nвопрос')).pass === true);
+  }
+  check('причина — не наша тема', dwh.reason.startsWith('не наша тема'));
+
+  // Обычная болтовня в канале без темы формы.
+  const chatter = guardChannel(req('всем привет, а кто дежурит сегодня?'));
+  check('сообщение без темы отсеяно', chatter.pass === false);
+
+  // Тема выделена жирным: intake-воркфлоу может обрамлять её markdown.
+  const bold = guardChannel(req('**Cross Data | Вопрос по отчетам**\nсломался дашборд'));
+  check('тема в markdown распознана', bold.pass === true);
+
+  // Системное сообщение о входе в канал.
+  const sys = guardChannel(req('user joined the channel', { type: 'system_join_channel' }));
+  check('системное отсеяно', sys.pass === false);
+
+  // from_bot в КАНАЛЕ не фильтруется: intake-воркфлоу может постить обращение
+  // от имени бота, и тогда фильтр отбрасывал бы именно реальные обращения,
+  // оставляя переписку вокруг них. Эхо здесь невозможно по конструкции —
+  // слушаем hr-report-ask, пишем stonis_hakcs_2.
+  const fromBot = guardChannel(req('Cross Data | Выгрузка данных\nвопрос',
+    { props: { from_bot: 'true' } }));
+  check('обращение от имени бота НЕ отброшено', fromBot.pass === true);
+}
+
+// ===================================================================== 22
+line('22. Guard: пост приходит JSON-строкой в data.post');
+{
+  // Ровно та форма, на которой прежний IF-фильтр молча пропускал всё:
+  // `$json.post.root_id` читался как undefined, `?? ''` давал пустую строку,
+  // и условие «только корневые» проходило для КАЖДОЙ реплики.
+  const packed = (post) => ({ event: 'posted', data: { post: JSON.stringify(post) } });
+
+  const ok = guardChannel(packed({
+    id: 'p1', type: '', root_id: '', message: 'Cross Data | Выгрузка данных\nнужна выгрузка',
+  }));
+  check('строковый пост распакован', ok.pass === true);
+  check('вопрос виден', ok.question.includes('нужна выгрузка'));
+
+  const reply = guardChannel(packed({
+    id: 'p2', type: '', root_id: 'p1', message: 'спасибо!',
+  }));
+  check('реплика из строкового поста отсеяна', reply.pass === false);
+  check('причина — реплика в треде', reply.reason === 'реплика в треде');
+
+  // Сломанный JSON не должен ронять ноду: пустой пост — это отсев с причиной,
+  // а не исключение и не пропуск дальше.
+  const broken = guardChannel({ event: 'posted', data: { post: '{не json' } });
+  check('сломанный JSON не роняет guard', broken.pass === false);
+  check('причина — пустое сообщение', broken.reason === 'пустое сообщение');
+}
+
+// ===================================================================== 23
+line('23. Guard лички: эхо и тип канала');
+{
+  const dmEvent = (message, extra = {}, top = {}) => ({
+    event: 'posted',
+    channel_type: 'D',
+    sender_name: '@r.kazantsev',
+    post: { id: 'd1', type: '', root_id: '', message, ...extra },
+    ...top,
+  });
+
+  const ok = guardDm(dmEvent('где смотреть декрет?'));
+  check('вопрос в личке проходит', ok.pass === true);
+  check('префикс темы в личке НЕ требуется', ok.reason === '');
+  check('собака у отправителя снята', ok.sender_name === 'r.kazantsev');
+
+  // В личке бот слушает и пишет ОДИН канал — без этого фильтра он заговорит
+  // сам с собой.
+  const echo = guardDm(dmEvent('Черновик ответа: ...', { props: { from_bot: 'true' } }));
+  check('эхо бота в личке отсеяно', echo.pass === false);
+  check('причина — сообщение бота', echo.reason === 'сообщение бота');
+
+  // Триггер лички идёт без фильтра каналов, поэтому канальные сообщения
+  // до него доходят и должны отсеиваться по типу канала.
+  const inChannel = guardDm(dmEvent('Cross Data | Выгрузка данных', {}, { channel_type: 'O' }));
+  check('сообщение из открытого канала отсеяно', inChannel.pass === false);
+  check('причина — не личный диалог', inChannel.reason === 'не личный диалог');
+}
+
+// ===================================================================== 24
+line('24. Лимит поста Mattermost: 4000 символов');
+{
+  // Живой прогон 2026-08-10: пост черновика упал с «Bad request», в ответе
+  // сервера — «Ваше сообщение слишком длинное». Падает ПОСЛЕДНИЙ узел: ядро
+  // отработало, токены уплачены, ответ собран — и не доехал никуда. В канале
+  // это выглядит как «бот промолчал».
+  const LIMIT = 4000;
+
+  // В треде минимум два поста: разбор и сообщение заказчику. Один пост
+  // здесь был бы регрессом — именно из-за него джуну нечего было копировать.
+  const short = runChannelParts(runParse('Короткий ответ\n\nУВЕРЕННОСТЬ: высокая'), { id: 'p1' });
+  check('короткий ответ — разбор и сообщение заказчику', short.length === 2);
+  check('короткий ответ без нумерации', !/\(1\/\d+\)/.test(short[0]));
+  // Шапка в лимит влезает всегда: она короткая по конструкции, а вопрос
+  // из формы обрезается по длине.
+  const longQuestionHead = runChannelHead(
+    runParse('Ответ\nУВЕРЕННОСТЬ: высокая'), { id: 'p1' }, 'hr-report-ask',
+    { question_text: 'нужна выгрузка. ' + 'подробности задачи. '.repeat(400) });
+  check('шапка в лимите', longQuestionHead.length <= LIMIT);
+  check('шапка обрезает вопрос', longQuestionHead.includes('…'));
+
+  // Длинный черновик: 9000 символов — столько бот выдаёт на вопрос про
+  // выгрузку с перечнем полей.
+  const long = runParse(
+    'ЧЕРНОВИК ОТВЕТА: ' + 'Поле business_dt — дата среза. '.repeat(300) +
+    '\nИСТОЧНИКИ: kb/process/export-playbook.md\nУВЕРЕННОСТЬ: высокая');
+  const parts = runChannelParts(long, { id: 'p1' });
+  check('длинный ответ разбит на несколько постов', parts.length > 1);
+  check('каждый пост влезает в лимит', parts.every((p) => p.length <= LIMIT));
+  // Нумерация теперь идёт внутри секции и вместе с её заголовком: без него
+  // «(2/3)» посреди треда не говорит, продолжением ЧЕГО он является.
+  check('посты пронумерованы',
+    parts.some((p) => /^\*\*Сообщение заказчику[^*]*\(1\/\d+\)\*\*/.test(p)));
+
+  // Главное свойство: разбивка НЕ должна терять содержание. Обрезка молча —
+  // это тот же тихий отказ, только вместо пустого сообщения приходит огрызок.
+  const joined = parts.join('\n');
+  check('черновик не потерян', joined.includes('business_dt'));
+  check('источники доехали', joined.includes('export-playbook.md'));
+  // Уверенность живёт в шапке, а не в треде: её читают, не разворачивая тред.
+  check('уверенность доехала', runChannelHead(long, { id: 'p1' }).includes('высокая'));
+
+  // Аварийный хвост: если и после разбивки не влезает, обрезка НАЗЫВАЕТ,
+  // сколько символов потеряно.
+  const huge = runParse('ЧЕРНОВИК ОТВЕТА: ' + 'абвгдеёжзий '.repeat(4000) +
+    '\nУВЕРЕННОСТЬ: высокая');
+  const hugeParts = runChannelParts(huge, { id: 'p1' });
+  // Предел общий на обращение: секций теперь до трёх, и посекционного лимита
+  // мало — три секции по четыре части это двенадцать сообщений подряд.
+  check('число постов ограничено', hugeParts.length <= 6);
+  check('все посты в лимите', hugeParts.every((p) => p.length <= LIMIT));
+  // Обрезка называет потерю. Ищем по всем постам, а не в последнем: последний
+  // теперь служебный, а обрезается хвост сообщения заказчику.
+  check('обрезка называет потерю',
+    hugeParts.some((p) => /обрезано \d+ символов/.test(p)));
+
+  // Личка и лог лички — тот же лимит и та же цена отказа.
+  const dmParts = runDmParts(long);
+  check('личка: разбита на посты', dmParts.length > 1);
+  check('личка: посты в лимите', dmParts.every((p) => p.length <= LIMIT));
+  check('личка: без служебного даже в длинном ответе',
+    !dmParts.join('\n').includes('kb/'));
+
+  const logParts = runDmLogParts(runParse(
+    'Ответ\n\nУВЕРЕННОСТЬ: средняя\nЧЕГО НЕ ХВАТИЛО: ' + 'нет статьи про ССЧ. '.repeat(300),
+    { question: 'вопрос', mode: 'dm' }));
+  check('лог лички: посты в лимите', logParts.every((p) => p.length <= LIMIT));
+
+  // Цитата вопроса в логе лички остаётся (ссылки на сообщение там нет), но
+  // обрезается — и обрезка называет потерю. Молчаливый огрызок читался бы
+  // как весь вопрос.
+  const longQ = runDmLog(runParse('Ответ\nУВЕРЕННОСТЬ: средняя',
+    { question: 'нужна выгрузка. ' + 'подробности задачи. '.repeat(80), mode: 'dm' }));
+  check('лог лички: цитата обрезана', /обрезано \d+ символов/.test(longQ));
+  check('лог лички: начало вопроса сохранено', longQ.includes('нужна выгрузка'));
+}
+
+// ===================================================================== 25
+line('25. Guard разбирает intake-форму: тема, автор, домен, ссылка, вопрос');
+{
+  // Ровно тот пост, на котором бот 2026-08-11 ответил «высокая уверенность»
+  // про витрину сотрудников на вопрос о бюджетах.
+  const FORM = [
+    'Cross Data | Вопрос по отчетам от пользователя @Anna Sokolova',
+    '',
+    'Выбери домен:',
+    'Стоимость и расходы на персонал',
+    'Укажи ссылку на отчет:',
+    'https://proteus.tcsbank.ru/superset/dashboard/budget-corporate-events/?native_filters_key=abc',
+    'Напиши свой вопрос:',
+    'привет! подскажите, долились ли бюджеты на сотрудников летом, тк суммы',
+    'в остатке не бьются с исходным бюджетом и фактическими расходами',
+  ].join('\n');
+
+  const g = guardChannel({
+    event: 'posted',
+    channel_name: 'hr-report-ask',
+    sender_name: '@intake-bot',
+    post: { id: 'p1', type: '', root_id: '', message: FORM },
+  });
+
+  check('обращение проходит', g.pass === true);
+  check('тема из формы', g.topic_kind === 'Вопрос по отчетам');
+  // Автор берётся из ШАПКИ, а не из sender_name: постит intake-воркфлоу.
+  check('автор из шапки, а не sender_name', g.form_author === 'Anna Sokolova');
+  check('домен формы', g.form_domain === 'Стоимость и расходы на персонал');
+  check('ссылка на отчёт', g.report_url.length === 1 &&
+    g.report_url[0].includes('budget-corporate-events'));
+  check('текст вопроса без служебных полей',
+    g.question_text.startsWith('привет! подскажите') &&
+    !g.question_text.includes('Выбери домен'));
+  check('вопрос в ядро — весь пост', g.question === FORM);
+  check('форма распознана', g.form_parsed === true);
+  check('form_context собран',
+    g.form_context.includes('Вопрос по отчетам') &&
+    g.form_context.includes('Стоимость и расходы') &&
+    g.form_context.includes('budget-corporate-events'));
+
+  // ТА ЖЕ ФОРМА, но пост приходит JSON-СТРОКОЙ в data.post — вид события,
+  // на котором прежний IF-фильтр был зелёным и пропускал всё (группа 22).
+  // Разбор формы обязан работать одинаково в обеих формах payload, иначе
+  // поля молча приедут пустыми, и правило про непокрытые отчёты не сработает.
+  const packed = guardChannel({
+    event: 'posted',
+    data: { post: JSON.stringify({ id: 'p1', type: '', root_id: '', message: FORM }) },
+  });
+  check('строковый пост: тема разобрана', packed.topic_kind === 'Вопрос по отчетам');
+  check('строковый пост: домен разобран',
+    packed.form_domain === 'Стоимость и расходы на персонал');
+  check('строковый пост: ссылка разобрана', packed.report_url.length === 1);
+
+  // Тема жирным: intake-воркфлоу может обрамлять шапку markdown.
+  const bold = guardChannel({
+    event: 'posted',
+    post: { id: 'p1', type: '', root_id: '',
+            message: '**Cross Data | Выгрузка данных от пользователя @ivan**\n' +
+                     'Бизнес-задача:\nаналитика Forge за июль' },
+  });
+  check('тема из жирной шапки', bold.topic_kind === 'Выгрузка данных');
+  check('неизвестное поле формы не потеряно',
+    bold.question_text.includes('аналитика Forge'));
+
+  // Форма не распознана вовсе: полей нет, только текст. Вопрос терять нельзя —
+  // пустой вопрос читается как «бот не знает».
+  const plain = guardChannel({
+    event: 'posted',
+    post: { id: 'p1', type: '', root_id: '',
+            message: 'Cross Data | Нет доступа к отчету\nне пускает в дашборд' },
+  });
+  check('без полей формы вопрос сохранён',
+    plain.question_text.includes('не пускает в дашборд'));
+  check('домена нет — пусто, а не выдумка', plain.form_domain === '');
+  check('ссылок нет — пустой массив', plain.report_url.length === 0);
+}
+
+// ===================================================================== 26
+line('26. Уверенность понижает КОД: вопрос по отчёту, которого нет в базе');
+{
+  const ANSWER = `ЧЕРНОВИК ОТВЕТА: Бюджеты на сотрудников в витрине сотрудников не отражаются — в её составе нет ни одного поля про бюджеты и расходы.
+ИСТОЧНИКИ: kb/tables/mdm-employee-structure-d.md, kb/metrics/legal-headcount.md
+УВЕРЕННОСТЬ: высокая`;
+
+  const trigger = {
+    question: 'долились ли бюджеты на сотрудников летом?',
+    mode: 'channel',
+    topic_kind: 'Вопрос по отчетам',
+    form_domain: 'Стоимость и расходы на персонал',
+    report_url: 'https://proteus.tcsbank.ru/superset/dashboard/budget-corporate-events/',
+  };
+
+  // Разобранный случай: роутер не подобрал НИ ОДНОЙ статьи, всё прочитанное —
+  // мастера домена, добранные кодом. Отчёт не разбирался.
+  const mastersOnly = {
+    ...MAT_OK,
+    masters_only: true,
+    router_picked: [],
+    asks_report: true,
+    report_seen: false,
+    articles_read: ['kb/tables/mdm-employee-structure-d.md',
+                    'kb/metrics/legal-headcount.md',
+                    'kb/recipes/structure-choice.md'],
+    dd_objects: ['urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d'],
+  };
+
+  const p = runParse(ANSWER, trigger, { domains: ['headcount-structure'] }, mastersOnly);
+  check('заявленное сохранено', p.confidence_claimed === 'high');
+  check('действует «нет ответа»', p.confidence_key === 'none');
+  check('понижение отмечено', p.confidence_capped === true);
+  check('причина названа', /отч[её]т/.test(p.confidence_capped_reason));
+  check('причина про мастеров тоже названа',
+    /мастера домена/.test(p.confidence_capped_reason));
+  // Одна и та же фраза дважды в строке «Почему» читается как две разные
+  // проблемы, поэтому правило про мастеров не дублирует правило про отчёт.
+  check('причина не продублирована',
+    p.confidence_capped_reason.split('только мастера домена').length === 2);
+
+  // ОСНОВАНИЕ — ответ на «непонятно, как считается уверенность».
+  const basis = p.confidence_basis.join(' · ');
+  check('основание: сколько статей', /статей: 3/.test(basis));
+  check('основание: это мастера', /только мастера домена/.test(basis));
+  check('основание: метаданные названы',
+    basis.includes('mdm_employee_structure_d') && !basis.includes('urn:dd:'));
+  check('основание: домен формы против домена бота',
+    basis.includes('Стоимость и расходы') && basis.includes('headcount-structure'));
+
+  // ЗАДАЧА ДЛЯ БАЗЫ — готовый список правок, собранный из фактов.
+  const tasks = p.kb_tasks.join('\n');
+  check('задача: статья об отчёте', /kb\/reports\//.test(tasks));
+  check('задача: отчёт узнаваем', tasks.includes('budget-corporate-events'));
+  check('задача: домен формы не покрыт',
+    /домен формы «Стоимость и расходы на персонал»/.test(tasks));
+  check('задача: читались только мастера', /только мастера/.test(tasks));
+
+  // Сообщение канала печатает всё это без цитаты обращения.
+  const msg = runChannelMsg(p, { id: 'p1' }, 'hr-report-ask', {
+    topic_kind: 'Вопрос по отчетам', form_author: 'Anna Sokolova',
+  });
+  console.log(msg);
+  check('в канале: понижение видно', msg.includes('нет ответа') &&
+    msg.includes('бот заявил высокую'));
+  check('в канале: блок задач', msg.includes('**Задача для базы**'));
+  check('в канале: нет цитаты обращения', !msg.includes('> долились ли бюджеты'));
+
+  // ВТОРОЙ УРОВЕНЬ: роутер статью под вопрос подобрал сам. Черновик может быть
+  // рабочим, но про сам отчёт бот по-прежнему не знает ничего — «средняя».
+  // Понижать такое до «нет ответа» значит отучить джуна читать черновики,
+  // то есть тот же тихий отказ, только в другую сторону.
+  const picked = runParse(ANSWER, trigger, { domains: ['headcount-structure'] }, {
+    ...MAT_OK,
+    masters_only: false,
+    router_picked: ['kb/metrics/legal-headcount.md'],
+    asks_report: true,
+    report_seen: false,
+  });
+  check('роутер подобрал статью → средняя', picked.confidence_key === 'medium');
+  check('причина всё равно про отчёт', /отч[её]т/.test(picked.confidence_capped_reason));
+
+  // Отчёт РАЗОБРАН (пришли метаданные объекта отчёта) — не понижаем.
+  const seen = runParse(ANSWER, trigger, { domains: ['headcount-structure'] }, {
+    ...MAT_OK,
+    asks_report: true,
+    report_seen: true,
+    dd_objects: ['urn:dd:reports:helicopter:note:12345'],
+  });
+  check('отчёт разобран → высокая остаётся', seen.confidence_key === 'high');
+  check('пометки о понижении нет', seen.confidence_capped === false);
+}
+
+// ===================================================================== 27
+line('27. Остальные понижения кодом и что код НЕ трогает');
+{
+  const HIGH = 'ЧЕРНОВИК ОТВЕТА: Ответ\nИСТОЧНИКИ: kb/metrics/turnover.md\nУВЕРЕННОСТЬ: высокая';
+
+  // Материалов не было вовсе: ответ по существу взяться неоткуда — общие
+  // знания в этом боте запрещены.
+  const empty = runParse(HIGH, undefined, {}, {
+    ...MAT_OK, has_materials: false, articles_read: [], router_picked: [],
+  });
+  check('нет материалов → нет ответа', empty.confidence_key === 'none');
+  check('причина названа', /материалов не было/.test(empty.confidence_capped_reason));
+
+  // Реестр ссылается на файл, которого нет: основание неполное.
+  const failed = runParse(HIGH, undefined, {}, {
+    ...MAT_OK, articles_failed: ['kb/reports/headcount-report.md'],
+  });
+  check('нечитаемая статья → средняя', failed.confidence_key === 'medium');
+  check('задача про битую ссылку реестра',
+    failed.kb_tasks.join('\n').includes('файл, которого нет'));
+
+  // Метаданные запрашивались и не дошли: состав полей неизвестен, а поля —
+  // самое частое, что бот утверждает.
+  const ddLost = runParse(HIGH, undefined, {}, {
+    ...MAT_OK, dd_failed: ['urn:dd:tables:greenplum:table:emart.legal_position_d'],
+  });
+  check('метаданные не дошли → средняя', ddLost.confidence_key === 'medium');
+  check('задача про метаданные без полного URN',
+    ddLost.kb_tasks.join('\n').includes('legal_position_d') &&
+    !ddLost.kb_tasks.join('\n').includes('urn:dd:'));
+
+  // Сбой планирования.
+  const routerErr = runParse(HIGH, undefined, { router_error: 'в выводе роутера нет JSON' });
+  check('сбой планирования → средняя', routerErr.confidence_key === 'medium');
+
+  // unknown НЕ ДВИГАЕТСЯ: это «модель отклонилась от формата», а не «средняя
+  // уверенность». Подменить его понижением значит спрятать parse_error
+  // за нормально выглядящим словом.
+  const broken = runParse('Просто текст без блоков', undefined, {}, {
+    ...MAT_OK, has_materials: false,
+  });
+  check('сломанный формат остаётся unknown', broken.confidence_key === 'unknown');
+  check('parse_error на месте', Boolean(broken.parse_error));
+
+  // Всё сошлось — код не трогает заявленное. Повышать он не может вообще:
+  // читал ли автор материалы по делу, код не знает.
+  const clean = runParse(HIGH);
+  check('чистый случай: высокая остаётся', clean.confidence_key === 'high');
+  check('чистый случай: причин нет', clean.confidence_capped_reason === '');
+  check('чистый случай: задач для базы нет', clean.kb_tasks.length === 0);
+
+  // Домен формы, который В РЕЕСТРЕ ЕСТЬ, задачей не считается.
+  const covered = runParse(HIGH, {
+    question: 'сколько людей в юните?', mode: 'channel',
+    topic_kind: 'Другое', form_domain: 'Численность и структура',
+  });
+  check('покрытый домен формы задачей не становится',
+    !covered.kb_tasks.join('\n').includes('домен формы'));
+}
+
+// ====================================================================== 28
+line('28. ВЫГРУЗКА: два блока разбираются раздельно');
+{
+  const MAT_EXPORT = { ...MAT_OK, is_export: true };
+  const ANSWER = [
+    'ЧЕРНОВИК ОТВЕТА: Уточните, пожалуйста: нужны люди с основным оформлением',
+    'или все позиции, включая совместительство?',
+    'Периметр: действующие сотрудники на 01.09.',
+    'ТЗ ДЛЯ АНАЛИТИКА: таблица emart.mdm_employee_structure_d,',
+    'фильтр active_employee_flg = 1',
+    'ИСТОЧНИКИ: kb/process/export-playbook.md',
+    'УВЕРЕННОСТЬ: высокая',
+  ].join('\n');
+
+  const a = runParse(ANSWER, { question: 'нужна выгрузка', mode: 'channel',
+    topic_kind: 'Выгрузка данных' }, {}, MAT_EXPORT);
+
+  check('черновик заказчику разобран', a.draft.includes('Уточните'));
+  check('ТЗ разобрано отдельно', a.tech_spec.includes('mdm_employee_structure_d'));
+  // Главное свойство всей правки: техника не течёт в текст заказчика.
+  check('техника не попала в черновик', !a.draft.includes('active_employee_flg'));
+  check('черновик не попал в ТЗ', !a.tech_spec.includes('Уточните'));
+  check('режим виден в разборе', a.is_export === true);
+  check('уверенность не пострадала', a.confidence_key === 'high');
+
+  // Блок ТЗ пропущен: это отклонение от формата, и джуну оно должно быть
+  // видно. Молча отданная половина ответа выглядит законченной.
+  const noSpec = runParse(
+    'ЧЕРНОВИК ОТВЕТА: вот состав полей\nУВЕРЕННОСТЬ: высокая',
+    { question: 'нужна выгрузка', mode: 'channel', topic_kind: 'Выгрузка данных' },
+    {}, MAT_EXPORT);
+  check('нет ТЗ — назван parse_error', noSpec.parse_error.includes('ТЗ ДЛЯ АНАЛИТИКА'));
+  check('нет ТЗ — уверенность понижена', noSpec.confidence_key === 'medium');
+
+  // Обычный вопрос: ТЗ не бывает, и его отсутствие ошибкой не является.
+  const usual = runParse('Ответ по существу\nУВЕРЕННОСТЬ: высокая',
+    { question: 'что такое ССЧ', mode: 'channel', topic_kind: 'Другое' });
+  check('обычный вопрос: ТЗ пустое', usual.tech_spec === '');
+  check('обычный вопрос: parse_error нет', usual.parse_error === '');
+  check('обычный вопрос: уверенность высокая', usual.confidence_key === 'high');
+}
+
+// ====================================================================== 29
+line('29. ВЫГРУЗКА: техническое в сообщении заказчику называется');
+{
+  const MAT_EXPORT = { ...MAT_OK, is_export: true };
+  const leaky = runParse([
+    'ЧЕРНОВИК ОТВЕТА: возьмём поле business_dt из emart.mdm_employee_structure_d,',
+    'подробности в kb/tables/mdm-employee-structure-d.md',
+    'ТЗ ДЛЯ АНАЛИТИКА: emart.mdm_employee_structure_d',
+    'УВЕРЕННОСТЬ: высокая',
+  ].join('\n'), { question: 'выгрузка', mode: 'channel',
+    topic_kind: 'Выгрузка данных' }, {}, MAT_EXPORT);
+
+  check('имя поля названо', leaky.draft_leaks.includes('business_dt'));
+  check('таблица со схемой названа',
+    leaky.draft_leaks.some((s) => s.includes('emart.mdm_employee_structure_d')));
+  check('путь kb/ назван', leaky.draft_leaks.some((s) => s.startsWith('kb/')));
+  // Проверка — про форму, а не про основание: понижение испортило бы
+  // калибровку, ради которой хранится пара «заявлено / действует».
+  check('уверенность не тронута', leaky.confidence_key === 'high');
+  check('текст модели не правится', leaky.draft.includes('business_dt'));
+
+  // Схема запроса — prod_v_<схема>, и она тоже утечка. Без явного префикса
+  // в шаблоне `prod_v_hrmart.` не совпадал бы: перед `hrmart` стоит «_»,
+  // то есть границы слова там нет, и имя таблицы уехало бы заказчику молча.
+  const prodV = runParse([
+    'ЧЕРНОВИК ОТВЕТА: возьмём prod_v_hrmart.mdm_employee_attendance',
+    'и prod_v_emart.functional_role_d',
+    'ТЗ ДЛЯ АНАЛИТИКА: prod_v_emart.functional_role_d',
+    'УВЕРЕННОСТЬ: высокая',
+  ].join('\n'), { question: 'выгрузка', mode: 'channel',
+    topic_kind: 'Выгрузка данных' }, {}, MAT_EXPORT);
+  check('схема prod_v_hrmart названа утечкой',
+    prodV.draft_leaks.some((s) => s.includes('prod_v_hrmart.mdm_employee_attendance')));
+  check('схема prod_v_emart названа утечкой',
+    prodV.draft_leaks.some((s) => s.includes('prod_v_emart.functional_role_d')));
+
+  // Чистый черновик: ложных срабатываний нет. Ссылка на отчёт с подчёркиваниями
+  // в параметрах — норма, и утечкой считаться не должна.
+  const clean = runParse([
+    'ЧЕРНОВИК ОТВЕТА: нужны действующие сотрудники на 01.09, отчёт тут:',
+    'https://proteus.tcsbank.ru/superset/dashboard/x/?native_filters_key=abc_def',
+    'ТЗ ДЛЯ АНАЛИТИКА: emart.mdm_employee_structure_d',
+    'УВЕРЕННОСТЬ: высокая',
+  ].join('\n'), { question: 'выгрузка', mode: 'channel',
+    topic_kind: 'Выгрузка данных' }, {}, MAT_EXPORT);
+  check('чистый черновик — утечек нет', clean.draft_leaks.length === 0);
+}
+
+// ====================================================================== 30
+line('30. ВЫГРУЗКА: шапка в канале, раздельные посты для копирования — в треде');
+{
+  const MAT_EXPORT = { ...MAT_OK, is_export: true };
+  const a = runParse([
+    'ЧЕРНОВИК ОТВЕТА: Уточните: только действующие на 01.09 или за период',
+    'с уволенными?',
+    'ТЗ ДЛЯ АНАЛИТИКА: emart.mdm_employee_structure_d, фильтр business_dt',
+    'ИСТОЧНИКИ: kb/process/export-playbook.md',
+    'УВЕРЕННОСТЬ: высокая',
+  ].join('\n'), { question: 'нужна выгрузка', mode: 'channel',
+    topic_kind: 'Выгрузка данных' }, {}, MAT_EXPORT);
+
+  const args = [a, { id: 'p1' }, 'hr-report-ask',
+    { topic_kind: 'Выгрузка данных', form_author: 'Anna Sokolova',
+      question_text: 'нужна выгрузка владельцев платформ' }];
+  const head = runChannelHead(...args);
+  const parts = runChannelParts(...args);
+
+  // В канале — одна строка обращения. Три поста подряд на каждое обращение
+  // и были той «огромной мешаниной», с которой нельзя работать в чате.
+  check('в канале — шапка обращения', head.includes('Выгрузка данных'));
+  check('в шапке нет черновика', !head.includes('только действующие'));
+  check('в шапке нет ТЗ', !head.includes('mdm_employee_structure_d'));
+  check('шапка называет состав треда', head.includes('ТЗ для аналитика'));
+
+  check('три поста в треде: разбор, заказчику, аналитику', parts.length === 3);
+  check('первый — разбор', parts[0].includes('**Разбор'));
+  check('второй — сообщение заказчику', parts[1].includes('Сообщение заказчику'));
+  check('третий — ТЗ', parts[2].includes('ТЗ для аналитика'));
+  check('третий помечен «заказчику не отправлять»',
+    parts[2].includes('заказчику не отправлять'));
+
+  // Ради чего всё: пост заказчику копируется целиком и в нём нет ни ТЗ,
+  // ни служебного. Пока они ехали одним постом, копировать было нечего.
+  check('в посте заказчику нет ТЗ', !parts[1].includes('mdm_employee_structure_d'));
+  check('в посте заказчику нет служебного', !parts[1].includes('Основание:'));
+  check('в посте заказчику нет ссылки на обращение',
+    !parts[1].includes('открыть обращение'));
+  check('вопрос заказчику на месте', parts[1].includes('только действующие'));
+
+  // Разбор — первым в треде: по нему решают, можно ли брать черновик.
+  check('разбор содержит основание', parts[0].includes('Основание:'));
+  check('разбор содержит источники', parts[0].includes('export-playbook.md'));
+
+  // Обычный вопрос: в треде два поста, пустого заголовка ТЗ быть не должно —
+  // он читался бы как «бот не дописал».
+  const usual = runParse('Ответ по существу\nУВЕРЕННОСТЬ: высокая',
+    { question: 'что такое ССЧ', mode: 'channel', topic_kind: 'Другое' });
+  const usualParts = runChannelParts(usual, { id: 'p2' });
+  check('обычный вопрос: два поста в треде', usualParts.length === 2);
+  check('обычный вопрос: заголовка ТЗ нет',
+    !usualParts.join('\n').includes('ТЗ для аналитика'));
+  check('обычный вопрос: шапка не обещает ТЗ',
+    !runChannelHead(usual, { id: 'p2' }).includes('ТЗ для аналитика'));
+
+  // Предупреждение об утечке техники печатается джуну в разборе.
+  const leaky = runParse([
+    'ЧЕРНОВИК ОТВЕТА: возьмём business_dt',
+    'ТЗ ДЛЯ АНАЛИТИКА: emart.mdm_employee_structure_d',
+    'УВЕРЕННОСТЬ: высокая',
+  ].join('\n'), { question: 'выгрузка', mode: 'channel',
+    topic_kind: 'Выгрузка данных' }, {}, MAT_EXPORT);
+  const leakyParts = runChannelParts(leaky, { id: 'p3' });
+  check('утечка названа джуну',
+    leakyParts[0].includes('Вычистить перед отправкой') &&
+    leakyParts[0].includes('business_dt'));
+
+  // Длина черновика: код МЕРИТ и называет, но текст модели не правит.
+  // Живая жалоба заказчика была именно про длину, и промпт её не гарантирует.
+  const longDraft = runParse([
+    'ЧЕРНОВИК ОТВЕТА: ' + 'Уточните состав выгрузки, пожалуйста. '.repeat(90),
+    'ТЗ ДЛЯ АНАЛИТИКА: emart.functional_role_d',
+    'УВЕРЕННОСТЬ: высокая',
+  ].join('\n'), { question: 'выгрузка', mode: 'channel',
+    topic_kind: 'Выгрузка данных' }, {}, MAT_EXPORT);
+  check('длинный черновик измерен', longDraft.draft_too_long > 2500);
+  check('длина названа джуну',
+    runChannelParts(longDraft, { id: 'p4' })[0].includes('Черновик длинный'));
+  check('текст черновика не тронут',
+    longDraft.draft.includes('Уточните состав выгрузки'));
+  // Уверенность это не трогает: длина — про форму, а не про основание.
+  check('длина не трогает уверенность', longDraft.confidence_key === 'high');
+  check('короткий черновик не помечен', a.draft_too_long === 0);
+  // Обычный вопрос длиной не меряется: правило про 1500 знаков — из режима
+  // выгрузки, и ответ по существу бывает законно длинным.
+  const longUsual = runParse(
+    'ЧЕРНОВИК ОТВЕТА: ' + 'Численность считается так. '.repeat(150) +
+    '\nУВЕРЕННОСТЬ: высокая', { question: 'как считать', mode: 'channel' });
+  check('обычный вопрос длиной не меряется', longUsual.draft_too_long === 0);
+
+  // Личка: ТЗ отдельным постом, чтобы аналитик копировал только первый.
+  const dmParts = runDmParts(a);
+  check('личка: ТЗ отдельным постом', dmParts.length === 2);
+  check('личка: первый пост без ТЗ',
+    !dmParts[0].includes('mdm_employee_structure_d'));
+
+  // Чат — отладочный вид: там видно всё, включая ТЗ.
+  check('чат показывает ТЗ', runChatMsg(a).includes('ТЗ ДЛЯ АНАЛИТИКА'));
+}
+
+console.log('\n' + '='.repeat(70));
+
+// ====================================================================== 31
+line('31. ДОСТУП: пробел базы называется конкретно, а не «ответа нет»');
+{
+  // Ответ по теме «Нет доступа к отчету» в базе должен появиться. Пока его
+  // нет, задача для базы обязана называть и что нужно, и где этому лежать —
+  // иначе пробел выглядит как «бот не справился».
+  const MAT_NO_ACCESS = { ...MAT_OK, masters_only: true,
+    articles_read: ['kb/tables/mdm-employee-structure-d.md'],
+    router_picked: [] };
+  const p = runParse('ЧЕРНОВИК ОТВЕТА: доступы я не выдаю\nУВЕРЕННОСТЬ: нет ответа',
+    { question: 'не пускает в дашборд', mode: 'channel',
+      topic_kind: 'Нет доступа к отчету' }, {}, MAT_NO_ACCESS);
+
+  const task = p.kb_tasks.find((t) => t.includes('routing.md'));
+  check('задача для базы названа', Boolean(task));
+  check('задача говорит, чего не хватает',
+    task.includes('заявк') && task.includes('SLA'));
+
+  // Статья прочитана — задачи нет: пробела больше нет.
+  const read = runParse('ЧЕРНОВИК ОТВЕТА: заявка оформляется так\nУВЕРЕННОСТЬ: средняя',
+    { question: 'не пускает в дашборд', mode: 'channel',
+      topic_kind: 'Нет доступа к отчету' }, {},
+    { ...MAT_OK, articles_read: ['kb/process/routing.md'] });
+  check('статья прочитана — задачи нет',
+    !read.kb_tasks.some((t) => t.includes('routing.md')));
+
+  // Тема не про доступ — задача не выдумывается.
+  const other = runParse('ЧЕРНОВИК ОТВЕТА: ответ\nУВЕРЕННОСТЬ: высокая',
+    { question: 'что такое ССЧ', mode: 'channel', topic_kind: 'Другое' });
+  check('чужая тема задачу не порождает',
+    !other.kb_tasks.some((t) => t.includes('routing.md')));
+}
+
+// ====================================================================== 33
+line('33. ЛИЧКА: причина средней уверенности настоящая, а не одна на всё');
+{
+  // Живой прогон 2026-08-27: в личке на любой средней уверенности печаталось
+  // «определение ещё не подтверждено» — формулировка правила про status:draft,
+  // зашитая в код. Ни одна прочитанная статья черновиком не была; средняя
+  // стояла из-за неизвестного признака групп доступа. Придуманная причина
+  // хуже отсутствующей: её читают и перестают верить всей строке.
+  const capped = runDmMsg({
+    draft: 'Поле ad_login.', confidence_key: 'medium',
+    confidence_claimed: 'high', confidence_capped: true,
+    confidence_capped_reason: 'метаданные запрашивались, но не получены',
+  });
+  check('печатается настоящая причина',
+    capped.includes('метаданные запрашивались, но не получены'));
+  check('чужая формулировка не подставляется',
+    !capped.includes('определение ещё не подтверждено'));
+
+  // Модель сама заявила среднюю, код не понижал: причины у нас нет —
+  // и выдумывать её нельзя.
+  const claimed = runDmMsg({
+    draft: 'Ответ.', confidence_key: 'medium',
+    confidence_claimed: 'medium', confidence_capped: false,
+    confidence_capped_reason: '',
+  });
+  check('без понижения причина не выдумывается',
+    !claimed.includes('определение ещё не подтверждено') &&
+    /перепроверьте/.test(claimed));
+
+  // Пробелы базы адресованы джуну, а не человеку в личке: пути kb/ туда
+  // не уезжают ни под каким видом.
+  const withGaps = runDmMsg({
+    draft: 'Ответ.', confidence_key: 'medium', confidence_capped: false,
+    gaps: 'нет статьи в kb/metrics/ с определением ССЧ',
+  });
+  check('служебное из gaps в личку не уходит', !/kb\//.test(withGaps));
+}
+
+// ====================================================================== 32
+line('32. ОДИН Service Account во всех воркфлоу');
+{
+  // 2026-08-27: в живых «DD Lookup» и «Support Bot Core» credential поменяли
+  // руками на «…Service Account Support», а сборщик продолжал выдавать
+  // «…account 2» — он тянулся из «Support Bot.json», снимка первой
+  // конструкции, который давно не трогали. Правка в интерфейсе живёт до
+  // следующего импорта, поэтому отказ был бы отложенным и беспричинным
+  // на вид: 401 и от каталога, и от чтения статей из GitLab сразу.
+  //
+  // Проверяется не конкретный id, а СОГЛАСОВАННОСТЬ: id один на все
+  // воркфлоу. Смена Service Account — правка одной константы DP_CRED
+  // в build_dd_flow.py, а не обход четырёх файлов.
+  const creds = new Map();      // id → [где встретился]
+  for (const [name, wf] of [['DD Lookup', load('DD Lookup.json')],
+                            ['Support Bot DD', load('Support Bot DD.json')],
+                            ['Support Bot Core', core]]) {
+    for (const n of wf.nodes) {
+      const c = (n.credentials || {}).devplatformApi;
+      if (!c) continue;
+      if (!creds.has(c.id)) creds.set(c.id, []);
+      creds.get(c.id).push(`${name} / ${n.name}`);
+    }
+  }
+  check('credential вообще проставлен', creds.size > 0);
+  check('во всех воркфлоу он ОДИН',
+    creds.size === 1,
+    creds.size > 1
+      ? 'разъехались: ' + [...creds].map(([id, at]) =>
+          `${id} → ${at.join(', ')}`).join(' | ')
+      : '');
+  // Ядро читает GitLab тем же аккаунтом, что DD Lookup ходит в каталог:
+  // build_time_flows берёт GITLAB_CRED из собранного «Support Bot DD»,
+  // и если нормализация в build_dd_flow пропадёт, разъедется молча именно тут.
+  const coreCred = core.nodes.find((n) => n.name === 'Get a file')?.credentials
+    ?.devplatformApi?.id;
+  check('ядро читает GitLab тем же аккаунтом',
+    Boolean(coreCred) && creds.has(coreCred));
+}
+
+// ===================================================================== 34
+line('34. ИБ: признак передачи вне контура разбирается из формы');
+{
+  // Подпись этого поля — 71 символ, то есть в sections она не попадает
+  // вовсе: LABEL_RE ограничен 60. Разбор поэтому идёт по строкам, и тест
+  // держит именно это — прежний способ дал бы пустое значение молча.
+  const form = (answer) => [
+    'Cross Data | Выгрузка данных от пользователя @Alisa Pipkina',
+    '',
+    'Бизнес-задача, решаемая выгрузкой:',
+    'нужны логины сотрудников юнита',
+    'Выгрузка нужна для использования исключительно внутри группы компаний:',
+    answer,
+    'Перечисли логины сотрудников, кому необходимо дать доступ к выгрузке:',
+    'a.pipkina',
+  ].join('\n');
+
+  const post = (message) => ({ id: 'p1', type: '', root_id: '', message });
+  const g = (answer) => guardChannel({
+    event: 'posted', channel_name: 'hr-report-ask', post: post(form(answer)),
+  });
+
+  check('«Нет» при подписи «исключительно внутри» = передача наружу',
+    g('Нет, данные будут переданы подрядчику').external_transfer === 'yes');
+  check('«Да» при той же подписи = только внутри',
+    g('Да').external_transfer === 'no');
+  check('короткое «Нет» тоже разбирается', g('Нет').external_transfer === 'yes');
+  // \b в JS определён по ASCII и с кириллицей не совпадает НИКОГДА — на этом
+  // уже один раз молча потерялся разбор шапки формы.
+  check('«Нет.» с точкой разбирается', g('Нет.').external_transfer === 'yes');
+  check('невнятный ответ не превращается в догадку',
+    g('затрудняюсь ответить').external_transfer === '');
+  check('прочитанное видно целиком',
+    g('Нет').external_transfer_raw.includes('исключительно внутри'));
+
+  // ОБРАТНАЯ ПОЛЯРНОСТЬ. Переформулируют вопрос — и то же «нет» будет
+  // означать ровно противоположное. Полярность читается из подписи.
+  const outward = guardChannel({
+    event: 'posted', channel_name: 'hr-report-ask',
+    post: post([
+      'Cross Data | Выгрузка данных от пользователя @ivan',
+      'Данные передаются за пределы группы компаний:',
+      'Да, партнёру',
+    ].join('\n')),
+  });
+  check('обратная формулировка: «Да» = наружу',
+    outward.external_transfer === 'yes');
+
+  // Подпись, из которой полярность не читается: «не разобрано», а не догадка.
+  // Перепутанная полярность здесь тише и дороже всего остального во флоу.
+  const vague = guardChannel({
+    event: 'posted', channel_name: 'hr-report-ask',
+    post: post([
+      'Cross Data | Выгрузка данных от пользователя @ivan',
+      'Как используются данные относительно группы компаний:',
+      'Нет',
+    ].join('\n')),
+  });
+  check('непонятная полярность = не разобрано', vague.external_transfer === '');
+
+  // Поля в форме нет вовсе — пусто, а не 'no'.
+  const noField = guardChannel({
+    event: 'posted', channel_name: 'hr-report-ask',
+    post: post('Cross Data | Выгрузка данных от пользователя @ivan\nнужны логины'),
+  });
+  check('поля нет: пусто, а не «внутри»', noField.external_transfer === '');
+
+  // Проза заказчика с теми же словами подписью не считается: двоеточие
+  // обязательно, иначе фраза «работаем внутри группы компаний» в тексте
+  // вопроса стала бы ответом на незаданный вопрос.
+  const prose = guardChannel({
+    event: 'posted', channel_name: 'hr-report-ask',
+    post: post([
+      'Cross Data | Выгрузка данных от пользователя @ivan',
+      'Бизнес-задача, решаемая выгрузкой:',
+      'мы работаем внутри группы компаний',
+      'Нет',
+    ].join('\n')),
+  });
+  check('проза с теми же словами подписью не считается',
+    prose.external_transfer === '');
+
+  // ТА ЖЕ ФОРМА строкой в data.post — вид события, на котором прежний
+  // IF-фильтр был зелёным и пропускал всё. Разбор обязан совпадать.
+  const packed = guardChannel({
+    event: 'posted',
+    data: { post: JSON.stringify(post(form('Нет, передаём внешнему аудитору'))) },
+  });
+  check('строковый пост: признак разобран так же',
+    packed.external_transfer === 'yes');
+}
+
+// ===================================================================== 35
+line('35. ИБ: код МЕРИТ, попало ли требование в черновик, и называет пробел');
+{
+  const ANSWER = (draft) => `ЧЕРНОВИК ОТВЕТА: ${draft}
+ТЗ ДЛЯ АНАЛИТИКА: ТАБЛИЦА: prod_v_emart.mdm_employee_structure_d
+ИСТОЧНИКИ: kb/process/export-playbook.md
+УВЕРЕННОСТЬ: высокая`;
+
+  const MAT_IB = { ...MAT_OK, is_export: true, ib_required: true,
+                   external_transfer: 'yes' };
+  const INPUTS = { question: 'выгрузка', mode: 'channel',
+                   topic_kind: 'Выгрузка данных' };
+
+  const missed = runParse(
+    ANSWER('**Что выгружаем** логины юнита. **Состав файла** логин, ФИО.'),
+    INPUTS, {}, MAT_IB);
+  check('требование доехало до разбора', missed.ib_required === true);
+  check('пропуск замечен', missed.ib_missing === true);
+  // Уверенность эта проверка НЕ трогает: основание под ответом от неё
+  // не зависит, а понижение испортило бы калибровку — метрику, ради которой
+  // пара «заявлено / действует» и хранится. Так же устроены draft_leaks
+  // и draft_too_long.
+  check('уверенность не тронута', missed.confidence_key === 'high' &&
+    missed.confidence_capped === false);
+
+  const stated = runParse(
+    ANSWER('**Чего не будет** — файл не передаём, пока информационная ' +
+           'безопасность не согласует передачу, заявка в ~sec_analytics_ask.'),
+    INPUTS, {}, MAT_IB);
+  check('согласование названо — пробела нет', stated.ib_missing === false);
+  check('и это видно отдельным полем', stated.ib_stated === true);
+
+  // Формулировок несколько, и требовать одну значит получать ложную тревогу
+  // на верном черновике — на неё быстро перестают смотреть.
+  const short = runParse(
+    ANSWER('**Чего не будет** — до согласования ИБ файл не отдаём.'),
+    INPUTS, {}, MAT_IB);
+  check('короткая формулировка «согласования ИБ» засчитана',
+    short.ib_missing === false);
+  // «ИБ» — не подстрока в любом слове: иначе совпало бы где угодно.
+  const falsePositive = runParse(
+    ANSWER('**Что выгружаем** сотрудников подразделения Либерти за июль.'),
+    INPUTS, {}, MAT_IB);
+  check('буквы «иб» внутри слова за согласование не считаются',
+    falsePositive.ib_missing === true);
+
+  // Требования не было — поля пустые, лишних строк в тред не уезжает.
+  const noReq = runParse(ANSWER('**Что выгружаем** логины юнита.'),
+    INPUTS, {}, { ...MAT_OK, is_export: true, ib_required: false,
+                  external_transfer: 'no' });
+  check('требования нет — пробела нет', noReq.ib_missing === false);
+  check('значение из формы всё равно сохранено', noReq.external_transfer === 'no');
+
+  // Джун видит это ПЕРВОЙ строкой разбора: остальное говорит, насколько
+  // черновику верить, а эта строка — что его нельзя отправлять как есть.
+  const msg = runChannelMsg(missed);
+  check('в треде названо', msg.includes('согласования ИБ в черновике нет') ||
+    msg.includes('согласования ИБ'));
+  check('канал заявки назван', msg.includes('~sec_analytics_ask'));
+  const thread = runChannelParts(missed).join('\n');
+  const posIb = thread.indexOf('🔒');
+  const posBasis = thread.indexOf('**Основание:**');
+  check('строка ИБ идёт раньше основания',
+    posIb !== -1 && (posBasis === -1 || posIb < posBasis));
+
+  const okMsg = runChannelMsg(stated);
+  check('когда согласование названо — строка подтверждает, а не тревожит',
+    okMsg.includes('в черновике оно названо'));
+  const quiet = runChannelMsg(noReq);
+  check('без требования строки ИБ в треде нет', !quiet.includes('🔒'));
+}
+
+console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
+process.exit(fails ? 1 : 0);

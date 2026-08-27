@@ -1,0 +1,186 @@
+{
+  "name": "My workflow 5899",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "posted"
+        ],
+        "postedFilters": {
+          "channels": [
+            {
+              "nameAuto": {
+                "__rl": true,
+                "mode": "name",
+                "value": "hr-report-ask"
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.mattermostTrigger",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0594e204-837a-485a-beff-0a7306bb7376",
+      "name": "Time Trigger",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "peer",
+          "value": ""
+        },
+        "attachments": [],
+        "otherOptions": {},
+        "file_ids": []
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        336,
+        -16
+      ],
+      "id": "c1de855a-57f7-4be7-8e27-16d8ddf9d141",
+      "name": "Post a message",
+      "webhookId": "4b3b3a6c-5e48-4f1d-8f6a-df5cb0fb217c",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get"
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        624,
+        0
+      ],
+      "id": "09ad4316-e0ad-4f52-8fab-3e00274096bb",
+      "name": "Get a message",
+      "webhookId": "ac8abb41-070b-41ca-81d6-02b1c106a3fb",
+      "credentials": {
+        "mattermostApi": {
+          "id": "ctIUOeAEvHFJj1TA",
+          "name": "Time Romuney"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getThread"
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        832,
+        0
+      ],
+      "id": "76223341-5c34-4385-8b68-5af4029bc6e1",
+      "name": "Get a message thread",
+      "webhookId": "4c53d600-6960-4947-82a8-64b1d65e753f",
+      "credentials": {
+        "mattermostApi": {
+          "id": "ctIUOeAEvHFJj1TA",
+          "name": "Time Romuney"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "reaction"
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        752,
+        -112
+      ],
+      "id": "99881b75-4274-4053-a9f8-d4b96773376b",
+      "name": "Create a reaction",
+      "webhookId": "baf88135-33ad-47d4-bf7a-9e170f44860c",
+      "credentials": {
+        "mattermostApi": {
+          "id": "ctIUOeAEvHFJj1TA",
+          "name": "Time Romuney"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "user",
+        "operation": "getById",
+        "userId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        }
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        768,
+        144
+      ],
+      "id": "e16cc517-15f5-4cde-8aa8-adbf18b51e5b",
+      "name": "Get a user by ID",
+      "webhookId": "029dd219-df84-478a-94bd-3ee2c3c75579",
+      "credentials": {
+        "mattermostApi": {
+          "id": "ctIUOeAEvHFJj1TA",
+          "name": "Time Romuney"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Time Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "Post a message": {
+      "main": [
+        []
+      ]
+    },
+    "Get a message": {
+      "main": [
+        []
+      ]
+    },
+    "Get a message thread": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "227d8c72-3be0-4d46-906a-549665ef52ba",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8476d3351ad8e874891ce696c625adbac4a7de5faa92e59418571c8dc0d0465e"
+  },
+  "nodeGroups": [],
+  "id": "ov6WbkeOHWV17b9a",
+  "tags": []
+}

@@ -1,0 +1,161 @@
+{
+  "name": "Support Bot · Adapter Chat",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -260,
+        300
+      ],
+      "id": "when-chat-message-received",
+      "name": "When chat message received"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "quV6Ec1hmobZefBX",
+          "mode": "id",
+          "cachedResultName": "Support Bot Core"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "question": "={{ $json.chatInput }}",
+            "mode": "chat",
+            "topic_kind": "",
+            "form_domain": "",
+            "report_url": "",
+            "form_context": "",
+            "external_transfer": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "question",
+              "displayName": "question",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "mode",
+              "displayName": "mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "topic_kind",
+              "displayName": "topic_kind",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "form_domain",
+              "displayName": "form_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "report_url",
+              "displayName": "report_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "form_context",
+              "displayName": "form_context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "external_transfer",
+              "displayName": "external_transfer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "id": "call-core",
+      "name": "Call core"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst CONF = { high: 'высокая', medium: 'средняя', none: 'нет ответа' };\nconst a = $json;\nconst lines = [a.draft || '(пусто)'];\n// В чате видно всё, включая ТЗ: адресат здесь — тот, кто правит промпт,\n// и ему нужно проверить оба блока, а не только тот, что уйдёт заказчику.\nif (a.tech_spec) {\n  lines.push('');\n  lines.push('ТЗ ДЛЯ АНАЛИТИКА: ' + a.tech_spec);\n}\nlines.push('');\nlines.push('ИСТОЧНИКИ: ' + (a.sources || '—'));\n// В чате печатаем и заявленное, и действующее: адресат здесь — тот, кто правит\n// промпт, и ему нужно видеть именно расхождение.\nlines.push('УВЕРЕННОСТЬ: ' + (CONF[a.confidence_key] || a.confidence || '—') +\n  (a.confidence_capped\n    ? ' (бот заявил ' + (CONF[a.confidence_claimed] || a.confidence_claimed) +\n      '; понижено: ' + a.confidence_capped_reason + ')'\n    : ''));\nif (Array.isArray(a.confidence_basis) && a.confidence_basis.length) {\n  lines.push('ОСНОВАНИЕ: ' + a.confidence_basis.join(' · '));\n}\nif (a.gaps) lines.push('ЧЕГО НЕ ХВАТИЛО: ' + a.gaps);\nif (Array.isArray(a.kb_tasks) && a.kb_tasks.length) {\n  lines.push('ЗАДАЧА ДЛЯ БАЗЫ:');\n  for (const t of a.kb_tasks) lines.push('  — ' + t);\n}\nif (a.parse_error) lines.push('РАЗБОР: ' + a.parse_error);\nreturn [{ json: { output: lines.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ],
+      "id": "build-reply",
+      "name": "Build reply"
+    }
+  ],
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Call core",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call core": {
+      "main": [
+        [
+          {
+            "node": "Build reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
