@@ -1755,6 +1755,31 @@ line('40. ЭКСПЕРТ, КОТОРОГО НЕ ПОДБИРАЛИ, назван
     { question: 'вопрос', mode: 'channel' }, {},
     { ...MAT_OK, routes: [], route_names: NAMES });
   check('без имён тревоги нет', clean.experts_invented.length === 0);
+
+  // ------------------------------------ инструмент, которого у коллеги нет
+  //
+  // `get_table_info` — инструмент аналитика в его собственной среде.
+  // Упоминаний в базе шесть, и одно из них в `kb/process/sql-conventions.md`,
+  // которая доезжает до автора на КАЖДОЙ просьбе помочь с запросом. Правило
+  // «коллеге его не предлагать» стоит в промпте, а промпт такие правила
+  // роняет первыми — как ронял требование согласования ИБ.
+  //
+  // draft_leaks эту дыру не закрывает: он считается ТОЛЬКО в режиме
+  // выгрузки, а просьба помочь с запросом режим как раз гасит.
+  const tool = runParse(
+    ANSWER('Состав полей посмотрите через get_table_info по этой витрине.'),
+    { question: 'как написать select по сотрудникам', mode: 'channel' }, {},
+    { ...MAT_OK, routes: [], route_names: NAMES, is_export: false });
+  check('инструмент аналитика замечен вне режима выгрузки',
+    tool.draft_own_tools.includes('get_table_info'));
+  check('и на уверенность это не влияет', tool.confidence_capped === false);
+  const toolThread = runChannelParts(tool).join('\n');
+  check('джун предупреждён про инструмент',
+    toolThread.includes('инструмент аналитика'));
+  const cleanTool = runParse(ANSWER('select mdm_employee_rk from prod_v_emart.t'),
+    { question: 'как написать select', mode: 'channel' }, {},
+    { ...MAT_OK, routes: [], route_names: NAMES, is_export: false });
+  check('обычный запрос тревоги не вызывает', cleanTool.draft_own_tools.length === 0);
 }
 
 // ===================================================================== 41

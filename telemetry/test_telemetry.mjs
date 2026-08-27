@@ -1612,8 +1612,12 @@ line('37. Витрина знает про КАЖДОЕ поле ответа б
   const CORE = JSON.parse(fs.readFileSync('../bot/Support Bot Core.json', 'utf8'));
   const parse = CORE.nodes.find((n) => n.name === 'Parse answer');
   check('нода разбора ответа найдена', Boolean(parse));
+  // Отступ в начале строки обязателен в шаблоне: часть присваиваний стоит
+  // внутри блоков `{ … }`, и якорь строго по началу строки их не видел —
+  // experts_invented и draft_own_tools проскакивали мимо теста, то есть
+  // проверка «ни одно поле не потеряно» сама теряла поля.
   const fields = [...new Set(
-    [...parse.parameters.jsCode.matchAll(/^out\.([a-z_0-9]+)\s*=/gm)].map((m) => m[1]),
+    [...parse.parameters.jsCode.matchAll(/^\s*out\.([a-z_0-9]+)\s*=/gm)].map((m) => m[1]),
   )].sort();
   check(`полей на выходе ядра (${fields.length})`, fields.length >= 25);
   // Прочитано витриной = есть json_extract по этому ключу. Названо

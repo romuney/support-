@@ -205,6 +205,9 @@ task_state AS (
 -- поле ядра тихо не доезжает до дашборда — то же самое, что было с
 -- `dd_received` и `router_empty`: код их считал, а посмотреть было негде.
 --
+--   draft                  — сам текст черновика. Он и так уходит в канал
+--                            джуна постом; вторая копия в логе это объём
+--                            и персональные данные без новой информации.
 --   question, raw          — полный текст обращения и сырой ответ модели.
 --                            Объём и персональные данные; сам пост и так
 --                            лежит в логе событием `request_created`.
@@ -279,6 +282,14 @@ bot AS (
            -- намеренно — основание под ответом от них не меняется.
            max_by(CAST(json_extract_scalar(payload, '$.draft_leaks') AS boolean),
                   event_ts) AS draft_leaks,
+           -- Модель назвала эксперта, которого код под этот вопрос
+           -- не подбирал, или инструмент аналитика, которого у коллеги нет.
+           -- Обе цифры — про то, что черновик нельзя отправить как есть,
+           -- и обе видит ЗАКАЗЧИК, если джун не заметит.
+           max_by(CAST(json_extract_scalar(payload, '$.experts_invented') AS integer),
+                  event_ts) AS experts_invented,
+           max_by(CAST(json_extract_scalar(payload, '$.draft_own_tools') AS integer),
+                  event_ts) AS draft_own_tools,
            max_by(CAST(json_extract_scalar(payload, '$.draft_too_long') AS boolean),
                   event_ts) AS draft_too_long,
            max_by(CAST(json_extract_scalar(payload, '$.draft_len') AS integer),
@@ -433,6 +444,8 @@ SELECT
     COALESCE(b.tables_no_meta, 0)                           AS tables_no_meta,
     b.routes,
     COALESCE(b.draft_leaks, false)                          AS draft_leaks,
+    COALESCE(b.experts_invented, 0)                         AS experts_invented,
+    COALESCE(b.draft_own_tools, 0)                          AS draft_own_tools,
     COALESCE(b.draft_too_long, false)                        AS draft_too_long,
     b.draft_len,
     COALESCE(b.confidence_capped, false)                    AS confidence_capped,
@@ -588,6 +601,8 @@ SELECT
     -- не влияют намеренно, но джун правит руками именно их.
     count_if(draft_leaks)                                  AS draft_leaks,
     count_if(draft_too_long)                               AS draft_split,
+    count_if(experts_invented > 0)                         AS experts_invented,
+    count_if(draft_own_tools > 0)                          AS own_tools_offered,
 
     -- Насколько живёт то, что добавлено последним: значения фильтров
     -- из данных и маршруты к экспертам. Ноль здесь значит «ни разу
