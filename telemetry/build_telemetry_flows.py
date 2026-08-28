@@ -69,9 +69,12 @@
 Проверяется: node test_telemetry.mjs
 """
 
+import ast
 import copy
 import json
 import os
+import pathlib
+import re
 import sys
 
 DST_INGEST = "Telemetry Ingest.json"
@@ -852,7 +855,18 @@ try {
   if (got && got.id) post = got;
 } catch (e) { /* ветка не выполнялась */ }
 
-return [{ json: { event: ev.event, data: ev.data, post: Object.keys(post).length ? post : ev.post } }];
+// event_inferred ЕДЕТ ДАЛЬШЕ. Guard его вычислил, Normalize его читает
+// (`src.event_inferred`), а этот узел стоит между ними — и, теряя признак,
+// делал его ложным ВСЕГДА: реакции идут только этим путём, а больше он
+// нигде и не нужен. Тогда снятие реакции, приехавшее как добавление,
+// в логе неотличимо от настоящего добавления, и снятое «взято в работу»
+// осталось бы в метриках навсегда.
+return [{ json: {
+  event: ev.event,
+  data: ev.data,
+  event_inferred: ev.event_inferred === true,
+  post: Object.keys(post).length ? post : ev.post,
+} }];
 """})
 
     nodes = [
@@ -915,8 +929,63 @@ if (!out.length) {
   out.push({ json: { event: 'backfill_empty', post: {},
     data: { note: 'ответ API не содержит постов — проверить channel_id и период' } } });
 }
+
+// СТРАНИЦА ЗАКОНЧИЛАСЬ, А ИСТОРИЯ — НЕТ. Запрос один, без пагинации:
+// GET /channels/{id}/posts отдаёт per_page постов и ссылки на соседние
+// страницы, а мы берём первую. Молча это читается как «в канале было
+// 200 постов», то есть засев обрывается на новейших, а метрики за первые
+// месяцы просто не появляются — и по виду прогона он успешный.
+//
+// Признаков исчерпания два, и берём оба: пришло ровно per_page постов
+// (ответ упёрся в лимит) либо API назвал следующую страницу. Событие
+// пишется в лог, а не только в вывод ноды: прогон ручной и разовый,
+// и через месяц вспомнить, докручивали ли страницы, будет неоткуда.
+// Лимит подставляется сборщиком из той же константы, что уезжает в ноду
+// «Period»: две копии числа разъехались бы молча, и признак исчерпания
+// перестал бы срабатывать ровно тогда, когда лимит подняли.
+const perPage = __PER_PAGE__;
+const gotAll = perPage > 0 && posts.length >= perPage;
+const moreLink = Boolean(res.next_post_id || res.has_next);
+if (gotAll || moreLink) {
+  out.push({ json: { event: 'backfill_truncated', post: {}, data: {
+    note: `получено ${posts.length} постов при лимите ${perPage} — это ПЕРВАЯ `
+      + 'страница, история засеяна НЕ целиком. Продолжить: выставить в ноде '
+      + '«Period» поле before на id самого старого поста этой страницы '
+      + 'и запустить ещё раз, пока это событие не перестанет появляться.',
+    oldest_post_id: res.order && res.order.length
+      ? res.order[res.order.length - 1]
+      : (posts.length ? posts[posts.length - 1].id : ''),
+    next_post_id: res.next_post_id || '',
+  } } });
+}
 return out;
 """
+
+
+# Service Account для T-Tracker — ЧИТАЕТСЯ ИЗ СБОРЩИКА БОТА, а не дублируется.
+#
+# 2026-08-27 один устаревший id в забытом файле разъезжался сразу по трём
+# воркфлоу и уронил бы разом каталог и чтение статей из GitLab по 401.
+# Бот тогда перевели на «…Service Account Support», а телеметрия осталась
+# на «…account 2» — то есть ровно та же копия, только в другом репозитории
+# каталога. Копия разъезжается молча, поэтому здесь её больше нет.
+def _dp_cred():
+    src = pathlib.Path(__file__).resolve().parent.parent / "bot" / "build_dd_flow.py"
+    text = src.read_text(encoding="utf-8")
+    m = re.search(r'^DP_CRED = (\{.*?\}\})\n\n', text, re.S | re.M)
+    if not m:
+        raise SystemExit(
+            f"не нашёл DP_CRED в {src}: credential нельзя вписать сюда копией — "
+            "разъедется молча, как это уже было 2026-08-27")
+    return ast.literal_eval(m.group(1))
+
+
+DP_CRED = _dp_cred()
+
+
+# Постов на страницу в GET /channels/{id}/posts. Одно число на два места:
+# и в ноду «Period», и в признак исчерпания страницы внутри «Explode posts».
+PER_PAGE = 200
 
 
 def build_backfill():
@@ -929,7 +998,15 @@ def build_backfill():
                 # since в мс. 0 = с начала канала: для засева это и нужно,
                 # а ограничить период можно, вписав таймстемп.
                 {"id": "since", "name": "since", "type": "number", "value": 0},
-                {"id": "per", "name": "per_page", "type": "number", "value": 200},
+                {"id": "per", "name": "per_page", "type": "number", "value": PER_PAGE},
+                # Пагинация вручную: запрос один, и когда придёт ровно
+                # per_page постов, «Explode posts» пишет в лог событие
+                # backfill_truncated с id самого старого поста страницы.
+                # Вписать его сюда и запустить снова — до тех пор, пока
+                # событие не перестанет появляться. Автоцикл в HTTP-ноде
+                # тут был бы рукописным, а разовый ручной прогон и так
+                # смотрят глазами.
+                {"id": "before", "name": "before", "type": "string", "value": ""},
             ]},
             "options": {},
         }),
@@ -946,6 +1023,7 @@ def build_backfill():
             "queryParameters": {"parameters": [
                 {"name": "since", "value": "={{ $json.since }}"},
                 {"name": "per_page", "value": "={{ $json.per_page }}"},
+                {"name": "before", "value": "={{ $json.before }}"},
             ]},
             # followRedirects: false — то же решение, что на нодах DD:
             # редирект на страницу логина иначе приходит как 200 с HTML,
@@ -953,7 +1031,7 @@ def build_backfill():
             "options": {"redirect": {"redirect": {"followRedirects": False}}},
         }, credentials=copy.deepcopy(MM_CRED)),
         node("Explode posts", "n8n-nodes-base.code", 2, [460, 300],
-             {"jsCode": BACKFILL_JS}),
+             {"jsCode": BACKFILL_JS.replace("__PER_PAGE__", str(PER_PAGE))}),
         call_ingest([700, 300]),
     ]
     return wf("Telemetry · Backfill", nodes,
@@ -1143,17 +1221,32 @@ def build_collector_tracker():
         node("Every 15 min", "n8n-nodes-base.scheduleTrigger", 1.2, [-260, 300], {
             "rule": {"interval": [{"field": "minutes", "minutesInterval": 15}]},
         }),
-        # Лог читается целиком: событий мало (тысячи в год), а инкрементальное
-        # чтение потребовало бы хранить курсор — лишнее состояние там, где
-        # можно обойтись без него.
+        # Лог читается ЦЕЛИКОМ, без фильтра по source, и это не небрежность.
+        #
+        # Раньше здесь стояло `source eq "channel"`. Задачи (`task_linked`)
+        # приходят из канала и фильтр проходили, а статусы
+        # (`task_status_changed`) пишутся с `source: 'tracker'` — и не
+        # проходили НИКОГДА. Следствий два, оба тихие и оба хуже, чем
+        # «одна ветка не выполняется»:
+        #   — `closed` всегда пуст, поэтому закрытые задачи опрашиваются
+        #     вечно, список растёт и упирается в потолок 200;
+        #   — `known` всегда пуст, поэтому «Diff statuses» видит КАЖДЫЙ
+        #     статус как изменившийся и пишет событие на задачу каждые
+        #     15 минут. Ровно то, что комментарий в самой ноде обещает
+        #     не допускать: «событие только на ИЗМЕНЕНИЕ статуса, иначе
+        #     каждый прогон крона добавлял бы строку на задачу».
+        # Отбор по типу события делает «Collect task keys» — он и так
+        # переключается по `event_type`, и там ошибиться нечем.
+        #
+        # returnAll обязателен: без него Data Tables молча вернёт первые N
+        # строк, а «первые N» лога — это самые старые события, где ни одной
+        # актуальной задачи может не быть вовсе. У двух других читателей
+        # той же таблицы (Telemetry Report, Telemetry Flush) он задан явно
+        # и по той же причине.
         node("Read log", "n8n-nodes-base.dataTable", 1, [-20, 300], {
             "operation": "get",
             "dataTableId": {"__rl": True, "value": TABLE, "mode": "name"},
-            "filters": {"conditions": [{
-                "keyName": "source",
-                "condition": "eq",
-                "keyValue": "channel",
-            }]},
+            "returnAll": True,
             "options": {},
         }),
         node("Collect task keys", "n8n-nodes-base.code", 2, [220, 300],
@@ -1189,9 +1282,7 @@ def build_collector_tracker():
                         "'status_update_at','type','space_key'] }) }}",
             "options": {"redirect": {"redirect": {"followRedirects": False}},
                         "response": {"response": {"neverError": True}}},
-        }, credentials={"devplatformApi": {
-            "id": "RBgLA1Lw8UGBMCU3",
-            "name": "Spirit (Devplatform) Service Account account 2"}}),
+        }, credentials=copy.deepcopy(DP_CRED)),
         node("Diff statuses", "n8n-nodes-base.code", 2, [940, 240],
              {"jsCode": TRACKER_DIFF_JS}),
         call_ingest([1180, 240]),

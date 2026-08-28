@@ -29,15 +29,7 @@
           "value": "support_event",
           "mode": "name"
         },
-        "filters": {
-          "conditions": [
-            {
-              "keyName": "source",
-              "condition": "eq",
-              "keyValue": "channel"
-            }
-          ]
-        },
+        "returnAll": true,
         "options": {}
       },
       "type": "n8n-nodes-base.dataTable",
@@ -128,8 +120,8 @@
       "name": "Search tasks",
       "credentials": {
         "devplatformApi": {
-          "id": "RBgLA1Lw8UGBMCU3",
-          "name": "Spirit (Devplatform) Service Account account 2"
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
         }
       }
     },

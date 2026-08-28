@@ -1645,6 +1645,134 @@ line('37. Витрина знает про КАЖДОЕ поле ответа б
   }
 }
 
+// ===================================================================== 38
+line('38. Витрина сравнивает уверенность с теми значениями, что пишет ядро');
+{
+  // Ядро приводит уверенность к английским ключам (high / medium / none /
+  // unknown), а по-русски она печатается только в сообщении джуну. Витрина
+  // сравнивала со словом «высокая» — совпадение невозможно НИКОГДА, то есть
+  // калибровка, названная в проекте самой ценной метрикой, считала ноль
+  // и выглядела при этом рабочей: колонка есть, запрос зелёный, в ней 0.
+  //
+  // Отказ того же класса, что ловят тесты 36 и 37, только по ЗНАЧЕНИЯМ,
+  // а не по именам полей. Поэтому список берётся из сборщика ядра.
+  const SQL = fs.readFileSync('support_request.sql', 'utf8');
+  const CORE = fs.readFileSync('../bot/build_time_flows.py', 'utf8');
+  const at = CORE.indexOf('out.confidence_claimed =');
+  check('присваивание уверенности найдено в сборщике', at !== -1);
+  // Берём ВСЕ строковые литералы выражения до точки с запятой, а не только
+  // те, что стоят перед двоеточием: последнее значение — фолбэк 'unknown',
+  // и он записан без двоеточия. Проверка, которая его теряет, разрешила бы
+  // витрине сравнивать с чем угодно и назвать это «ключом ядра».
+  const expr = CORE.slice(at, at + CORE.slice(at).indexOf(';'));
+  const keys = [...new Set([...expr.matchAll(/'([a-z]+)'/g)].map((m) => m[1]))];
+  check(`ключей уверенности (${keys.join(', ')})`, keys.length >= 3);
+  // Каждое значение, с которым витрина сравнивает уверенность, обязано быть
+  // ключом из сборщика — иначе счётчик тихо считает ноль.
+  const compared = [...new Set(
+    [...SQL.matchAll(/confidence_(?:claimed|key)\s*=\s*'([^']+)'/g)].map((m) => m[1]),
+  )];
+  check(`витрина сравнивает со значениями (${compared.join(', ')})`, compared.length > 0);
+  for (const v of compared) {
+    check(`значение '${v}' есть среди ключей ядра`, keys.includes(v));
+  }
+}
+
+// ===================================================================== 39
+line('39. Засев истории: обрыв на первой странице НАЗЫВАЕТСЯ');
+{
+  // GET /channels/{id}/posts отдаёт per_page постов и ссылки на соседние
+  // страницы, а Backfill делает ОДИН запрос. Молча это читается как
+  // «в канале было 200 постов»: засев обрывается на новейших, метрик
+  // за ранние месяцы просто нет, а прогон по виду успешный.
+  const bfFlow = JSON.parse(fs.readFileSync('Telemetry Backfill.json', 'utf8'));
+  const exNode = bfFlow.nodes.find((n) => n.name === 'Explode posts');
+  const explode = (input) =>
+    new Function('$json', exNode.parameters.jsCode)(input).map((x) => x.json);
+
+  const full = {};
+  const order = [];
+  for (let i = 0; i < 200; i++) {
+    const id = `p${i}`;
+    full[id] = { id, message: 'x', create_at: 1000 + i, user_id: 'u' };
+    order.push(id);
+  }
+  const truncated = explode({ posts: full, order });
+  const marks = truncated.filter((x) => x.event === 'backfill_truncated');
+  check('обрыв страницы назван событием', marks.length === 1);
+  check('и назван самый старый пост страницы',
+    marks[0] && marks[0].data.oldest_post_id === 'p199');
+  check('посты при этом не потеряны',
+    truncated.filter((x) => x.event === 'posted').length === 200);
+
+  // Неполная страница — история кончилась, событию взяться неоткуда.
+  const short = {};
+  for (let i = 0; i < 5; i++) short[`q${i}`] = { id: `q${i}`, message: 'x', create_at: 1 };
+  const done = explode({ posts: short, order: Object.keys(short) });
+  check('на неполной странице тревоги нет',
+    !done.some((x) => x.event === 'backfill_truncated'));
+
+  // Ссылка на следующую страницу — второй признак, независимый от лимита.
+  const linked = explode({ posts: short, order: Object.keys(short), next_post_id: 'q9' });
+  check('ссылка на следующую страницу тоже считается обрывом',
+    linked.some((x) => x.event === 'backfill_truncated'));
+
+  // Лимит в ноде и лимит в коде — одно число: две копии разъехались бы
+  // молча, и признак перестал бы срабатывать ровно тогда, когда лимит подняли.
+  const period = bfFlow.nodes.find((n) => n.name === 'Period');
+  const perPage = period.parameters.assignments.assignments
+    .find((a) => a.name === 'per_page').value;
+  const code = exNode.parameters.jsCode;
+  check(`лимит ноды (${perPage}) вписан в код`,
+    new RegExp(`perPage = ${perPage};`).test(code));
+  // И поле для докрутки страницы должно реально уходить в запрос.
+  const get = bfFlow.nodes.find((n) => n.name === 'Get posts');
+  check('поле before уходит в запрос',
+    get.parameters.queryParameters.parameters.some((q) => q.name === 'before'));
+}
+
+// ===================================================================== 40
+line('40. Коллектор трекера читает СВОИ же события, а не только чужие');
+{
+  // `task_linked` пишется из канала (source: 'channel'), а
+  // `task_status_changed` — из самого трекера (source: 'tracker'). Фильтр
+  // `source eq "channel"` пропускал первые и отсекал вторые, то есть узел
+  // не видел НИ ОДНОГО уже записанного статуса. Следствий два, оба тихие:
+  //   — закрытые задачи опрашивались вечно и упирались в потолок 200;
+  //   — «Diff statuses» видел каждый статус как изменившийся и писал
+  //     событие на задачу каждые 15 минут. Ровно то, что комментарий
+  //     в самой ноде обещает не допускать.
+  const tr = JSON.parse(fs.readFileSync('Telemetry Collector Tracker.json', 'utf8'));
+  const read = tr.nodes.find((n) => n.name === 'Read log');
+  const conds = ((read.parameters.filters || {}).conditions) || [];
+  check('лог не фильтруется по source',
+    !conds.some((c) => c.keyName === 'source'));
+  // Без returnAll Data Tables молча вернёт первые N строк — а «первые N»
+  // лога это самые старые события, где актуальных задач может не быть вовсе.
+  check('лог читается целиком', read.parameters.returnAll === true);
+
+  // Прогон самой ноды: статус из лога должен доехать до плана, иначе
+  // «Diff statuses» посчитает его изменившимся.
+  const keys = tr.nodes.find((n) => n.name === 'Collect task keys');
+  const rows = [
+    { event_type: 'task_linked', thread_id: 't1',
+      payload: JSON.stringify({ task_key: 'CROSS-1' }), source: 'channel' },
+    { event_type: 'task_linked', thread_id: 't2',
+      payload: JSON.stringify({ task_key: 'CROSS-2' }), source: 'channel' },
+    { event_type: 'task_status_changed', thread_id: 't1',
+      payload: JSON.stringify({ task_key: 'CROSS-1', status: 'В работе' }),
+      source: 'tracker' },
+    { event_type: 'task_status_changed', thread_id: 't2',
+      payload: JSON.stringify({ task_key: 'CROSS-2', status: 'Done', is_final: true }),
+      source: 'tracker' },
+  ];
+  const plan = new Function('$input',
+    keys.parameters.jsCode)({ all: () => rows.map((json) => ({ json })) })[0].json;
+  check('известный статус доехал до плана', plan.known['CROSS-1'] === 'В работе');
+  check('закрытая задача больше не опрашивается', !plan.keys.includes('CROSS-2'));
+  check('открытая опрашивается', plan.keys.includes('CROSS-1'));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

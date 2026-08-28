@@ -519,6 +519,14 @@ SELECT
     count_if(ev.event_type = 'unsupported_event'
              AND json_extract_scalar(ev.payload, '$.event') = 'backfill_empty')
                                                                     AS backfill_empty_runs,
+    -- Засев оборвался на первой странице: GET /channels/{id}/posts отдаёт
+    -- per_page постов и ссылку на следующую страницу, а Backfill берёт одну.
+    -- Ненулевое значение здесь значит, что метрик за ранний период просто
+    -- НЕТ — и это неотличимо от «тогда обращений не было», если не считать
+    -- отдельно. Лечится повторными прогонами с полем `before`.
+    count_if(ev.event_type = 'unsupported_event'
+             AND json_extract_scalar(ev.payload, '$.event') = 'backfill_truncated')
+                                                                    AS backfill_truncated_runs,
     count_if(ev.event_type = 'skipped')                             AS skipped_events,
     count_if(ev.event_type = 'request_created' AND ev.kind = 'unknown') AS topic_unrecognized,
     count_if(ev.event_type = 'request_created'
@@ -563,9 +571,17 @@ SELECT
 
     -- Калибровка — самая ценная метрика: врущий confidence опаснее низкого
     -- покрытия. Считается по паре «заявлено моделью / осталось после кода».
-    count_if(confidence_claimed = 'высокая')               AS claimed_high,
-    count_if(confidence_claimed = 'высокая'
+    -- КЛЮЧИ АНГЛИЙСКИЕ: ядро приводит уверенность к high / medium / none
+    -- (`build_time_flows.py`, `out.confidence_claimed`), а по-русски она
+    -- печатается только в сообщении джуну. Сравнение со словом «высокая»
+    -- не совпадало НИКОГДА — то есть самая ценная метрика проекта считала
+    -- ноль и выглядела при этом рабочей: колонка есть, запрос зелёный,
+    -- в ней просто всегда 0. Тест 38 держит эти значения по сборщику.
+    count_if(confidence_claimed = 'high')                  AS claimed_high,
+    count_if(confidence_claimed = 'high'
              AND draft_useful = false)                     AS claimed_high_but_useless,
+    count_if(confidence_key = 'none')                      AS no_answer,
+    count_if(confidence_claimed = 'unknown')               AS format_broken,
     count_if(confidence_downgraded)                        AS downgraded_by_code,
     count_if(parse_error IS NOT NULL)                      AS parse_errors,
 
