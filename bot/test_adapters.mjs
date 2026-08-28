@@ -1963,5 +1963,67 @@ line('43. \\w и \\b рядом с кириллицей — запрещены �
   check(`Code-ноды просканированы (${scanned})`, scanned > 15);
 }
 
+// ===================================================================== 44
+line('44. ЛИЧКА: темы нет, потому что нет формы — и режим по ней не включается');
+{
+  // topic_kind по смыслу — «что человек выбрал в форме», и Plan принимает
+  // его как ФАКТ: по нему включается режим выгрузки, и признак «просят
+  // помочь с запросом» его намеренно НЕ перебивает.
+  //
+  // В личке PREFIXES пуст, формы нет вовсе, и туда уезжала ВСЯ первая
+  // строка свободного текста. Следствий два, оба тихие: вопрос со словом
+  // «выгрузка» включал полный режим (+две статьи, +4500 токенов правил,
+  // требование ТЗ), а просьбу написать запрос погасить было нечем —
+  // догадкой такой режим не считался. То есть живой отказ 2026-08-27
+  // в личке оставался невылеченным.
+  const dmFlow = JSON.parse(fs.readFileSync('Adapter DM.json', 'utf8'));
+  const gDM = dmFlow.nodes.find((n) => n.name === 'Guard DM').parameters.jsCode;
+  const runDM = (msg) => new Function('$json', gDM)({
+    event: 'posted',
+    data: { post: JSON.stringify({ id: 'p1', root_id: '', message: msg,
+                                   channel_type: 'D', user_id: 'u1' }) },
+  })[0].json;
+
+  const free = runDM('Подскажи, нужно ли заводить запрос на выгрузку, если разово?');
+  check('свободный текст темой не становится', free.topic_kind === '');
+  check('обращение при этом проходит', free.pass === true);
+  check('и вопрос не потерян', /заводить запрос/.test(free.question));
+
+  // Шапку могут вставить в личку целиком — тогда её восстановит Plan
+  // из первой строки самого обращения, и это проверяется ниже прогоном.
+  const pasted = runDM('Cross Data | Выгрузка данных от пользователя @Anna\nнужны логины');
+  check('автор из вставленной шапки разобран', pasted.form_author === 'Anna');
+
+  // В КАНАЛЕ тема по-прежнему берётся из формы: гейт на префикс, а не отмена.
+  const gCH = channel.nodes.find((n) => n.name === 'Guard channel').parameters.jsCode;
+  const ch = new Function('$json', gCH)({
+    event: 'posted',
+    data: { post: JSON.stringify({ id: 'p1', root_id: '',
+      message: 'Cross Data | Выгрузка данных от пользователя @Anna\nнужны логины',
+      channel_id: 'piyu3cs9xpdwie7nwxje5cwm8r', user_id: 'u1' }) },
+  })[0].json;
+  check('в канале тема из формы осталась', ch.topic_kind === 'Выгрузка данных');
+
+  // И сквозной прогон: Plan на свободном тексте личку в режим не уводит,
+  // а вставленную шапку — уводит, потому что там тема настоящая.
+  const REG = fs.readFileSync(REGISTRY_AT, 'utf8');
+  const planJs = core.nodes.find((n) => n.name === 'Plan').parameters.jsCode;
+  const runPlanWith = (topic_kind, question) => {
+    const routed = JSON.stringify({ domains: [], articles: [], dd: [], no_question: false });
+    const $ = (n) => ({ first: () => ({ json: {
+      'When called by adapter': { question, mode: 'dm', topic_kind },
+      'Router': { output: routed },
+      'Decode registry': { text: REG, full: REG },
+    }[n] }) });
+    return new Function('$', '$json', planJs)($, { output: routed })[0].json;
+  };
+  const q1 = 'Подскажи, нужно ли заводить запрос на выгрузку, если разово?';
+  check('вопрос про выгрузку режим не включает',
+    runPlanWith(runDM(q1).topic_kind, q1).is_export === false);
+  const q2 = 'Cross Data | Выгрузка данных от пользователя @Anna\nнужны логины';
+  check('вставленная шапка режим включает',
+    runPlanWith(runDM(q2).topic_kind, q2).is_export === true);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

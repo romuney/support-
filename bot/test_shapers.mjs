@@ -703,6 +703,99 @@ line('9б. ОТЧЁТ — витрины-источники приходят и�
     /истёк Service Account/.test(srcFail) && !/не указаны/.test(srcFail));
 }
 
+// ===================================================================== 9в
+line('9в. ОТЧЁТ: владелец и канал поддержки не выбрасываются');
+{
+  const REP = 'urn:dd:reports:reports:report:1728';
+  // Форма подтверждена живым прогоном разведки 2026-08-27: в /attribute
+  // отчёта лежат report_developer, developers_team, data_team,
+  // support_channel. Раньше шейпер печатал только команду и два УГАДАННЫХ
+  // ключа, а владельца и канал отбрасывал молча — при том что по фидбеку
+  // аналитика это два самых частых вопроса канала (11 и 13 обращений из 49).
+  const attrs = { statusCode: 200, body: {
+    report_developer: { type: 'text', data: 'Ivan Petrov' },
+    developers_team: { type: 'text', data: 'CrossData' },
+    support_channel: { type: 'text', data: '~hr_reports_ask' },
+    period: { type: 'text', data: 'ежедневно' },
+    some_other_key: { type: 'text', data: 'x' },
+  } };
+  const md = { statusCode: 200, body: { data: [{ key: 'summary', value: 'Отчёт про людей' }] } };
+  const links = { statusCode: 200, body: { reports: { url: 'https://proteus/x' } } };
+  const out = runReport({ urn: REP }, md, attrs, links);
+
+  checkS('владелец назван', /ВЛАДЕЛЕЦ ОТЧЁТА: Ivan Petrov/.test(out));
+  checkS('команда рядом с владельцем', /команда CrossData/.test(out));
+  // Владельца потому и не дублируют в git: он меняется без нашего ведома.
+  checkS('сказано, что владелец из каталога', /Взято из каталога/.test(out));
+  checkS('канал поддержки назван', /КУДА ПИСАТЬ ПО ОТЧЁТУ: ~hr_reports_ask/.test(out));
+  checkS('и сказано, что канал чужой', /это канал поддержки/.test(out));
+  // Незнакомые ключи не выбрасываются молча: именно так владелец и канал
+  // полгода были невидимы — разведка искала их по угаданному списку слов.
+  checkS('прочие атрибуты названы именами', /ЕЩЁ АТРИБУТЫ В КАРТОЧКЕ.*some_other_key/.test(out));
+
+  // Пустая карточка — лишних заголовков нет.
+  const bare = runReport({ urn: REP }, md, { statusCode: 200, body: {} }, links);
+  checkS('без атрибутов владельца строки нет', !/ВЛАДЕЛЕЦ ОТЧЁТА/.test(bare));
+  checkS('без канала строки нет', !/КУДА ПИСАТЬ ПО ОТЧЁТУ/.test(bare));
+}
+
+// ===================================================================== 11б
+line('11б. НЕПРИШЕДШИЕ КАРТОЧКИ: проверенным считается только полученное');
+{
+  const URN_W = 'urn:dd:tables:greenplum:table:emart.t';
+  const cols = { statusCode: 200, body: { totalCount: 3, data: [
+    { entity: { fqn: 'emart.t.a_col' } },
+    { entity: { fqn: 'emart.t.b_col' } },
+    { entity: { fqn: 'emart.t.c_col' } },
+  ] } };
+  // Карточки запрошены по всем трём полям, но две вернули 500.
+  const cards = [
+    { statusCode: 200, body: { fqn: 'emart.t.a_col', summary: { data: 'Дата приёма' },
+                               attributes: {} } },
+    { statusCode: 500, body: { fqn: 'emart.t.b_col' } },
+    { statusCode: 500, body: { fqn: 'emart.t.c_col' } },
+  ];
+  const pick = { mode: 'by_meaning', total_cols: 3, picked: 3, matched: 0 };
+  const out = runTable({ urn: URN_W, search: 'декрет' },
+    { statusCode: 200, body: {} }, cols, cards, pick);
+
+  // Раньше здесь печаталось «проверены 3 из 3»: details строится из targets
+  // и фильтруется по `d.field || d.failed`, то есть упавшие карточки шли
+  // в зачёт наравне с полученными, и ветка про непроверенные поля была
+  // мёртвой. «Не встретилось» читалось как «такого поля нет», хотя две
+  // трети полей никто не смотрел.
+  checkS('проверенным считается только полученное', /проверены 1 из 3/.test(out));
+  checkS('отказ карточек назван числом', /по 2 каталог не отдал карточку/.test(out));
+  checkS('и сказано, что утверждать об отсутствии нельзя',
+    /сказать НЕЛЬЗЯ|НЕПРОВЕРЕННЫМИ/.test(out));
+  // Отказы по карточкам обязаны быть видны сами по себе: поле, чьё описание
+  // не пришло, выглядело в точности как поле без описания.
+  checkS('поля без описаний перечислены', /ОПИСАНИЯ НЕ ПОЛУЧЕНЫ по 2 полям/.test(out));
+  checkS('и это не выдано за отсутствие описания',
+    /НЕ значит, что описания\s+нет/.test(out.replace(/\n/g, ' ')));
+
+  // Все карточки пришли — лишних строк нет.
+  const okCards = cards.map((c, i) => ({ statusCode: 200,
+    body: { fqn: `emart.t.${['a', 'b', 'c'][i]}_col`, summary: { data: 'x' }, attributes: {} } }));
+  const clean = runTable({ urn: URN_W, search: 'декрет' },
+    { statusCode: 200, body: {} }, cols, okCards, pick);
+  checkS('без отказов лишнего не пишется',
+    /проверены 3 из 3/.test(clean) && !/ОПИСАНИЯ НЕ ПОЛУЧЕНЫ/.test(clean));
+
+  // Карточки прочитаны, но совпадений нет: inventory() больше не утверждает,
+  // что карточки не запрашивались — признак чувствительности у нас на руках.
+  checkS('в by_meaning без совпадений признак не объявлен отсутствующим',
+    !/карточки в этом режиме не запрашивались/.test(clean));
+  checkS('и сводка по чувствительности напечатана',
+    /ЧУВСТВИТЕЛЬНОСТЬ|ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ/.test(clean));
+
+  // А при пустом search карточек правда нет — там формулировка верна.
+  const noCards = runTable({ urn: URN_W, search: '' },
+    { statusCode: 200, body: {} }, cols);
+  checkS('без карточек формулировка прежняя',
+    /карточки в этом режиме не запрашивались/.test(noCards));
+}
+
 // ===================================================================== 12
 line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, а не по вере');
 {
