@@ -51,7 +51,7 @@ Change-таблицы (`management_position_attr_chng`, `legal_position_attr_chn
 
 ## К каким атрибутам применимо
 
-Любой атрибут из `t-emp-structure`: `emp_specialization_desc`, `grade_nm`,
+Любой атрибут из `t-emp-structure`: `emp_specialization_desc`, `grade`,
 `department_nm`, `team_lead_login`, `position_nm`, `management_position_nm`,
 `active_type_nm`, `lvl{N}_mapped_management_unit_nm`.
 

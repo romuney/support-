@@ -86,7 +86,7 @@ Change-таблицы для стажа не используются.
 {{ render(attr_column='emp_specialization_desc', attr_value='Бизнес-аналитик BI') }}
 
 -- стаж в грейде
-{{ render(attr_column='grade_nm', attr_value='Senior') }}
+{{ render(attr_column='grade', attr_value='Senior') }}
 
 -- стаж в департаменте, включая ушедших из него, но остающихся в компании
 {{ render(attr_column='department_nm', attr_value='HR-аналитика', only_current=false) }}
