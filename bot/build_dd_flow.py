@@ -757,6 +757,13 @@ function valuesBlock() {
   let unknown = 0;
   for (const it of res) {
     if (!it || typeof it !== 'object') { unknown++; continue; }
+    // Пустой элемент — это «строк не вернулось». Именно так выглядит ответ
+    // при alwaysOutputData, который стоит на ноде обязательно (иначе ноль
+    // строк останавливает весь воркфлоу). Считать его непонятной формой
+    // значило бы на каждом промахе фильтра писать «разобрать не удалось»
+    // вместо «таких значений нет» — две разные вещи, которые чинятся
+    // в разных местах.
+    if (Object.keys(it).length === 0) continue;
     if (it.val !== undefined && it.val !== null) { rows.push(it); continue; }
     let unwrapped = false;
     for (const k of ['data', 'rows', 'result', 'results', 'response', 'body']) {
@@ -1111,7 +1118,25 @@ const inp = $('When called by agent').first().json;
 const words = needlesOf(inp.values);
 
 // Имена, по которым значения не тянем никогда, даже если признак пуст.
-const PII_RE = /(^|_)(full|fio|name|nm|phone|tel|email|mail|birth|passport|inn|snils|addr)($|_)/i;
+// ПЕРСОНАЛЬНОЕ — ЭТО ПОЛЕ ПРО ЧЕЛОВЕКА, А НЕ ЛЮБОЕ ПОЛЕ С `_nm`.
+//
+// Здесь стояло `nm|name` в общем списке, и под фильтр попадало КАЖДОЕ поле
+// с суффиксом `_nm` — то есть ровно те, ради которых ветка значений
+// и заведена: в этом проекте `_nm` по соглашению значит «название чего-то»
+// (`*_rk` против `*_nm`), а не «имя человека». Живой прогон 2026-08-28:
+// на вопросе про юнит Human Capital Origination поле `legal_unit_nm`
+// было выброшено как «похоже на ПДн», а запрос ушёл по кодам
+// `legal_unit_type_cd` — и, разумеется, ничего не нашёл.
+//
+// Поэтому `nm`/`name` сами по себе персональными не считаются: только рядом
+// со словом, которое называет ЧЕЛОВЕКА (`full_nm`, `employee_name`), либо
+// в списке заведомо личных полей — контакты, документы, дата рождения,
+// адрес, логин.
+const PII_RE = new RegExp([
+  '(^|_)(fio|phone|tel|mobile|email|mail|birth|passport|inn|snils|addr|address|login)($|_)',
+  '(^|_)(full|first|last|middle|patronymic|short)_(nm|name)($|_)',
+  '(^|_)(emp|employee|person|people|user|manager|head|lead|hrbp|client|candidate)_(nm|name)($|_)',
+].join('|'), 'i');
 
 const picked = $('Pick columns').all().map((i) => i.json).filter((x) => x.field);
 const summaries = $('dd_column_summary').all().map((i) => i.json);
@@ -1174,9 +1199,21 @@ const table = dot === -1 ? '' : `prod_v_${fqn.slice(0, dot)}.${fqn.slice(dot + 1
 // смотрим у названий, а не у ключей.
 const KEYLIKE_RE = /(^|_)(rk|dk|sk|id|flg|dt|num|no)$/i;
 
+// НАЗВАНИЯ ИДУТ ВПЕРЁД КОДОВ. Потолок в четыре поля выбирает из списка
+// совпавших, и порядок здесь решает: живой прогон 2026-08-28 отдал места
+// `legal_unit_type_cd` и `emp_specialization_oper_code`, а `emp_stream_desc`
+// до запроса не доехал. Заказчик называет «Human Capital Origination»,
+// а не код типа юнита, поэтому поля с человекочитаемым суффиксом
+// (`_nm`, `_desc`, `_txt`) проверяются первыми. Это порядок, а не отсев:
+// коды остаются кандидатами, просто после названий.
+const NAMELIKE_RE = /(^|_)(nm|name|desc|descr|txt|title)$/i;
+const ranked = cand.slice().sort(
+  (a, b) => (NAMELIKE_RE.test(b.field) ? 1 : 0) - (NAMELIKE_RE.test(a.field) ? 1 : 0),
+);
+
 const skipped = [];
 const fields = [];
-cand.forEach((d) => {
+ranked.forEach((d) => {
   if (fields.length >= MAX_VALUE_FIELDS) return;
   const f = d.field;
   if (!/^[a-z_][a-z0-9_]*$/i.test(f)) return;      // в SQL идёт только имя-идентификатор
@@ -1189,7 +1226,7 @@ cand.forEach((d) => {
 // Потолок MAX_VALUE_FIELDS — про стоимость запроса, и отброшенное по нему
 // обязано называться: молча урезанный список полей читается как «значений
 // в остальных полях нет», хотя их просто не спрашивали.
-const overCap = cand.length - fields.length - skipped.length;
+const overCap = ranked.length - fields.length - skipped.length;
 if (overCap > 0) {
   skipped.push(`ещё ${overCap} полей (потолок ${MAX_VALUE_FIELDS} на один запрос)`);
 }
@@ -1521,6 +1558,16 @@ need_values = {
 # до шейпера и печатается — «витрина до Trino не доехала» обязано отличаться
 # от «таких значений нет», иначе автор пойдёт чинить не то.
 dd_values = {
+    # alwaysOutputData ОБЯЗАТЕЛЕН, и это не настройка удобства.
+    #
+    # n8n останавливает выполнение, если нода вернула НОЛЬ элементов, —
+    # а ноль строк здесь нормальный исход: значений под слова заказчика
+    # в данных может не быть. Без этого флага такой запрос убивал ВЕСЬ
+    # «DD Lookup»: «Shape table meta» не выполнялся вовсе, и бот оставался
+    # без инвентаря полей — при том, что каталог отработал полностью.
+    # То есть ветка значений, задуманная как дополнение, отбирала основной
+    # ответ. Живой прогон 2026-08-28: «No output data returned».
+    "alwaysOutputData": True,
     "parameters": {"query": "={{ $json.values_sql }}", **copy.deepcopy(_TRINO["options"])},
     "type": _TRINO["type"],
     "typeVersion": _TRINO["typeVersion"],

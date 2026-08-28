@@ -961,6 +961,50 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     /не годится для поиска/.test(allKeys.values_reason) &&
     !/чувствительн/.test(allKeys.values_reason));
 
+  // `_nm` — ЭТО НАЗВАНИЕ ЧЕГО-ТО, А НЕ ИМЯ ЧЕЛОВЕКА.
+  //
+  // Живой прогон 2026-08-28, вопрос про юнит Human Capital Origination:
+  // `legal_unit_nm` был выброшен как «похоже на ПДн», потому что в списке
+  // персональных стояло голое `nm`. Под фильтр попадало КАЖДОЕ поле
+  // с этим суффиксом — то есть ровно те, ради которых ветка и заведена:
+  // в проекте `_nm` по соглашению значит «название», `*_rk` против `*_nm`.
+  // Запрос ушёл по кодам и, разумеется, ничего не нашёл.
+  const named = runValuesSql({ urn: URN_T, values: 'origination' },
+    { statusCode: 200, body: { data: [
+      { entity: { fqn: 'emart.t.legal_unit_nm' } },
+      { entity: { fqn: 'emart.t.position_nm' } },
+      { entity: { fqn: 'emart.t.full_nm' } },
+      { entity: { fqn: 'emart.t.ad_login' } },
+      { entity: { fqn: 'emart.t.contact_main_phone_no' } },
+    ] } },
+    [{ field: 'legal_unit_nm' }, { field: 'position_nm' }, { field: 'full_nm' },
+     { field: 'ad_login' }, { field: 'contact_main_phone_no' }],
+    [{ body: {} }, { body: {} }, { body: {} }, { body: {} }, { body: {} }]);
+  checkS('название юнита не считается ПДн',
+    named.values_fields.includes('legal_unit_nm'));
+  checkS('название должности тоже', named.values_fields.includes('position_nm'));
+  checkS('а вот ФИО — считается', !named.values_fields.includes('full_nm'));
+  checkS('и логин', !named.values_fields.includes('ad_login'));
+  checkS('и телефон', !named.values_fields.includes('contact_main_phone_no'));
+
+  // НАЗВАНИЯ ВПЕРЁД КОДОВ: потолок в четыре поля выбирает из совпавших,
+  // и порядок решает. В том же прогоне места заняли `legal_unit_type_cd`
+  // и `emp_specialization_oper_code`, а `emp_stream_desc` до запроса
+  // не доехал — заказчик же называет не код типа юнита.
+  const live = ['legal_unit_rk', 'legal_unit_nm', 'legal_unit_type_cd',
+                'legal_unit_type_desc', 'emp_specialization_desc',
+                'emp_specialization_oper_code', 'emp_stream_desc'];
+  const ranked = runValuesSql({ urn: URN_T, values: 'human capital origination' },
+    { statusCode: 200, body: { data: live.map((x) => ({ entity: { fqn: `emart.t.${x}` } })) } },
+    live.map((field) => ({ field })), live.map(() => ({ body: {} })));
+  checkS('название юнита попало в запрос',
+    ranked.values_fields.includes('legal_unit_nm'));
+  checkS('стрим тоже попал', ranked.values_fields.includes('emp_stream_desc'));
+  checkS('код типа юнита вытеснен',
+    !ranked.values_fields.includes('legal_unit_type_cd'));
+  checkS('операционный код вытеснен',
+    !ranked.values_fields.includes('emp_specialization_oper_code'));
+
   // Слов не задали — запроса нет вовсе: тянуть значения «на всякий случай»
   // значит платить сканом витрины на каждой выгрузке.
   const noWords = runValuesSql({ urn: URN_T, values: '' }, colsWithSlice, picked, cardsOpen);
@@ -1027,6 +1071,14 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
   // Пустая обёртка — это честное «строк нет», а не сбой разбора.
   const emptyWrap = shape(okPlan, [{ data: [] }]);
   checkS('пустая обёртка — это отсутствие значений', /НЕ НАЙДЕНО/.test(emptyWrap));
+
+  // ПУСТОЙ ЭЛЕМЕНТ — тоже «строк нет». Именно так выглядит ответ ноды
+  // при alwaysOutputData, который на ней стоит обязательно: без него ноль
+  // строк ОСТАНАВЛИВАЕТ весь воркфлоу, и «Shape table meta» не выполняется
+  // вовсе — бот остаётся без инвентаря, хотя каталог отработал полностью.
+  const emptyItem = shape(okPlan, [{}]);
+  checkS('пустой элемент — это отсутствие значений',
+    /НЕ НАЙДЕНО/.test(emptyItem) && !/разобрать его не удалось/.test(emptyItem));
 
   // Список упёрся в потолок — обрезка называется, иначе «других значений
   // нет» становится утверждением о факте, которого никто не проверял.
