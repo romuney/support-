@@ -329,6 +329,12 @@ bot AS (
                   event_ts) AS check_rows,
            max_by(json_extract_scalar(payload, '$.check_failed'),
                   event_ts) AS check_failed,
+           -- Дословно ли подтвердилось значение. Отдельно от check_rows:
+           -- «данные ответили» и «ответ был тот самый» — разные вещи,
+           -- и доля дословных подтверждений показывает, насколько автор
+           -- угадывает написание с первого раза.
+           max_by(CAST(json_extract_scalar(payload, '$.check_exact') AS integer),
+                  event_ts) AS check_exact,
            -- Переписал ли автор черновик по реальным значениям. Доля правок
            -- от числа проверок — метрика того, стоит ли второй проход своих
            -- токенов: правок нет вовсе значит, что данные ничего не меняли.
@@ -483,6 +489,7 @@ SELECT
     COALESCE(b.check_asked, 0)                              AS check_asked,
     COALESCE(b.check_skipped, 0)                            AS check_skipped,
     COALESCE(b.check_rows, 0)                               AS check_rows,
+    COALESCE(b.check_exact, 0)                              AS check_exact,
     b.check_failed                                          AS check_failed,
     COALESCE(b.revised, false)                              AS revised,
     COALESCE(b.articles_invented, 0)                        AS articles_invented,
@@ -690,6 +697,7 @@ SELECT
     -- отказал» и «проверили, и черновик переписан» чинятся в разных местах.
     -- Слитые в одну колонку, они отправляют чинить не то.
     count_if(check_asked > 0)                              AS check_requested,
+    count_if(check_exact > 0)                              AS check_exact_hit,
     count_if(check_failed IS NOT NULL AND check_failed <> '') AS check_failed,
     count_if(revised)                                      AS draft_revised,
     count_if(routes IS NOT NULL AND routes <> '[]')        AS expert_suggested,

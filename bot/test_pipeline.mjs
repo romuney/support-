@@ -1488,7 +1488,7 @@ line('32. ПРОВЕРКА ЗНАЧЕНИЙ ПОСЛЕ АВТОРА: сборк�
   // искомое — иначе «таких значений нет» стало бы утверждением о факте,
   // которого никто не проверял.
   check('совпавшее поднято сортировкой раньше потолка',
-    two.every((i) => /ORDER BY matched DESC[\s\S]*LIMIT/.test(i.check_sql)));
+    two.every((i) => /ORDER BY exact_hit DESC, matched DESC[\s\S]*LIMIT/.test(i.check_sql)));
 
   // Пятый случай литерального \n вместо переноса строки был именно в SQL.
   check('в SQL настоящие переносы, а не литерал',
@@ -1551,10 +1551,10 @@ line('33. ПРОВЕРКА ЗНАЧЕНИЙ: пять исходов звуча�
 
   // 1. Совпало: значения заказчика есть в данных.
   const hit = runRes([
-    { fld: 'emp_stream_desc', val: 'Data', cnt: 120, matched: true },
+    { fld: 'emp_stream_desc', val: 'Data', cnt: 120, exact_hit: true, matched: true },
     { fld: 'emp_stream_desc', val: 'Retail', cnt: 90, matched: false },
   ]);
-  check('совпавшее названо отдельно', /совпало со словом заказчика/.test(hit.check_block));
+  check('совпавшее названо отдельно', /ТОЧНОЕ СОВПАДЕНИЕ/.test(hit.check_block));
   check('и значение дословно', hit.check_block.includes('«Data»'));
   check('прочие подписаны иначе', /прочие значения поля/.test(hit.check_block));
   check('строки посчитаны', hit.check_rows === 2);
@@ -1575,7 +1575,9 @@ line('33. ПРОВЕРКА ЗНАЧЕНИЙ: пять исходов звуча�
   const wide = (matched) => runRes(
     Array.from({ length: 40 }, (_, i) => (
       { fld: 'emp_stream_desc', val: 'v' + i, cnt: 1, matched: false }))
-      .concat(matched ? [{ fld: 'emp_stream_desc', val: 'ЦЕЛЬ', cnt: 5, matched: true }] : []),
+      .concat(matched
+        ? [{ fld: 'emp_stream_desc', val: 'ЦЕЛЬ', cnt: 5, exact_hit: true, matched: true }]
+        : []),
   );
   const cnt = (b) => (b.match(/^ {4}«/gm) || []).length;
   check('без совпадений словарь печатается целиком', cnt(wide(false).check_block) === 40);
@@ -1821,6 +1823,78 @@ line('37. ЗАПРОС БЕЗ ФИЛЬТРА АКТИВНОСТИ НАЗЫВАЕ
   check('на ответе без SQL молчит',
     runParse('текучесть считается по статье', 'что такое текучесть')
       .draft_no_active_filter === false);
+}
+
+// ===================================================================== 38
+line('38. ТОЧНОЕ СОВПАДЕНИЕ НЕ ПОДМЕНЯЕТСЯ ПОХОЖИМ');
+{
+  // ЖИВОЙ КЕЙС 2026-08-28. Заказчик спросил продуктовых аналитиков; в поле
+  // есть и «Продуктовый аналитик» (685), и «Продуктовый аналитик (DA)» (806).
+  // Обе строки matched, и при сортировке по count вариант с (DA) встал ВЫШЕ
+  // точного совпадения — автор взял первую строку и подставил в фильтр
+  // не то, что сам же написал в первом проходе. Проверка ЗАМЕНИЛА верное
+  // значение на неверное, а это хуже, чем не проверять вовсе.
+  const MAT = { materials:
+    'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ' +
+    'ПОЛЯ: last_day_flg, active_employee_flg, company_fire_flg, emp_specialization_desc' };
+  const sql = new Function('$', '$json', js('Build check SQL'))(
+    () => ({ first: () => ({ json: MAT }) }),
+    { check_values: '', draft: "where emp_specialization_desc = 'Продуктовый аналитик'" },
+  )[0].json.check_sql;
+
+  check('признак точного совпадения есть в запросе',
+    /AS exact_hit/.test(sql));
+  check('и сравнение идёт с целой фразой',
+    sql.includes("= 'продуктовый аналитик'"));
+  check('сортировка ставит точное ПЕРВЫМ, раньше частоты',
+    /ORDER BY exact_hit DESC, matched DESC, cnt DESC/.test(sql));
+
+  // Блок для автора: три уровня, и точное названо точным.
+  const rows = [
+    { fld: 'emp_specialization_desc', val: 'Продуктовый аналитик', cnt: 685,
+      exact_hit: true, matched: true },
+    { fld: 'emp_specialization_desc', val: 'Продуктовый аналитик (DA)', cnt: 806,
+      exact_hit: false, matched: true },
+    { fld: 'emp_specialization_desc', val: 'Кредитный аналитик', cnt: 158,
+      exact_hit: false, matched: false },
+  ];
+  const res = new Function('$', '$json', js('Check result'))(
+    (n) => (n === 'Build check SQL'
+      ? { first: () => ({ json: { check_skipped: [] } }) }
+      : { all: () => rows.map((json) => ({ json })) }),
+    {},
+  )[0].json;
+  const b = res.check_block;
+
+  check('точное совпадение названо точным', /ТОЧНОЕ СОВПАДЕНИЕ/.test(b));
+  check('и стоит выше похожего',
+    b.indexOf('«Продуктовый аналитик»') < b.indexOf('«Продуктовый аналитик (DA)»'));
+  check('похожее прямо запрещено ставить в фильтр',
+    /В ФИЛЬТР НЕ СТАВЬ/.test(b));
+  check('но его велено НАЗВАТЬ коллеге', /НАЗОВИ\s+коллеге/.test(b));
+  check('факт точного совпадения посчитан', res.check_exact === 1);
+
+  // Точного нет — прежнее поведение: выбрать по смыслу.
+  const noExact = new Function('$', '$json', js('Check result'))(
+    (n) => (n === 'Build check SQL'
+      ? { first: () => ({ json: { check_skipped: [] } }) }
+      : { all: () => rows.slice(1).map((json) => ({ json })) }),
+    {},
+  )[0].json;
+  check('без точного совпадения выбор по смыслу',
+    /точного совпадения нет/.test(noExact.check_block) &&
+    !/ТОЧНОЕ СОВПАДЕНИЕ/.test(noExact.check_block));
+  check('и счётчик точных нулевой', noExact.check_exact === 0);
+
+  // Промпт правки: подтверждённое значение не заменяется, а устаревшая
+  // оговорка вычищается — именно она пережила правку в живом прогоне,
+  // потому что «всё остальное оставь как было».
+  const rev = JSON.parse(fs.readFileSync('Support Bot Core.json', 'utf8'))
+    .nodes.find((n) => n.name === 'Revise draft').parameters.text;
+  check('правка не даёт заменить подтверждённое похожим',
+    /не меняй ни на что из соседних блоков/.test(rev));
+  check('и велит вычистить устаревшую оговорку',
+    /select distinct/.test(rev) && /вычистить/.test(rev));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
