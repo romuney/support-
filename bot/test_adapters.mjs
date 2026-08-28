@@ -2439,5 +2439,53 @@ line('52. ЗАПРОС БЕЗ ФИЛЬТРА АКТИВНОСТИ — СТРОК
   check('поле читается витриной', view.includes('draft_no_active_filter'));
 }
 
+// ===================================================================== 53
+line('53. УСТАРЕВШАЯ ОГОВОРКА: ПРОСИТ ПРОВЕРИТЬ УЖЕ ПРОВЕРЕННОЕ');
+{
+  const finalJs = core.nodes.find((n) => n.name === 'Final answer').parameters.jsCode;
+  const run = (draft, res) => {
+    const $ = (name) => {
+      if (name === 'Parse answer') {
+        return { first: () => ({ json: { draft, confidence_key: 'high',
+                                         confidence_claimed: 'high' } }) };
+      }
+      if (name === 'Build check SQL') {
+        return { first: () => ({ json: { check_pairs: [{ field: 'f' }], check_skipped: [] } }) };
+      }
+      if (name === 'Check result') return { first: () => ({ json: res }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', finalJs)($, {})[0].json;
+  };
+  const OK = { check_rows: 12, check_failed: '', check_exact: 1 };
+
+  // Правило стоит в промпте автора и всё равно роняется: живой прогон
+  // 2026-08-28 дал эту фразу трижды в одном ответе.
+  check('оговорка после успешной проверки названа',
+    run('значение нужно уточнить через select distinct', OK).draft_stale_caveat === true);
+  check('и в другой формулировке тоже',
+    run('точное написание нужно подтвердить значение в витрине', OK)
+      .draft_stale_caveat === true);
+
+  // Условие узкое НАМЕРЕННО: не проверяли или проверка отказала — совет
+  // коллеге уточнить самому остаётся верным, и тревожить джуна незачем.
+  check('при отказе проверки оговорка законна',
+    run('уточните через select distinct',
+      { check_rows: 0, check_failed: 'Table does not exist' }).draft_stale_caveat === false);
+  check('и при нулевом результате тоже',
+    run('уточните через select distinct',
+      { check_rows: 0, check_failed: '' }).draft_stale_caveat === false);
+  check('на чистом черновике молчит',
+    run('обычный ответ без оговорок', OK).draft_stale_caveat === false);
+
+  // Строка джуну и колонка витрины.
+  const msg = runChannelMsg({ draft: 'ч', confidence_key: 'high',
+    confidence_basis: ['x'], draft_stale_caveat: true });
+  check('джун видит строку', /осталась просьба уточнить значение/.test(msg));
+  check('поле читается витриной',
+    fs.readFileSync('../telemetry/support_request.sql', 'utf8')
+      .includes('draft_stale_caveat'));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

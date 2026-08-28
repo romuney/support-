@@ -335,6 +335,11 @@ bot AS (
            -- угадывает написание с первого раза.
            max_by(CAST(json_extract_scalar(payload, '$.check_exact') AS integer),
                   event_ts) AS check_exact,
+           -- Черновик просит проверить то, что уже проверено. Метрика того,
+           -- держится ли запрет в промпте автора: доля не падает — значит
+           -- правило надо усиливать не формулировкой.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_stale_caveat') AS boolean),
+                  event_ts) AS draft_stale_caveat,
            -- Переписал ли автор черновик по реальным значениям. Доля правок
            -- от числа проверок — метрика того, стоит ли второй проход своих
            -- токенов: правок нет вовсе значит, что данные ничего не меняли.
@@ -490,6 +495,7 @@ SELECT
     COALESCE(b.check_skipped, 0)                            AS check_skipped,
     COALESCE(b.check_rows, 0)                               AS check_rows,
     COALESCE(b.check_exact, 0)                              AS check_exact,
+    COALESCE(b.draft_stale_caveat, false)                   AS draft_stale_caveat,
     b.check_failed                                          AS check_failed,
     COALESCE(b.revised, false)                              AS revised,
     COALESCE(b.articles_invented, 0)                        AS articles_invented,
@@ -698,6 +704,7 @@ SELECT
     -- Слитые в одну колонку, они отправляют чинить не то.
     count_if(check_asked > 0)                              AS check_requested,
     count_if(check_exact > 0)                              AS check_exact_hit,
+    count_if(draft_stale_caveat)                           AS stale_caveat,
     count_if(check_failed IS NOT NULL AND check_failed <> '') AS check_failed,
     count_if(revised)                                      AS draft_revised,
     count_if(routes IS NOT NULL AND routes <> '[]')        AS expert_suggested,

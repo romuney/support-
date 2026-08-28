@@ -1897,6 +1897,57 @@ line('38. ТОЧНОЕ СОВПАДЕНИЕ НЕ ПОДМЕНЯЕТСЯ ПОХО
     /select distinct/.test(rev) && /вычистить/.test(rev));
 }
 
+// ===================================================================== 39
+line('39. ЧЕРНОВИК — MARKDOWN, А НЕ ЧИСТЫЙ SQL');
+{
+  const MAT = { materials:
+    'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ПОЛЯ: ' +
+    'last_day_flg, active_employee_flg, company_fire_flg, ' +
+    'emp_specialization_desc, residential_city_nm, emp_stream_desc' };
+  const runCheck = (draft) => {
+    const $ = () => ({ first: () => ({ json: MAT }) });
+    return new Function('$', '$json', js('Build check SQL'))($, { draft, check_values: '' })
+      .map((i) => i.json);
+  };
+
+  // ЖИВОЙ КЕЙС 2026-08-28. Автор не стал ставить значения в запрос, а вынес
+  // их списком в текст — то есть сделал ровно то, что от него требуется.
+  // Проверка всё равно не запустилась: имя поля обёрнуто в обратные кавычки,
+  // и прежняя регулярка допускала между именем и оператором только скобку.
+  // В логе осталось «в черновике нет фильтров по значению».
+  const live = runCheck([
+    'Подготовьте пары для проверки:',
+    '',
+    "- `emp_specialization_desc` = 'GO разработчик'",
+    "- `residential_city_nm` = 'Краснодар'",
+  ].join('\n'));
+  check('пара в обратных кавычках разобрана', live.length === 2);
+  check('имя поля не потеряно',
+    live.map((i) => i.check_field).sort().join()
+      === 'emp_specialization_desc,residential_city_nm');
+  check('значение не потеряно',
+    live.some((i) => i.check_value === 'GO разработчик'));
+
+  // Подчёркивание — и разметка курсива, и часть КАЖДОГО имени поля.
+  // Снять его вместе с остальной разметкой значит превратить
+  // emp_specialization_desc в три слова и отправить в отбор `desc`.
+  check('подчёркивание в имени уцелело',
+    !live.some((i) => /^(desc|nm)$/.test(i.check_field)));
+
+  // Кавычки у значения в прозе бывают разные: пропустить пару из-за ёлочки
+  // значит не проверить значение, названное прямым текстом.
+  check('двойные кавычки', runCheck('emp_stream_desc = "Data"')[0].check_value === 'Data');
+  check('ёлочки', runCheck('emp_stream_desc = «Data»')[0].check_value === 'Data');
+  check('жирный шрифт вокруг поля не мешает',
+    runCheck("**emp_stream_desc** = 'Data'")[0].check_field === 'emp_stream_desc');
+
+  // Прежние формы не сломались.
+  check('обычный SQL по-прежнему разбирается',
+    runCheck("where emp_stream_desc = 'Data'")[0].check_field === 'emp_stream_desc');
+  check('и список IN тоже',
+    runCheck("where emp_stream_desc in ('Data', 'Retail')").length === 2);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
