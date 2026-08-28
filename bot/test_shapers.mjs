@@ -82,7 +82,7 @@ function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = n
 }
 
 // Прогон ноды «Build values SQL»: какой SQL она построит и что исключит.
-function runValuesSql(inputs, cols, picked, cards, summaries = null) {
+function runValuesSql(inputs, cols, picked, cards, summaries = null, all = false) {
   const $ = (name) => {
     if (name === 'Pick columns') {
       return { all: () => picked.map((json) => ({ json })) };
@@ -98,7 +98,8 @@ function runValuesSql(inputs, cols, picked, cards, summaries = null) {
       first: () => ({ json: { 'When called by agent': inputs, dd_columns: cols }[name] }),
     };
   };
-  return new Function('$', js('Build values SQL'))($)[0].json;
+  const out = new Function('$', js('Build values SQL'))($);
+  return all ? out.map((x) => x.json) : out[0].json;
 }
 
 // Прогон ноды Pick columns: что она отдаст дальше по флоу.
@@ -848,6 +849,7 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
   const plan = runValuesSql({ urn: URN_T, search: 'специализация', values: 'аналитик' },
     colsWithSlice, picked, cardsOpen);
   checkS('SQL построен', plan.values_sql.length > 0);
+  checkS('поле названо в элементе', plan.values_field === 'emp_specialization_desc');
   // Имя таблицы выводится из URN и получает префикс prod_v_: читать из emart
   // напрямую нельзя, запросы идут из prod_v-схемы.
   checkS('таблица с префиксом prod_v_',
@@ -867,7 +869,7 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
   checkS('тип приводится в ветви',
     /CAST\(emp_specialization_desc AS varchar\) AS val/.test(plan.values_sql));
   checkS('сравнение идёт по приведённому значению',
-    /lower\(val\) LIKE/.test(plan.values_sql));
+    /lower\(CAST\(emp_specialization_desc AS varchar\)\) LIKE/.test(plan.values_sql));
   // Фильтр по словам НЕ в WHERE: он не экономит скан (GROUP BY и так идёт
   // по всему срезу), а промах слов давал ноль строк — «таких значений нет»
   // при живых данных, и второй попытки в конвейере нет.
@@ -883,13 +885,18 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
   // «UNION ALL … ORDER BY 3» читается двояко (всё объединение или последняя
   // ветвь), и по порядковому номеру колонки после набора операций диалекты
   // расходятся. Цена ошибки тут не отказ, а МОЛЧА неверный список.
-  checkS('сортировка над подзапросом',
-    /\) r\nWHERE \(matched AND rn <= \d+\)/.test(plan.values_sql) &&
-    /ORDER BY fld, matched DESC, cnt DESC$/.test(plan.values_sql));
-  // Потолок НА ПОЛЕ, а не на весь запрос: общий давал одному полю
-  // вытеснить остальные — частоты у разных полей несопоставимы.
-  checkS('потолок на поле, а не на запрос',
-    /PARTITION BY fld, matched ORDER BY cnt DESC/.test(plan.values_sql));
+  // ЗАПРОС НА ПОЛЕ, а не один UNION на все. Соседние узлы этого же флоу
+  // (dd_column_summary, dd_column_attrs) уже выполняются по разу на колонку —
+  // до 289 запросов, — так что довод «пусть HTTP-вызов будет один» не стоил
+  // ни свода типов к общему через CAST, ни оконной функции с тремя уровнями
+  // вложенности, ни того, что шейпер всё равно резал результат обратно
+  // по fld. Плюс отказ одного поля ронял выдачу по всем остальным.
+  checkS('запрос плоский, без UNION', !/UNION/i.test(plan.values_sql));
+  checkS('и без оконной функции', !/OVER\s*\(/i.test(plan.values_sql));
+  checkS('совпавшее поднято сортировкой, а не фильтром',
+    /ORDER BY matched DESC, cnt DESC/.test(plan.values_sql));
+  // Потолок НА ПОЛЕ получается сам: у каждого поля свой запрос.
+  checkS('потолок на поле', /LIMIT 60$/.test(plan.values_sql));
   checkS('сортировка по имени колонки, а не по номеру',
     !/ORDER BY \d/.test(plan.values_sql));
   // Слово режется до основы тем же needlesOf, что и фильтр по описаниям, и это
@@ -1020,6 +1027,30 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
   checkS('операционный код вытеснен',
     !ranked.values_fields.includes('emp_specialization_oper_code'));
 
+  // ЭЛЕМЕНТ НА ПОЛЕ: n8n выполнит ноду запроса по разу на каждый, и отказ
+  // одного поля больше не роняет выдачу по остальным.
+  const perField = runValuesSql({ urn: URN_T, values: 'аналитик' },
+    { statusCode: 200, body: { data: [
+      { entity: { fqn: 'emart.t.emp_specialization_desc' } },
+      { entity: { fqn: 'emart.t.emp_stream_desc' } },
+    ] } },
+    [{ field: 'emp_specialization_desc' }, { field: 'emp_stream_desc' }],
+    [{ body: {} }, { body: {} }], null, true);
+  checkS('элемент на поле', perField.length === 2);
+  checkS('у каждого свой запрос',
+    perField[0].values_sql !== perField[1].values_sql);
+  checkS('и своё имя поля',
+    perField[0].values_field === 'emp_specialization_desc' &&
+    perField[1].values_field === 'emp_stream_desc');
+  checkS('каждый запрос про своё поле',
+    perField[0].values_sql.includes('GROUP BY emp_specialization_desc') &&
+    perField[1].values_sql.includes('GROUP BY emp_stream_desc'));
+  // Общие факты едут в каждом элементе: шейпер читает их с первого,
+  // и разъехаться им негде.
+  checkS('общие факты в каждом элементе',
+    JSON.stringify(perField[0].values_words) === JSON.stringify(perField[1].values_words) &&
+    perField[0].values_table === perField[1].values_table);
+
   // Слов не задали — запроса нет вовсе: тянуть значения «на всякий случай»
   // значит платить сканом витрины на каждой выгрузке.
   const noWords = runValuesSql({ urn: URN_T, values: '' }, colsWithSlice, picked, cardsOpen);
@@ -1132,8 +1163,8 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     { fld: 'f', val: 'b', cnt: 2, matched: true },
     { fld: 'f', val: 'c', cnt: 1, matched: true },
   ]);
-  checkS('обрезка по лимиту названа', /список ОБРЕЗАН/.test(capped));
-  checkS('и названо, у какого поля', /У полей f показаны первые 3/.test(capped));
+  checkS('обрезка по лимиту названа', /хвост словаря ОБРЕЗАН/.test(capped));
+  checkS('и названо, у какого поля', /У полей f из хранилища пришли первые 3/.test(capped));
   const notCapped = shape({ ...okPlan, values_limit: 60 }, [
     { fld: 'f', val: 'a', cnt: 3, matched: true },
   ]);
