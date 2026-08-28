@@ -2487,5 +2487,62 @@ line('53. УСТАРЕВШАЯ ОГОВОРКА: ПРОСИТ ПРОВЕРИТЬ
       .includes('draft_stale_caveat'));
 }
 
+// ===================================================================== 54
+line('54. ПРОМАХ РАЗБОРА ПАР ОБЪЯВЛЯЕТ СЕБЯ САМ');
+{
+  const finalJs = core.nodes.find((n) => n.name === 'Final answer').parameters.jsCode;
+  const run = (parsed, plan) => {
+    const $ = (name) => {
+      if (name === 'Parse answer') {
+        return { first: () => ({ json: { confidence_key: 'medium',
+                                         confidence_claimed: 'medium', ...parsed } }) };
+      }
+      if (name === 'Build check SQL') return { first: () => ({ json: plan }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', finalJs)($, {})[0].json;
+  };
+  const NOPAIRS = { check_pairs: [], check_skipped: [],
+                    check_reason: 'в черновике нет фильтров по значению' };
+
+  // Пары код достаёт из свободного текста модели, и каждый промах разбора
+  // до сих пор был ТИХИМ: сначала гейтом был блок автора, потом имя поля
+  // в обратных кавычках. Оба раза в логе стояла честная причина, и оба раза
+  // она читалась как «проверять было нечего». Ловим само противоречие:
+  // автор пишет, что написание неизвестно, а проверка не запускалась.
+  const missed = run({
+    draft: 'запрос...',
+    gaps: 'Значения полей emp_specialization_desc и residential_city_nm ' +
+          'не проверены — точное написание в данных неизвестно.',
+  }, NOPAIRS);
+  check('противоречие поймано', missed.check_missed === true);
+  check('и причина от кода сохранена',
+    /нет фильтров по значению/.test(missed.check_reason));
+
+  // Проверка прошла — противоречия нет, что бы ни стояло в gaps.
+  check('после реальной проверки не срабатывает',
+    run({ draft: 'x', gaps: 'значение не проверено' },
+      { check_pairs: [{ field: 'f' }], check_skipped: [], check_reason: '' })
+      .check_missed === false);
+
+  // Автор ничего про значения не говорил — проверять и правда было нечего.
+  check('на ответе без разговора о значениях молчит',
+    run({ draft: 'текучесть считается так-то', gaps: 'нет статьи про X' }, NOPAIRS)
+      .check_missed === false);
+
+  // Джун видит строку, и она прямо называет это поломкой бота, а не
+  // пробелом базы: чинится в разных местах.
+  const msg = runChannelMsg({ draft: 'ч', confidence_key: 'medium',
+    confidence_basis: ['x'], check_missed: true,
+    check_reason: 'в черновике нет фильтров по значению' });
+  check('джун видит строку', /проверка не запускалась/.test(msg));
+  check('и причину рядом', /нет фильтров по значению/.test(msg));
+  check('названо поломкой бота, а не пробелом базы', /поломка бота/.test(msg));
+
+  const view = fs.readFileSync('../telemetry/support_request.sql', 'utf8');
+  check('поля читаются витриной',
+    view.includes('check_missed') && view.includes('check_reason'));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

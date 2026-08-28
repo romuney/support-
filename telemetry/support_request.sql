@@ -340,6 +340,16 @@ bot AS (
            -- правило надо усиливать не формулировкой.
            max_by(CAST(json_extract_scalar(payload, '$.draft_stale_caveat') AS boolean),
                   event_ts) AS draft_stale_caveat,
+           -- Разбор пар «поле = значение» промахнулся: автор пишет, что
+           -- значение не проверено, а проверка не запускалась. Каждый такой
+           -- промах до сих пор находился только глазами по логу n8n.
+           max_by(CAST(json_extract_scalar(payload, '$.check_missed') AS boolean),
+                  event_ts) AS check_missed,
+           -- Почему проверка не запускалась, текстом. Разбивка по этой
+           -- колонке и есть список того, что чинить: «нет фильтров
+           -- по значению» и «ни одна пара не прошла отбор» — разные поломки.
+           max_by(json_extract_scalar(payload, '$.check_reason'),
+                  event_ts) AS check_reason,
            -- Переписал ли автор черновик по реальным значениям. Доля правок
            -- от числа проверок — метрика того, стоит ли второй проход своих
            -- токенов: правок нет вовсе значит, что данные ничего не меняли.
@@ -496,6 +506,8 @@ SELECT
     COALESCE(b.check_rows, 0)                               AS check_rows,
     COALESCE(b.check_exact, 0)                              AS check_exact,
     COALESCE(b.draft_stale_caveat, false)                   AS draft_stale_caveat,
+    COALESCE(b.check_missed, false)                         AS check_missed,
+    b.check_reason                                          AS check_reason,
     b.check_failed                                          AS check_failed,
     COALESCE(b.revised, false)                              AS revised,
     COALESCE(b.articles_invented, 0)                        AS articles_invented,
@@ -705,6 +717,7 @@ SELECT
     count_if(check_asked > 0)                              AS check_requested,
     count_if(check_exact > 0)                              AS check_exact_hit,
     count_if(draft_stale_caveat)                           AS stale_caveat,
+    count_if(check_missed)                                 AS check_missed,
     count_if(check_failed IS NOT NULL AND check_failed <> '') AS check_failed,
     count_if(revised)                                      AS draft_revised,
     count_if(routes IS NOT NULL AND routes <> '[]')        AS expert_suggested,
