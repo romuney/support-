@@ -1569,8 +1569,16 @@ line('36. Витрина support_request.sql знает про КАЖДЫЙ ти
   check('строки-примеры CSV исключены', SQL.includes("<> 'schema_sample'"));
   check('дедуп по event_id есть (нужен в режиме insert)',
     /ROW_NUMBER\(\) OVER \(PARTITION BY event_id/.test(SQL));
+  // Сравнение с ПОРОГОМ, а не с точной полночью: from_unixtime в Trino отдаёт
+  // время в тайм-зоне сессии, а ноды Flush ставят Europe/Moscow — ноль
+  // приезжает как 1970-01-01 03:00:00, и точное равенство мимо него
+  // промахивалось. «Времени не было» становилось настоящей датой 1970 года,
+  // и reaction time уезжал в минус 56 лет — ровно то, что этот guard
+  // и заведён предотвращать.
   check('event_ts = 0 превращается в NULL, а не в 1970 год',
-    SQL.includes("NULLIF(event_ts, TIMESTAMP '1970-01-01 00:00:00')"));
+    /event_ts < TIMESTAMP '2000-01-01 00:00:00' THEN NULL/.test(SQL));
+  check('и порог не привязан к полуночи 1970',
+    !SQL.includes("NULLIF(event_ts, TIMESTAMP '1970-01-01 00:00:00')"));
   check('обращение = тред с request_created',
     /FROM ev\s+WHERE event_type = 'request_created'/.test(SQL));
   check('отсев тредов без корня НАЗВАН числом',
@@ -1771,6 +1779,52 @@ line('40. Коллектор трекера читает СВОИ же собы�
   check('известный статус доехал до плана', plan.known['CROSS-1'] === 'В работе');
   check('закрытая задача больше не опрашивается', !plan.keys.includes('CROSS-2'));
   check('открытая опрашивается', plan.keys.includes('CROSS-1'));
+}
+
+// ===================================================================== 41
+line('41. Отчёт по темам: посчитанное ДОЕЗЖАЕТ до вывода');
+{
+  // REPORT_ROLLUP_JS накапливал по треду реплики и заявленную уверенность,
+  // и ни одно из этих полей не попадало ни в bucket, ни в вывод, ни
+  // в markdown: считалось, а посмотреть было негде. Тот же класс, что поля
+  // ядра, которых не читала витрина.
+  const rp = JSON.parse(fs.readFileSync('Telemetry Report.json', 'utf8'));
+  const roll = rp.nodes.find((n) => n.parameters.jsCode &&
+    n.parameters.jsCode.includes('TOPIC_TITLES'));
+  check('нода разбивки найдена', Boolean(roll));
+  const now = Date.now();
+  const mkRow = (o) => ({ json: {
+    event_id: o.event_id ?? Math.random().toString(36),
+    thread_id: o.thread_id, event_type: o.event_type,
+    event_ts: o.event_ts, ingested_at: o.event_ts,
+    actor: o.actor ?? 'u1', source: o.source ?? 'channel',
+    kind: o.kind ?? '', domains: '', payload: JSON.stringify(o.payload ?? {}),
+  } });
+  const rows = [
+    { event_type: 'request_created', thread_id: 't1', event_ts: now,
+      kind: 'export', payload: { ours: true } },
+    { event_type: 'bot_answered', thread_id: 't1', event_ts: now + 10,
+      source: 'core', payload: { confidence_key: 'high' } },
+    { event_type: 'human_replied', thread_id: 't1', event_ts: now + 20, actor: 'u1' },
+    { event_type: 'human_replied', thread_id: 't1', event_ts: now + 30, actor: 'u2' },
+  ].map(mkRow);
+  const out = new Function('$input', '$', roll.parameters.jsCode)(
+    { all: () => rows }, () => ({ first: () => ({ json: { days: 30 } }) }),
+  ).map((x) => x.json);
+  // Тема берётся с корневого события: у него своя колонка kind, и она
+  // здесь 'unknown' только потому, что тестовый корень её не несёт.
+  // Проверяем ту строку, что собралась, — важны накопленные поля.
+  const bucket = out.find((r) => r.kind && r.kind !== 'ИТОГО');
+  check('строка темы собрана', Boolean(bucket));
+  check('реплики людей доехали до вывода', bucket.replies_human === 2);
+  // Уверенность здесь ДЕЙСТВУЮЩАЯ (confidence_key), а не заявленная:
+  // пара «заявлено / действует» живёт в витрине, и путать их нельзя.
+  check('действующая уверенность доехала', bucket.conf_high === 1);
+  const md = out.find((r) => typeof r.markdown === 'string');
+  check('и попали в markdown-таблицу',
+    md && md.markdown.includes('Реплик') && md.markdown.includes('Высокая'));
+  const total = out.find((r) => r.kind === 'ИТОГО');
+  check('итог их суммирует', total && total.replies_human === 2 && total.conf_high === 1);
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

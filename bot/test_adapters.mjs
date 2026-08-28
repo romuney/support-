@@ -2031,5 +2031,37 @@ line('44. ЛИЧКА: темы нет, потому что нет формы —
     runPlanWith(runDM(q2).topic_kind, q2).is_export === true);
 }
 
+// ===================================================================== 45
+line('45. ВЫДУМАННЫЙ РОУТЕРОМ ПУТЬ — не пробел реестра');
+{
+  // Путь роутера уезжал в files без сверки с реестром: GitLab отвечал 404,
+  // путь попадал в articles_failed, и «Задача для базы» объявляла это
+  // расхождением реестра — «реестр ссылается на файл, которого нет».
+  // Джуна отправляли чинить строку, которой не существует. Тот же класс,
+  // что слитые ddFailed и ddMissing: два диагноза под одним именем,
+  // и починка уходит не туда.
+  const p = runParse('ЧЕРНОВИК ОТВЕТА: ответа нет\nУВЕРЕННОСТЬ: нет ответа',
+    { question: 'сколько зарплат', mode: 'channel' }, {},
+    { ...MAT_OK,
+      articles_failed: ['kb/tables/mdm-employee-structure-d.md'],
+      articles_invented: ['kb/tables/mdm-employee-salary.md'] });
+  const reg = p.kb_tasks.find((t) => t.includes('реестр ссылается'));
+  const inv = p.kb_tasks.find((t) => t.includes('которого нет в реестре'));
+  check('битая строка реестра названа', Boolean(reg));
+  check('и в ней только путь ИЗ реестра',
+    reg.includes('mdm-employee-structure-d') && !reg.includes('salary'));
+  check('промах роутера назван отдельно', Boolean(inv));
+  check('и назван промахом роутера, а не пробелом базы',
+    inv.includes('промах роутера') && inv.includes('salary'));
+
+  // Ничего не выдумано — второй строки нет: строка, которая горит всегда,
+  // перестаёт читаться вместе с соседними.
+  const clean = runParse('ЧЕРНОВИК ОТВЕТА: ответ\nУВЕРЕННОСТЬ: высокая',
+    { question: 'вопрос', mode: 'channel' }, {},
+    { ...MAT_OK, articles_failed: [], articles_invented: [] });
+  check('без выдумки строки нет',
+    !clean.kb_tasks.some((t) => t.includes('которого нет в реестре')));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

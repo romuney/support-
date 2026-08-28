@@ -26,9 +26,11 @@
 --     ex. DWH HR) лежат в логе намеренно — задним числом их добрать нельзя, —
 --     но в НАШИ метрики не входят. Фильтр `ours` обязателен у потребителя.
 --  3. Считать `event_ts = 0` временем. Нормализатор пишет 0, когда времени
---     в событии не было (`skipped`, часть служебных), и в DLH это
---     1970-01-01. Здесь такие значения превращаются в NULL до всякой
---     арифметики — иначе reaction time уехал бы в минус 56 лет.
+--     в событии не было (`skipped`, часть служебных), и в DLH это 1970 год —
+--     причём НЕ ровно полночь: from_unixtime отдаёт время в тайм-зоне сессии,
+--     а ноды Flush ставят Europe/Moscow, так что ноль приезжает как
+--     1970-01-01 03:00:00. Поэтому здесь порог, а не точное равенство;
+--     иначе арифметика уводит reaction time в минус 56 лет.
 --  4. Ровнять снятие `:loading:` и снятие закрывающей реакции. Правила
 --     РАЗНЫЕ: дежурный снимает `:loading:`, когда ставит закрывающую, поэтому
 --     `taken_at` = ПЕРВОЕ добавление за историю треда и снятие его не
@@ -75,7 +77,18 @@ ev AS (
     SELECT thread_id,
            event_type,
            -- 0 = «времени в событии не было», а не 1970 год.
-           NULLIF(event_ts, TIMESTAMP '1970-01-01 00:00:00') AS event_ts,
+           --
+           -- Сравнение с ПОРОГОМ, а не с точной полночью: в DLH эпоха
+           -- конвертируется через from_unixtime, а он отдаёт время в тайм-зоне
+           -- сессии — ноды Flush ставят Europe/Moscow, и ноль приезжает как
+           -- 1970-01-01 03:00:00. Точное равенство мимо него промахивалось,
+           -- и «времени не было» превращалось в настоящую дату 1970 года:
+           -- reaction time уезжал в минус 56 лет и тянул за собой медиану,
+           -- то есть ровно то, что этот NULLIF и заведён предотвращать.
+           -- Порог берём заведомо ниже любого настоящего события и выше
+           -- любого смещения от эпохи — офсеты не бывают в годы.
+           CASE WHEN event_ts < TIMESTAMP '2000-01-01 00:00:00' THEN NULL
+                ELSE event_ts END AS event_ts,
            actor,
            source,
            kind,
@@ -264,6 +277,11 @@ bot AS (
            -- что в данные не ходили — и блок значений просто не появился.
            max_by(CAST(json_extract_scalar(payload, '$.values_asked') AS integer),
                   event_ts) AS values_asked,
+           -- Пути, которых нет в реестре: роутер их придумал. Метрика его
+           -- качества, и путать её с пробелом базы нельзя — чинятся в разных
+           -- местах, а по логу без этой колонки они неразличимы.
+           max_by(CAST(json_extract_scalar(payload, '$.articles_invented') AS integer),
+                  event_ts) AS articles_invented,
            -- Согласование ИБ: возникло требование и попало ли оно в черновик.
            -- Цена ошибки здесь не «черновик хуже», а файл с персональными
            -- данными, ушедший наружу без согласования, — поэтому обе части
@@ -445,6 +463,7 @@ SELECT
     (b.dd_count > 0 AND COALESCE(b.dd_received, 0) = 0)     AS dd_planned_not_received,
     COALESCE(b.router_empty, false)                         AS router_empty,
     COALESCE(b.values_asked, 0)                             AS values_asked,
+    COALESCE(b.articles_invented, 0)                        AS articles_invented,
     COALESCE(b.ib_required, false)                          AS ib_required,
     COALESCE(b.ib_missing, false)                           AS ib_missing,
     COALESCE(b.is_query_help, false)                        AS is_query_help,
@@ -607,6 +626,7 @@ SELECT
     count_if(dd_never_ran)                                 AS dd_node_never_ran,
     count_if(dd_planned_not_received)                      AS dd_planned_not_received,
     count_if(router_empty)                                 AS router_empty_plan,
+    count_if(articles_invented > 0)                        AS router_invented_paths,
     count_if(tables_no_meta > 0)                           AS tables_without_inventory,
     count_if(parse_error IS NOT NULL OR router_error IS NOT NULL) AS bot_errors,
 

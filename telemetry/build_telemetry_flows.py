@@ -1898,6 +1898,13 @@ const bucket = (kind) => {
       requests: 0, ours: 0, taken: 0, closed: 0, unresolved: 0,
       answered: 0, helpful: 0, not_helpful: 0, texts: 0, detail_opened: 0,
       tasks: 0, reaction_ms: [], cycle_ms: [],
+      // Реплики и заявленная уверенность накапливались по треду и никуда
+      // не доезжали: ни в bucket, ни в вывод, ни в markdown. Считалось,
+      // и посмотреть было негде — тот же класс, что поля ядра, которых
+      // не читала витрина. Реплики людей это прокси-сигнал на 100 %
+      // обращений (кнопки нажимают единицы), а доля высокой уверенности —
+      // половина калибровки.
+      replies_human: 0, replies_bot: 0, conf_high: 0, conf_none: 0,
     });
   }
   return buckets.get(kind);
@@ -1924,6 +1931,10 @@ for (const t of threads.values()) {
   b.texts += t.texts;
   b.detail_opened += t.detail_opened;
   if (t.task_key) b.tasks++;
+  b.replies_human += t.replies_human || 0;
+  b.replies_bot += t.replies_bot || 0;
+  if (t.confidence === 'high') b.conf_high++;
+  if (t.confidence === 'none') b.conf_none++;
 }
 
 const out = [...buckets.values()].map((b) => ({
@@ -1946,6 +1957,17 @@ const out = [...buckets.values()].map((b) => ({
   feedback_texts: b.texts,
   detail_opened: b.detail_opened,
   tasks: b.tasks,
+  // Реплики людей в треде — прокси-сигнал на 100 % обращений, в отличие
+  // от кнопок, которые нажимают единицы: тред, закрывшийся после ответа
+  // бота без переписки, вероятно закрылся ответом бота.
+  replies_human: b.replies_human,
+  replies_bot: b.replies_bot,
+  // Уверенность здесь ДЕЙСТВУЮЩАЯ (`confidence_key`) — та, что осталась
+  // после понижения кодом. Пара «заявлено / действует», по которой считается
+  // калибровка, живёт в витрине support_request: здесь для неё нет второго
+  // поля, и выдавать одно за другое нельзя.
+  conf_high: b.conf_high,
+  conf_none: b.conf_none,
   reaction_h: hours(median(b.reaction_ms)),
   cycle_h: hours(median(b.cycle_ms)),
 })).sort((a, b) => b.requests - a.requests);
@@ -1953,11 +1975,13 @@ const out = [...buckets.values()].map((b) => ({
 const total = out.reduce((acc, r) => {
   for (const k of ['requests', 'ours', 'taken', 'closed', 'open', 'unresolved',
                    'bot_answered', 'helpful', 'not_helpful', 'feedback_texts',
-                   'detail_opened', 'tasks']) acc[k] += r[k];
+                   'detail_opened', 'tasks', 'replies_human', 'replies_bot',
+                   'conf_high', 'conf_none']) acc[k] += r[k];
   return acc;
 }, { kind: 'ИТОГО', topic: 'ИТОГО', requests: 0, ours: 0, taken: 0, closed: 0,
      open: 0, unresolved: 0, bot_answered: 0, helpful: 0, not_helpful: 0,
-     feedback_texts: 0, detail_opened: 0, tasks: 0 });
+     feedback_texts: 0, detail_opened: 0, tasks: 0,
+     replies_human: 0, replies_bot: 0, conf_high: 0, conf_none: 0 });
 total.helpful_pct = (total.helpful + total.not_helpful)
   ? Math.round(total.helpful * 100 / (total.helpful + total.not_helpful)) : null;
 total.reaction_h = hours(median([...buckets.values()].flatMap((b) => b.reaction_ms)));
@@ -1966,12 +1990,18 @@ total.cycle_h = hours(median([...buckets.values()].flatMap((b) => b.cycle_ms)));
 // Готовая markdown-таблица: отчёт смотрят люди, а не BI. Копируется в канал
 // как есть.
 const cell = (v) => (v === null || v === undefined || v === '' ? '—' : String(v));
+// «Реплик» — реплики ЛЮДЕЙ в треде. Это прокси-сигнал на 100 % обращений,
+// в отличие от кнопок, которые нажимают единицы: много реплик после ответа
+// бота значит, что ответа не хватило. «Высокая» — уверенность ДЕЙСТВУЮЩАЯ,
+// после понижения кодом; пара «заявлено / действует» живёт в витрине.
 const head = ['Тема', 'Обращений', 'Взято', 'Закрыто', 'Открыто', 'Бот ответил',
-              '👍', '👎', '% помогло', 'Отзывов', 'Реакция, ч', 'Цикл, ч'];
+              '👍', '👎', '% помогло', 'Отзывов', 'Реплик', 'Высокая',
+              'Реакция, ч', 'Цикл, ч'];
 const line = (r) => '| ' + [
   r.topic, r.requests, r.taken, r.closed, r.open, r.bot_answered,
   r.helpful, r.not_helpful, r.helpful_pct === null ? '—' : r.helpful_pct + '%',
-  r.feedback_texts, cell(r.reaction_h), cell(r.cycle_h),
+  r.feedback_texts, r.replies_human, r.conf_high,
+  cell(r.reaction_h), cell(r.cycle_h),
 ].map(cell).join(' | ') + ' |';
 
 // Обращения к HC Data лежат в том же канале и в той же таблице, но

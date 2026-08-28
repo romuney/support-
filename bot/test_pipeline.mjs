@@ -200,11 +200,27 @@ line('7. НЕЧИТАЕМАЯ статья — расхождение реест
   ]);
   check('прочитанная статья вклеена', /Уволенные \/ средняя численность/.test(m.materials));
   check('нечитаемая названа', /kb\/metrics\/ghost\.md/.test(m.materials));
-  check('формулировка про расхождение реестра',
-    /Реестр ссылается на файл, которого нет/.test(m.materials));
+  // ghost.md нет и в реестре — значит путь придумал роутер, и «расхождение
+  // реестра» здесь неверный диагноз: править там нечего. Формулировки
+  // разведены, иначе задача уходит на строку, которой не существует.
+  check('выдуманный путь назван несуществующим',
+    /Не существует: kb\/metrics\/ghost\.md/.test(m.materials));
+  check('и не выдан за расхождение реестра',
+    !/Реестр ссылается на файл, которого нет/.test(m.materials));
   check('в отчёте разделены прочитанные и нет',
     m.articles_read.includes('kb/metrics/turnover.md')
-      && m.articles_failed.includes('kb/metrics/ghost.md'));
+      && m.articles_invented.includes('kb/metrics/ghost.md')
+      && !m.articles_failed.includes('kb/metrics/ghost.md'));
+
+  // А путь ИЗ реестра, который не читается, — по-прежнему расхождение базы.
+  const real = runPlan(JSON.stringify({
+    domains: [], articles: ['kb/metrics/turnover.md'],
+    dd_urn: '', field_hint: '', no_question: false,
+  }));
+  const mr = runMaterials(real, [{ error: '404 not found' }]);
+  check('битая строка реестра названа расхождением',
+    /Реестр ссылается на файл, которого нет/.test(mr.materials) &&
+    mr.articles_failed.includes('kb/metrics/turnover.md'));
 }
 
 // ====================================================================== 8
@@ -1350,6 +1366,48 @@ line('29. reached_by: code — контракт между базой знани
       check(`${path} есть в базе`, fs.existsSync(`${dir}/../${path.slice(3)}`));
     }
   }
+}
+
+// ===================================================================== 30
+line('30. ВОПРОС ПРО ОТЧЁТ распознаётся и без формы — в чате и в личке');
+{
+  // «Build materials» брал тему и ссылку из СЫРЫХ полей формы, а формы нет
+  // ни в чате, ни в личке: оба поля там пустые. Значит правило «спрашивали
+  // про отчёт, а отчёта в материалах нет» — и понижение уверенности за ним —
+  // не срабатывало НИ РАЗУ вне канала. Ровно та же асимметрия, из-за которой
+  // в чате не работало самообслуживание: у режима выгрузки фолбэк был,
+  // у поиска отчёта — нет.
+  const ROUTER = JSON.stringify({
+    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+  });
+  const q = 'привет! почему в дашборде ' +
+    'https://proteus.tcsbank.ru/superset/dashboard/budget-corporate-events/ ' +
+    'цифры не сходятся?';
+
+  // Канал: тема и ссылка пришли формой.
+  const ch = runPlan(ROUTER, REGISTRY, {
+    question: q, topic_kind: 'Вопрос по отчетам',
+    report_url: 'https://proteus.tcsbank.ru/superset/dashboard/budget-corporate-events/',
+  });
+  const chM = runMaterials(ch, ch.files.map(() => ({ content: b64('# Витрина') })));
+  check('в канале вопрос про отчёт распознан', chM.asks_report === true);
+
+  // Чат/личка: формы нет вовсе, ссылка — в тексте обращения.
+  const chat = runPlan(ROUTER, REGISTRY, { question: q });
+  check('ссылка найдена в тексте',
+    /budget-corporate-events/.test(chat.report_url_found || ''));
+  const chatM = runMaterials(chat, chat.files.map(() => ({ content: b64('# Витрина') })));
+  check('без формы вопрос про отчёт тоже распознан', chatM.asks_report === true);
+  // Отчёта среди материалов нет — автор обязан это увидеть.
+  check('и отчёт в материалах не найден', chatM.report_seen === false);
+  check('автору сказано про отсутствие отчёта',
+    /отч[её]т/i.test(chatM.materials));
+
+  // Обычный вопрос без отчёта — правило молчит: строка, которая горит
+  // всегда, перестаёт читаться.
+  const plain = runPlan(ROUTER, REGISTRY, { question: 'что такое текучесть' });
+  const plainM = runMaterials(plain, plain.files.map(() => ({ content: b64('# Х') })));
+  check('на обычном вопросе правило молчит', plainM.asks_report === false);
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

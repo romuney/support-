@@ -433,6 +433,19 @@ def check_articles(ent_rows):
             err(f"{r['путь']}: алиасы есть в реестре, но не во фронтматтере: "
                 f"{sorted(extra)}")
 
+        # И ОБРАТНО. Проверка была односторонней: реестр обязан быть
+        # подмножеством фронтматтера, а лишний алиас во фронтматтере
+        # не замечался вовсе. Роутер при этом видит ТОЛЬКО проекцию реестра —
+        # значит алиас, живущий лишь в статье, не работает ни разу, и понять
+        # это по статье нельзя: там он на месте и выглядит рабочим. Ровно тот
+        # же класс, что kb/process/*.md без reached_by: файл есть, до бота
+        # не доезжает.
+        missing = {norm_alias(a) for a in fm_aliases} - {norm_alias(a) for a in idx_aliases}
+        if missing:
+            err(f"{r['путь']}: алиасы есть во фронтматтере, но не в реестре: "
+                f"{sorted(missing)} — роутер видит только реестр, "
+                f"и такой алиас не сработает ни разу")
+
         for link in re.findall(r"\[[^\]]*\]\(([^)#]+)\)", body):
             if link.startswith(("http://", "https://", "mailto:")):
                 continue
@@ -464,6 +477,36 @@ def check_articles(ent_rows):
 def enum_values(block):
     return {v for v in re.findall(r"`([^`]+)`", block)
             if not re.fullmatch(r"[a-z][a-z0-9_]*", v)}
+
+
+def check_process_links():
+    """Ссылки и упоминания id в регламентах kb/process/.
+
+    `check_articles()` обходит СТРОКИ РЕЕСТРА, а регламентов в реестре нет —
+    значит их относительные ссылки и упоминания id не проверял никто. При этом
+    три файла из четырёх доезжают до бота (`reached_by: code`), и битая ссылка
+    там стоит ровно столько же, сколько в статье: автор получает путь, который
+    никуда не ведёт, и пересказывает его коллеге.
+    """
+    known = set()
+    idx = open(INDEX, encoding="utf-8").read()
+    for m in re.finditer(r"^\|\s*([a-z]+-[a-z0-9-]+)\s*\|", idx, re.M):
+        known.add(m.group(1))
+
+    for path in sorted(glob.glob(os.path.join(KB, "process", "*.md"))):
+        rel = os.path.relpath(path, os.path.dirname(KB))
+        body = open(path, encoding="utf-8").read()
+        for link in re.findall(r"\[[^\]]*\]\(([^)#]+)\)", body):
+            if link.startswith(("http://", "https://", "mailto:")):
+                continue
+            target = os.path.normpath(os.path.join(os.path.dirname(path), link))
+            if not os.path.exists(target):
+                err(f"{rel}: битая ссылка «{link}» → {target}")
+        # Упоминание id, которого нет в реестре: тот же смысл, что в статьях —
+        # агент увидит имя сущности и решит, что она есть.
+        for m in re.finditer(r"`((?:m|r|t|rc)-[a-z0-9-]+)`", body):
+            if m.group(1) not in known:
+                err(f"{rel}: упомянут id «{m.group(1)}», которого нет в реестре")
 
 
 def check_enum_values():
@@ -595,6 +638,7 @@ def main():
     if rt_rows:
         check_routes(rt_rows)
     check_process()
+    check_process_links()
     check_enum_values()
     check_sql_schemas()
 

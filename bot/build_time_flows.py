@@ -660,6 +660,11 @@ const topicKind = String(trig0.topic_kind ?? '') ||
 // Порядок files при этом остаётся диагностикой: при isExport плейбук
 // и развилка идут ПЕРВЫМИ, а если плейбук пришёл последним — значит его
 // выбрал роутер, а режим был выключен.
+// Ссылка на отчёт: из поля формы, а если формы нет — из текста обращения.
+// В чат и в личку пост вставляют целиком, вместе со ссылкой на дашборд.
+const reportUrlFound = String(trig0.report_url ?? '').trim() ||
+  (question0.match(/https?:\/\/[^\s)»"']*(?:dashboard|superset|proteus)[^\s)»"']*/i) || [''])[0];
+
 const isExport = /выгруз/i.test(topicKind);
 const EXPORT_PATHS = ['kb/process/export-playbook.md'];
 const EXPORT_IDS = ['rc-structure-choice'];
@@ -967,7 +972,21 @@ for (const d of plan.domains) {
     add(p);
   }
 }
-for (const p of plan.articles) add(p);
+// Путь, выдуманный роутером, отделяется от пути из реестра.
+//
+// Раньше сюда попадало всё подряд, GitLab отвечал 404, и путь уезжал
+// в articles_failed — а «Задача для базы» объявляла это расхождением
+// реестра: «реестр ссылается на файл, которого нет». Джуна отправляли
+// чинить строку, которой не существует. Тот же класс, что слитые ddFailed
+// и ddMissing до 2026-08-27: два разных диагноза под одним именем, и
+// починка уходит не туда. Промах роутера чинится промптом и реестром,
+// битая строка реестра — правкой реестра.
+const knownPaths = new Set(byId.values());
+const invented = [];
+for (const p of plan.articles) {
+  if (p && !knownPaths.has(p)) invented.push(p);
+  add(p);
+}
 
 // Предохранитель на объём: 8 статей — это уже ~18k токенов материалов.
 // Резать молча нельзя, поэтому обрезанное называется в служебном блоке.
@@ -1083,6 +1102,17 @@ return [{
     // Число объектов вынесено отдельным полем: IF «Need DD» сравнивает его
     // с нулём. Условие по длине массива в n8n-выражении работает не везде
     // одинаково, а промах здесь тихий — метаданные просто не запросятся.
+    // Пути, которых нет в реестре: роутер их придумал. Отдельно от
+    // articles_failed — там пути ИЗ реестра, которые не удалось прочитать.
+    articles_invented: invented,
+    // ВОССТАНОВЛЕННАЯ тема и ссылка на отчёт. «Build materials» брал их
+    // из сырых полей формы, а формы нет ни в чате, ни в личке — значит
+    // правило «спрашивали про отчёт, а отчёта в материалах нет» там
+    // не срабатывало НИ РАЗУ, и уверенность не понижалась. Ровно та же
+    // асимметрия, из-за которой в чате не работало самообслуживание:
+    // у режима выгрузки фолбэк был, у поиска отчёта — нет.
+    topic_kind_used: topicKind,
+    report_url_found: reportUrlFound,
     dd_count: plan.dd.length,
     // Сколько объектов уехало со значениями фильтров. Метрика роутера, а не
     // каталога: доля вопросов, где заказчик назвал конкретное значение, а
@@ -1342,6 +1372,7 @@ try {
 const parts = [];
 const failed = [];
 const paths = Array.isArray(plan.files) ? plan.files : [];
+const invented = Array.isArray(plan.articles_invented) ? plan.articles_invented : [];
 // Что роутер подобрал сам — в отличие от мастеров, добранных кодом.
 const routerPicked = Array.isArray(plan.router_articles) ? plan.router_articles : [];
 
@@ -1501,9 +1532,12 @@ const ddMeta = ddOk.length ? 'ok' : '';
 // и поставил ВЫСОКУЮ уверенность на вопрос про бюджеты в дашборде, которого
 // в базе нет вовсе. Факт «отчёт не разбирался» проверяется однозначно:
 // среди прочитанного нет ни статьи kb/reports/, ни объекта reports.helicopter.
+// Тема и ссылка берутся из ПЛАНА, а не из сырых полей формы: «Plan» их
+// восстанавливает из шапки и текста обращения, и только так это правило
+// работает в чате и в личке, где формы нет вовсе.
 const trigger = $('When called by adapter').first().json;
-const reportUrl = String(trigger.report_url ?? '').trim();
-const topicKind = String(trigger.topic_kind ?? '');
+const reportUrl = String(plan.report_url_found ?? trigger.report_url ?? '').trim();
+const topicKind = String(plan.topic_kind_used ?? trigger.topic_kind ?? '');
 const asksReport = Boolean(reportUrl) || /отч[её]т|дашборд/i.test(topicKind);
 // В URN система пишется через двоеточие (urn:dd:reports:helicopter:note:…),
 // а в поле system — через точку (reports.helicopter). Проверяем оба варианта:
@@ -1517,11 +1551,26 @@ const reportSeen =
 // «статью не удалось прочитать»: это разные вещи, и вторую нельзя записывать
 // в пробелы владельца. Ровно то же правило, что и для описаний полей в DD.
 const notes = [];
-if (failed.length) {
+// Два разных диагноза и две разные формулировки автору. Путь ИЗ реестра,
+// который не читается, — расхождение базы, и его надо назвать. Путь, которого
+// в реестре нет вовсе, роутер придумал: базе тут править нечего, и говорить
+// автору про «расхождение реестра» значит отправить в ЧЕГО НЕ ХВАТИЛО задачу
+// на строку, которой не существует.
+const failedReal = failed.filter((p) => !invented.includes(p));
+const failedInvented = failed.filter((p) => invented.includes(p));
+if (failedReal.length) {
   notes.push(
-    `Не удалось прочитать: ${failed.join(', ')}. ` +
+    `Не удалось прочитать: ${failedReal.join(', ')}. ` +
       'Реестр ссылается на файл, которого нет, либо файл недоступен — ' +
       'это расхождение нужно назвать в ЧЕГО НЕ ХВАТИЛО.',
+  );
+}
+if (failedInvented.length) {
+  notes.push(
+    `Не существует: ${failedInvented.join(', ')}. Такого пути нет в реестре — ` +
+      'статью под этот вопрос не подбирали, она просто отсутствует. ' +
+      'В ЧЕГО НЕ ХВАТИЛО пиши, какой сущности не хватает, а не про ' +
+      'расхождение реестра: расходиться там нечему.',
   );
 }
 if (Array.isArray(plan.dropped) && plan.dropped.length) {
@@ -1745,7 +1794,11 @@ return [{
     mode_rules: isExport ? EXPORT_RULES : '',
     is_export: isExport,
     articles_read: paths.filter((p) => !failed.includes(p)),
-    articles_failed: failed,
+    // Два РАЗНЫХ диагноза, и чинятся они в разных местах: строка реестра
+    // указывает на несуществующий файл (правится реестр) — и роутер назвал
+    // путь, которого в реестре нет вовсе (правится промпт роутера).
+    articles_failed: failed.filter((p) => !invented.includes(p)),
+    articles_invented: invented.filter((p) => failed.includes(p)),
     dd_used: ddOk.length > 0,
     dd_objects: ddOk,
     dd_failed: ddLost,
@@ -2157,6 +2210,13 @@ out.routes = Array.isArray(mat.routes) ? mat.routes : [];
   out.experts_invented = all.filter((n) => n && !named.has(n) && text.includes(n));
 }
 out.routes_dropped = Array.isArray(mat.routes_dropped) ? mat.routes_dropped : [];
+// Пути, которые роутер придумал. Метрика его качества, как router_empty:
+// задним числом «роутер выдумал путь» и «в базе нет статьи» по логу
+// неразличимы, а чинятся они в разных местах. Присваивание стоит здесь,
+// а не в блоке плана выше: `mat` объявлен ниже него, и обращение к нему
+// раньше объявления роняло ноду целиком.
+out.articles_invented = Array.isArray(mat.articles_invented)
+  ? mat.articles_invented.length : 0;
 
 // 4б. Инструменты, которых у КОЛЛЕГИ нет.
 //
@@ -2399,6 +2459,15 @@ if (mat.masters_only) {
 if (Array.isArray(mat.articles_failed) && mat.articles_failed.length) {
   tasks.push('реестр ссылается на файл, которого нет: ' +
     mat.articles_failed.join(', '));
+}
+if (Array.isArray(mat.articles_invented) && mat.articles_invented.length) {
+  // Это НЕ пробел базы: такой строки в реестре нет вовсе, и править там
+  // нечего. Раньше этот случай печатался как «реестр ссылается на файл,
+  // которого нет» — джуна отправляли чинить несуществующую строку.
+  tasks.push('роутер назвал путь, которого нет в реестре: ' +
+    mat.articles_invented.join(', ') +
+    ' — это промах роутера, а не пробел базы; править нечего, ' +
+    'но если такая статья нужна — её и правда нет');
 }
 if (mat.dd_never_ran) {
   // Это не задача для базы знаний, а поломка бота — но печатается здесь же,
