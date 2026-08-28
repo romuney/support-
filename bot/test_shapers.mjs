@@ -861,13 +861,19 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     !plan.values_fields.includes('full_nm') &&
     plan.values_skipped.some((x) => /full_nm/.test(x)));
   checkS('исключение названо, а не молча', plan.values_skipped.length === 1);
-  // ilike по числовому столбцу Trino не выполнит — приводим тип.
-  checkS('тип приводится перед ilike', /CAST\(emp_specialization_desc AS varchar\) ILIKE/.test(plan.values_sql));
+  // LIKE по числовому столбцу Trino не выполнит — приводим тип.
+  checkS('тип приводится перед сравнением',
+    /lower\(CAST\(emp_specialization_desc AS varchar\)\) LIKE/.test(plan.values_sql));
+  // В TRINO НЕТ ILIKE — это синтаксис Postgres и Greenplum. Живой прогон
+  // 2026-08-28 ответил «mismatched input 'ILIKE'», то есть запрос не разобрался
+  // вовсе. Регистронезависимость делается через lower() на колонке: слова
+  // уже приведены к нижнему регистру в needlesOf.
+  checkS('ILIKE не используется', !/ILIKE/i.test(plan.values_sql));
   // Слово режется до основы тем же needlesOf, что и фильтр по описаниям, и это
   // здесь намеренно: ilike '%аналит%' поймает и «Бизнес-аналитик BI», и
   // «Аналитики BI», а точное '%аналитик%' промахнулось бы мимо склонения —
   // ровно как промахивалась подстрока «почты» до правки 2026-08-27.
-  checkS('слово подставлено с обёртками, по основе', /ILIKE '%аналит%'/.test(plan.values_sql));
+  checkS('слово подставлено с обёртками, по основе', /LIKE '%аналит%'/.test(plan.values_sql));
   // Перенос строки в SQL обязан быть настоящим переносом: литеральный \\n
   // Trino не разберёт, а по виду JSON это неотличимо от нормального запроса.
   checkS('в SQL настоящие переносы строк',
@@ -913,6 +919,39 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     meaning.values_fields[0] === 'emp_specialization_desc');
   checkS('by_meaning: несовпавшие поля в запрос не попали',
     !/a_first_col|b_second_col/.test(meaning.values_sql));
+
+  // СУРРОГАТНЫЕ КЛЮЧИ И ФЛАГИ значений не несут. Живой прогон 2026-08-28:
+  // запрос ушёл по `legal_unit_rk` — скан витрины ради списка чисел, тогда
+  // как заказчик называет «Human Capital Origination». Сопоставить одно
+  // с другим по такому списку нельзя, а стоит он столько же, сколько полезный.
+  const keys = runValuesSql({ urn: URN_T, values: 'аналитик' },
+    { statusCode: 200, body: { data: [
+      { entity: { fqn: 'emart.t.legal_unit_rk' } },
+      { entity: { fqn: 'emart.t.last_day_flg' } },
+      { entity: { fqn: 'emart.t.emp_specialization_desc' } },
+    ] } },
+    [{ field: 'legal_unit_rk' }, { field: 'last_day_flg' },
+     { field: 'emp_specialization_desc' }],
+    [{ body: {} }, { body: {} }, { body: {} }]);
+  checkS('ключ в запрос не попал', !/legal_unit_rk AS varchar/.test(keys.values_sql));
+  checkS('флаг в запрос не попал', !keys.values_fields.includes('last_day_flg'));
+  checkS('название попало', keys.values_fields.includes('emp_specialization_desc'));
+  checkS('исключение ключа названо',
+    keys.values_skipped.some((x) => /legal_unit_rk.*ключ или флаг/.test(x)));
+  // Канонический срез при этом остаётся: last_day_flg не годится как поле
+  // ДЛЯ ПОИСКА значений, но как фильтр обязателен.
+  checkS('канонический срез не пострадал', /last_day_flg = 1/.test(keys.values_sql));
+
+  // Все поля оказались ключами — причина называется по факту, а не
+  // «исключены как чувствительные»: это отправило бы запрашивать доступ
+  // там, где дело совсем в другом.
+  const allKeys = runValuesSql({ urn: URN_T, values: 'аналитик' },
+    { statusCode: 200, body: { data: [{ entity: { fqn: 'emart.t.legal_unit_rk' } }] } },
+    [{ field: 'legal_unit_rk' }], [{ body: {} }]);
+  checkS('без подходящих полей запроса нет', allKeys.values_sql === '');
+  checkS('и причина названа точно',
+    /не годится для поиска/.test(allKeys.values_reason) &&
+    !/чувствительн/.test(allKeys.values_reason));
 
   // Слов не задали — запроса нет вовсе: тянуть значения «на всякий случай»
   // значит платить сканом витрины на каждой выгрузке.

@@ -2167,5 +2167,67 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   check('время проставлено', typeof out.event_ts === 'number' && out.event_ts > 0);
 }
 
+// ===================================================================== 47
+line('47. В Trino не уезжает синтаксис Postgres');
+{
+  // Живой прогон 2026-08-28: запрос значений ушёл с ILIKE и не разобрался
+  // вовсе — «mismatched input 'ILIKE'». Это оператор Postgres и Greenplum,
+  // в Trino его нет. Ошибка была громкой и потому дешёвой, но повторять её
+  // незачем: SQL здесь СОБИРАЕТСЯ кодом, а проверить его можно только
+  // прогоном — по виду JSON он выглядит как обычная строка.
+  //
+  // Список узкий намеренно, из подтверждённых различий: широкая проверка
+  // «похоже на Postgres» дала бы ложные тревоги на верном запросе, и на неё
+  // перестали бы смотреть — как и на всякую строку, которая горит всегда.
+  const PG_ONLY = [
+    [/\bILIKE\b/i, 'ILIKE — в Trino нет, нужно lower(col) LIKE lower(...)'],
+    [/::\s*(?:varchar|text|int|integer|bigint|date|timestamp)\b/i,
+     ':: — приведение типа по-постгресовому, в Trino CAST(x AS type)'],
+    [/\bnextval\s*\(/i, 'nextval — последовательностей в Trino нет'],
+  ];
+  // Комментарии выбрасываются перед проверкой: слово ILIKE встречается
+  // в объяснениях, почему его нельзя писать, и детектор ловил бы сам текст
+  // правила. Ложная тревога на верном коде обесценивает проверку быстрее,
+  // чем её отсутствие.
+  const stripComments = (t) => t
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split('\n').map((l) => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n');
+  const sources = [];
+  for (const f of ['DD Lookup.json', 'Support Bot Core.json',
+                   '../telemetry/Telemetry Flush.json']) {
+    if (!fs.existsSync(f)) continue;
+    const flow = JSON.parse(fs.readFileSync(f, 'utf8'));
+    for (const n of flow.nodes || []) {
+      const code = n.parameters && n.parameters.jsCode;
+      if (typeof code === 'string') {
+        sources.push([`${f.split('/').pop()} · ${n.name}`, stripComments(code)]);
+      }
+      const qy = n.parameters && n.parameters.query;
+      if (typeof qy === 'string') sources.push([`${f.split('/').pop()} · ${n.name} (query)`, qy]);
+    }
+  }
+  const sqlFile = '../telemetry/support_request.sql';
+  if (fs.existsSync(sqlFile)) {
+    // В SQL комментарии свои — двойной дефис.
+    sources.push(['support_request.sql', fs.readFileSync(sqlFile, 'utf8')
+      .split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')]);
+  }
+  check(`источников SQL просканировано (${sources.length})`, sources.length > 3);
+  for (const [where, text] of sources) {
+    for (const [re, why] of PG_ONLY) {
+      check(`${where}: ${why.split(' —')[0]}`, !re.test(text), re.test(text) ? why : '');
+    }
+  }
+
+  // Детектор проверен на том, что реально сломалось, — иначе зелёный тест
+  // не значит ничего: сломанный детектор и чистый код по выводу неразличимы.
+  check('детектор ловит ILIKE',
+    PG_ONLY[0][0].test("WHERE CAST(x AS varchar) ILIKE '%а%'"));
+  check('и не ругается на LIKE',
+    !PG_ONLY[0][0].test("WHERE lower(CAST(x AS varchar)) LIKE '%а%'"));
+  check('детектор ловит ::', PG_ONLY[1][0].test('x::varchar'));
+  check('и не ругается на CAST', !PG_ONLY[1][0].test('CAST(x AS varchar)'));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

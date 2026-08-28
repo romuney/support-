@@ -1161,6 +1161,19 @@ const fqn = String(inp.urn || '').split(':').pop();
 const dot = fqn.indexOf('.');
 const table = dot === -1 ? '' : `prod_v_${fqn.slice(0, dot)}.${fqn.slice(dot + 1)}`;
 
+// СУРРОГАТНЫЕ КЛЮЧИ И ФЛАГИ ЗНАЧЕНИЙ НЕ НЕСУТ.
+//
+// Живой прогон 2026-08-28: запрос ушёл по `legal_unit_rk`, и это скан витрины
+// ради списка чисел. Заказчик называет «Human Capital Origination», а не
+// ключ юнита; сопоставить одно с другим по такому списку нельзя, а стоит он
+// столько же, сколько полезный. Флаги — то же самое: их значения 0 и 1,
+// и фильтр по ним заказчик словами не задаёт.
+//
+// Соглашение проекта прямое: `*_rk` против `*_nm`, джойн по названиям
+// запрещён (см. kb/tables/mdm-employee-structure-d.md). Значит и значения
+// смотрим у названий, а не у ключей.
+const KEYLIKE_RE = /(^|_)(rk|dk|sk|id|flg|dt|num|no)$/i;
+
 const skipped = [];
 const fields = [];
 cand.forEach((d) => {
@@ -1168,6 +1181,7 @@ cand.forEach((d) => {
   const f = d.field;
   if (!/^[a-z_][a-z0-9_]*$/i.test(f)) return;      // в SQL идёт только имя-идентификатор
   if (PII_RE.test(f)) { skipped.push(`${f} (имя похоже на ПДн)`); return; }
+  if (KEYLIKE_RE.test(f)) { skipped.push(`${f} (ключ или флаг, значений не несёт)`); return; }
   const acc = accessOf(d.attrs);
   if (acc.known && acc.groups) { skipped.push(`${f} (чувствительное)`); return; }
   fields.push(f);
@@ -1186,16 +1200,29 @@ if (!ok) {
                     values_skipped: skipped, values_table: table,
                     values_reason: !words.length ? 'слов для поиска значений не задано'
                       : !table ? 'из URN не вывелось имя таблицы'
-                      : 'все отобранные поля исключены как чувствительные' } }];
+                      // Причина называется по факту, а не одной формулировкой
+                      // на все случаи: «исключены как чувствительные» на списке
+                      // из ключей и флагов отправило бы запрашивать доступ там,
+                      // где дело в другом.
+                      : 'ни одно из отобранных полей не годится для поиска '
+                        + 'значений: ' + (skipped.join(', ') || 'подходящих полей нет') } }];
 }
 
 const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 const like = words.map((w) => q('%' + w + '%'));
 const slice = hasSlice ? 'last_day_flg = 1 AND ' : '';
+// В TRINO НЕТ ILIKE. Это синтаксис Postgres и Greenplum, а здесь Trino, и он
+// отвечает на него разбором: «mismatched input 'ILIKE'» — прогон 2026-08-28.
+// Регистронезависимость делается через lower(): слова уже приведены к нижнему
+// регистру в needlesOf, поэтому lower() нужен только на колонке.
+//
+// Ошибка была громкой и потому дешёвой: нода стоит с continueRegularOutput,
+// шейпер назвал это отказом запроса, а не «значений не найдено», и ответ
+// по витрине не пропал. Ровно ради этого пять исходов и разведены.
 const parts = fields.map((f) =>
   `SELECT ${q(f)} AS fld, CAST(${f} AS varchar) AS val, count(*) AS cnt\n` +
   `FROM ${table}\nWHERE ${slice}(` +
-  like.map((l) => `CAST(${f} AS varchar) ILIKE ${l}`).join(' OR ') +
+  like.map((l) => `lower(CAST(${f} AS varchar)) LIKE ${l}`).join(' OR ') +
   `)\nGROUP BY 1, 2`);
 
 return [{ json: {
