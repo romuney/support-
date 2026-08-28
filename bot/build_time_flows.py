@@ -1298,6 +1298,10 @@ core_nodes += [
                     # и вернёт РЕАЛЬНЫЕ значения поля. Пусто — ветка значений
                     # в субворкфлоу не запускается вовсе, скана витрины нет.
                     "values": "={{ $json.values }}",
+                    # Вопрос целиком — узлу, который раскладывает слова
+                    # заказчика по полям витрины: без него «юнит» одинаково
+                    # похож и на управленческую структуру, и на юридическую.
+                    "question": "={{ $('When called by adapter').first().json.question }}",
                 },
                 "matchingColumns": [],
                 "schema": [
@@ -1310,7 +1314,7 @@ core_nodes += [
                         "canBeUsedToMatch": True,
                         "type": "string",
                     }
-                    for k in ("urn", "search", "values")
+                    for k in ("urn", "search", "values", "question")
                 ],
                 "attemptToConvertTypes": False,
                 "convertFieldsToString": True,

@@ -1928,11 +1928,42 @@ line('42. ВХОД values проложен от роутера до запрос
   // ответ — и по виду флоу это выглядело успешным прогоном.
   check('пустой результат не останавливает воркфлоу',
     val && val.alwaysOutputData === true);
-  // Ветка значений в принципе не должна мочь оборвать цепочку до шейпера:
-  // у неё один выход, и он ведёт в «Shape table meta».
+  // ДВА ПРОХОДА, и ни один не может оборвать цепочку до шейпера. Первый
+  // ведёт не в шейпер, а в построение второго: код решает, нужен ли он.
+  // Ложная ветвь гейта и второй проход оба заканчиваются шейпером.
   const after = ((lookup.connections['dd_values'] || {}).main || [])[0] || [];
-  check('и ведёт в шейпер',
-    after.length === 1 && after[0].node === 'Shape table meta');
+  check('первый проход ведёт в построение второго',
+    after.length === 1 && after[0].node === 'Retry values SQL');
+  const gate = (lookup.connections['Need retry'] || {}).main || [];
+  check('второй проход за гейтом',
+    (gate[0] || []).some((t) => t.node === 'dd_values_retry'));
+  check('и без второго прохода поток идёт в шейпер',
+    (gate[1] || []).some((t) => t.node === 'Shape table meta'));
+  const retryOut = ((lookup.connections['dd_values_retry'] || {}).main || [])[0] || [];
+  check('второй проход тоже ведёт в шейпер',
+    retryOut.length === 1 && retryOut[0].node === 'Shape table meta');
+  const retryNode = lookup.nodes.find((n) => n.name === 'dd_values_retry');
+  check('у второго прохода те же предохранители',
+    retryNode && retryNode.onError === 'continueRegularOutput' &&
+    retryNode.alwaysOutputData === true);
+
+  // ЧТО проверять — решает модель, КАК запрашивать — код. Граница
+  // сознательная: канонический срез, запрет ПДн и потолки строк остаются
+  // свойствами кода, а не пожеланиями к модели.
+  const picker = lookup.nodes.find((n) => n.name === 'Pick value fields');
+  check('узел выбора полей есть', Boolean(picker));
+  check('у него есть модель',
+    Boolean((lookup.connections['Pick values model'] || {}).ai_languageModel));
+  check('сломанный ответ модели не роняет каталог',
+    picker && picker.onError === 'continueRegularOutput');
+  const sqlNode = lookup.nodes.find((n) => n.name === 'Build values SQL');
+  check('SQL строит КОД, а не модель',
+    sqlNode && sqlNode.type === 'n8n-nodes-base.code');
+  // Вопрос заказчика доезжает до узла выбора: без него «юнит» одинаково
+  // похож и на управленческую структуру, и на юридическую.
+  const trg = lookup.nodes.find((n) => n.type.endsWith('executeWorkflowTrigger'));
+  const inputs = (trg.parameters.workflowInputs.values || []).map((v) => v.name);
+  check('вопрос объявлен входом каталога', inputs.includes('question'));
   check('гейт перед запросом есть',
     lookup.nodes.some((n) => n.name === 'Need values'));
 }

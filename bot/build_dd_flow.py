@@ -183,6 +183,13 @@ trigger = {
                 # (emp_specialization_desc), а значение — нет, потому что
                 # перечня значений в каталоге нет вовсе, он только в данных.
                 {"name": "values"},
+                # Вопрос заказчика целиком — только для узла «Pick value
+                # fields»: чтобы разложить слова по полям, нужно понимать,
+                # про что вопрос. «Юнит Human Capital Origination» — это
+                # управленческая структура, а не юридическая, и различить
+                # их можно по смыслу вопроса и описанию поля, но не по
+                # подстроке «юнит», которая одинаково похожа на оба.
+                {"name": "question"},
             ]
         },
     },
@@ -364,6 +371,36 @@ function needlesOf(search) {
 function matchesAny(text, needles) {
   const t = String(text || '').toLowerCase();
   return needles.some((n) => n && t.includes(n));
+}
+
+// СЛОВА ФРАЗЫ ИЩУТСЯ ОТДЕЛЬНО ОТ САМОЙ ФРАЗЫ.
+//
+// needlesOf режет только по запятым, поэтому «BI-аналитик» уезжал в запрос
+// целиком: `LIKE '%bi-аналитик%'`. В витрине значение записано иначе —
+// «Бизнес-аналитик BI», — и совпадений ноль при том, что данные есть.
+// Искать надо по «аналит»: тогда видно и как специализация называется
+// на самом деле, и какие ещё есть рядом.
+//
+// Фраза при этом остаётся: точное совпадение ценнее приблизительного,
+// а список альтернатив в OR ничего не теряет — он только добавляет.
+function valueNeedles(raw) {
+  const out = [];
+  const add = (w) => { if (w && !out.includes(w)) out.push(w); };
+  // Режем СЫРУЮ фразу, а основу считаем ОДИН раз. Иначе «аналитик»
+  // превращался в «аналит», потом ещё раз в «анал» — четыре буквы, которые
+  // совпадут с чем угодно и утопят полезное. Стемминг не идемпотентен,
+  // и применять его дважды нельзя.
+  for (const phrase of String(raw || '').toLowerCase().split(/[,;\n]+/)) {
+    const p = phrase.trim();
+    if (!p) continue;
+    add(needlesOf(p)[0] || p);
+    for (const part of p.split(/[\s\-–—_/]+/)) {
+      // Короче трёх символов не берём — «bi» совпадёт с половиной справочника.
+      if (part.length < 3) continue;
+      add(needlesOf(part)[0] || part);
+    }
+  }
+  return out;
 }
 
 function shortName(o) {
@@ -713,8 +750,17 @@ function valuesBlock() {
     return;
   }
 
-  let res;
+  // ДВА ПРОХОДА, и оба читаются. Второй идёт по ЗАПАСНОМУ полю пары —
+  // модель называет его сразу, поэтому промах выбора лечится без второго
+  // обращения к ней. Не выполнялся ни один — это сбой конвейера, и он
+  // отличается от «значений не нашлось».
+  let res = null;
+  let ranTwice = false;
   try { res = $('dd_values').all().map((i) => i.json); } catch (e) { res = null; }
+  try {
+    const more = $('dd_values_retry').all().map((i) => i.json);
+    if (more.length) { res = (res || []).concat(more); ranTwice = true; }
+  } catch (e) { /* второй проход не понадобился — нормальный путь */ }
 
   out.push('');
   if (res === null) {
@@ -817,6 +863,19 @@ function valuesBlock() {
     (isYes(r.matched) ? byField.get(f).hit : byField.get(f).sample).push(r);
   }
   const anyHit = [...byField.values()].some((g) => g.hit.length);
+  // Пары «слово → поле» пришли от модели. Печатаем их автору: по ним видно,
+  // ЧТО именно проверялось, и промах выбора становится заметен — раньше
+  // слова подставлялись в каждое поле подряд, и понять, почему запрос ушёл
+  // в legal_unit_nm, было нельзя.
+  const pairs = Array.isArray(plan.values_pairs) ? plan.values_pairs : [];
+  if (pairs.length) {
+    out.push('');
+    out.push('ПРОВЕРЯЛИСЬ ПАРЫ «значение → поле»: ' +
+      pairs.map((p) => `«${p.value}» → ${p.field}` +
+        (p.fallback ? ` (запасное: ${p.fallback})` : '')).join('; ') +
+      (ranTwice ? '. По части пар первое поле не дало совпадений, ' +
+        'и вторая попытка прошла по запасному.' : '.'));
+  }
 
   out.push(
     anyHit
@@ -1166,7 +1225,7 @@ return [{ json: { dd_meta: out.join('\n') } }];
 #   по числовому столбцу Trino не выполнит.
 # — ПУСТОЙ СПИСОК СЛОВ = ЗАПРОСА НЕТ. Тянуть значения «на всякий случай»
 #   значит платить сканом витрины на каждой выгрузке.
-VALUES_SQL = COMMON_JS + r"""
+VALUE_CANDIDATES = COMMON_JS + r"""
 const MAX_VALUE_FIELDS = 4;
 // Потолки НА ПОЛЕ, а не на весь запрос. Общий LIMIT давал одному полю
 // вытеснить остальные: сортировка по частоте, а частоты у разных полей
@@ -1180,32 +1239,11 @@ const MAX_ROWS = 60;
 
 const inp = $('When called by agent').first().json;
 
-// СЛОВА ФРАЗЫ ИЩУТСЯ ОТДЕЛЬНО ОТ САМОЙ ФРАЗЫ.
-//
-// needlesOf режет только по запятым, поэтому «BI-аналитик» уезжал в запрос
-// целиком: `LIKE '%bi-аналитик%'`. В витрине значение записано иначе —
-// «Бизнес-аналитик BI», — и совпадений ноль при том, что данные есть.
-// Искать надо по «аналит»: тогда видно и как специализация называется
-// на самом деле, и какие ещё есть рядом.
-//
-// Фраза при этом остаётся: точное совпадение ценнее приблизительного,
-// а список альтернатив в OR ничего не теряет — он только добавляет.
-function valueNeedles(raw) {
-  const out = [];
-  const add = (w) => { if (w && !out.includes(w)) out.push(w); };
-  for (const phrase of needlesOf(raw)) {
-    add(phrase);
-    // Слова фразы: по пробелам и дефисам. Короче трёх символов не берём —
-    // «bi» совпадёт с половиной справочника и утопит полезное.
-    for (const part of phrase.split(/[\s\-–—_/]+/)) {
-      if (part.length < 3) continue;
-      add(needlesOf(part)[0] || part);
-    }
-  }
-  return out;
-}
 
-const words = valueNeedles(inp.values);
+// Слова остаются СЫРЫМИ: их читает модель при раскладке по полям и автор
+// в блоке значений, а основы считаются один раз, при сборке SQL.
+const words = String(inp.values || '').split(/[,;\n]+/)
+  .map((x) => x.trim()).filter(Boolean);
 
 // Имена, по которым значения не тянем никогда, даже если признак пуст.
 // ПЕРСОНАЛЬНОЕ — ЭТО ПОЛЕ ПРО ЧЕЛОВЕКА, А НЕ ЛЮБОЕ ПОЛЕ С `_nm`.
@@ -1321,86 +1359,30 @@ if (overCap > 0) {
   skipped.push(`ещё ${overCap} полей (потолок ${MAX_VALUE_FIELDS} на один запрос)`);
 }
 
-const ok = Boolean(words.length && table && fields.length);
-if (!ok) {
-  return [{ json: { values_sql: '', values_fields: [], values_words: words,
-                    values_skipped: skipped, values_table: table,
-                    values_reason: !words.length ? 'слов для поиска значений не задано'
-                      : !table ? 'из URN не вывелось имя таблицы'
-                      // Причина называется по факту, а не одной формулировкой
-                      // на все случаи: «исключены как чувствительные» на списке
-                      // из ключей и флагов отправило бы запрашивать доступ там,
-                      // где дело в другом.
-                      : 'ни одно из отобранных полей не годится для поиска '
-                        + 'значений: ' + (skipped.join(', ') || 'подходящих полей нет') } }];
-}
 
-const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-const like = words.map((w) => q('%' + w + '%'));
-const slice = hasSlice ? 'last_day_flg = 1' : '';
-// В TRINO НЕТ ILIKE. Это синтаксис Postgres и Greenplum, а здесь Trino, и он
-// отвечает на него разбором: «mismatched input 'ILIKE'» — прогон 2026-08-28.
-// Регистронезависимость делается через lower(): слова уже приведены к нижнему
-// регистру в needlesOf, поэтому lower() нужен только на колонке.
-//
-// Ошибка была громкой и потому дешёвой: нода стоит с continueRegularOutput,
-// шейпер назвал это отказом запроса, а не «значений не найдено», и ответ
-// по витрине не пропал. Ровно ради этого пять исходов и разведены.
-// ЗАПРОС НА ПОЛЕ, а не один UNION на все.
-//
-// Раньше поля объединялись через UNION ALL, чтобы «HTTP-вызов остался один».
-// Довод не выдерживает: соседние узлы этого же флоу, dd_column_summary
-// и dd_column_attrs, уже выполняются по разу на КОЛОНКУ — до 289 запросов
-// на таблицу. Четыре запроса к Trino на этом фоне не стоят ничего, а UNION
-// покупал за них дорого:
-//   — типы всех полей приходилось сводить к общему через CAST;
-//   — потолок на поле требовал оконной функции и трёх уровней вложенности;
-//   — шейпер всё равно резал результат обратно по `fld`, то есть склейка
-//     разбиралась на обоих концах.
-// Плюс отказ одного поля ронял выдачу по всем остальным.
-//
-// n8n выполняет ноду по разу на входной элемент, поэтому «по запросу на
-// поле» — это просто N элементов на выходе, без единой лишней ноды.
-//
-// Фильтра по словам в WHERE нет намеренно: он не экономит скан (GROUP BY
-// и так идёт по всему срезу), а промах слов давал ноль строк — «таких
-// значений нет» при живых данных. Вместо этого признак `matched` считается
-// в SELECT, а сортировка по нему поднимает совпавшее наверх: тогда потолок
-// строк не может выбросить искомое.
-//
-// Канонический срез, наоборот, обязателен: без него это скан всей истории.
-const rows = fields.map((f) => {
-  const v = `CAST(${f} AS varchar)`;
-  const matchExpr = like.map((l) => `lower(${v}) LIKE ${l}`).join(' OR ') || 'false';
-  return {
-    field: f,
-    sql:
-      `SELECT ${q(f)} AS fld, ${v} AS val, count(*) AS cnt,\n` +
-      `       (${matchExpr}) AS matched\n` +
-      `FROM ${table}\n` +
-      (slice ? `WHERE ${slice}\n` : '') +
-      `GROUP BY ${f}\n` +
-      `ORDER BY matched DESC, cnt DESC\n` +
-      `LIMIT ${MAX_ROWS}`,
-  };
-});
+// Текст для модели: имя поля и описание из каталога. Только кандидаты —
+// то, что уже прошло фильтры ПДн, ключей и чувствительности, — иначе
+// модель получит 289 строк и выберет из того, что мы всё равно не спросим.
+const MAX_SHOWN = 40;
+const shown = ranked.filter((d) => fields.includes(d.field)).slice(0, MAX_SHOWN);
+const fieldsText = shown
+  .map((d) => `${d.field} — ${(d.desc || d.comment || 'описания нет').slice(0, 160)}`)
+  .join('\n');
 
-// Элемент на поле: n8n выполнит ноду запроса по разу на каждый.
-// Общие для всех полей факты (слова, исключённое, таблица) едут в каждом
-// элементе — шейпер читает их с первого, а разъехаться им негде.
-return rows.map((r) => ({ json: {
-  values_sql: r.sql,
-  values_field: r.field,
-  values_limit: MAX_ROWS,
-  values_sample: MAX_SAMPLE,
-  values_matched_shown: MAX_MATCHED,
-  values_fields: fields,
+return [{ json: {
+  values_candidates: fields,
+  fields_text: fieldsText || 'подходящих полей нет',
   values_words: words,
   values_skipped: skipped,
   values_table: table,
   values_slice: hasSlice,
-  values_reason: '',
-} }));
+  values_ready: Boolean(words.length && table && fields.length),
+  values_reason: words.length && table && fields.length ? ''
+    : !words.length ? 'слов для поиска значений не задано'
+    : !table ? 'из URN не вывелось имя таблицы'
+    : 'ни одно из отобранных полей не годится для поиска значений: '
+      + (skipped.join(', ') || 'подходящих полей нет'),
+} }];
 """
 
 PICK_COLUMNS = COMMON_JS + r"""
@@ -1642,7 +1624,267 @@ def code(name, js, pos):
 
 
 pick_columns = code("Pick columns", PICK_COLUMNS, [700, 200])
+
+# Из пар модели — запросы. SQL пишет КОД: канонический срез, потолки
+# и запрет на ПДн остаются гарантиями, а не пожеланиями.
+VALUES_SQL = COMMON_JS + r"""
+const MAX_ROWS = 60;
+
+const plan = $('Value candidates').first().json;
+const table = String(plan.values_table || '');
+const allowed = Array.isArray(plan.values_candidates) ? plan.values_candidates : [];
+
+if (!plan.values_ready || !allowed.length) {
+  return [{ json: { ...plan, values_sql: '', values_pairs: [] } }];
+}
+
+// Разбор ответа модели. Формат сломан — не роняем лукап: инвентарь полей
+// важнее значений, а причина уезжает автору текстом.
+let pairs = [];
+let pickError = '';
+try {
+  const raw = String($json.output ?? $json.text ?? '');
+  const a = raw.indexOf('{');
+  const b = raw.lastIndexOf('}');
+  if (a === -1 || b <= a) throw new Error('в ответе нет JSON');
+  const got = JSON.parse(raw.slice(a, b + 1));
+  pairs = Array.isArray(got.pairs) ? got.pairs : [];
+} catch (e) {
+  pickError = `разбор ответа модели не удался: ${e.message}`;
+}
+
+// ПОЛЕ ИЗ ОТВЕТА МОДЕЛИ ПРОВЕРЯЕТСЯ ПО СПИСКУ КАНДИДАТОВ.
+// Придуманное имя — это либо ошибка Trino, либо, хуже, обращение к полю,
+// которое мы намеренно исключили как персональное. Ответ модели здесь
+// данные, а не команда.
+const clean = [];
+const dropped = [];
+for (const p of pairs) {
+  const value = String((p && p.value) || '').trim();
+  const field = String((p && p.field) || '').trim();
+  const fallback = String((p && p.fallback) || '').trim();
+  if (!value || !allowed.includes(field)) {
+    if (value || field) dropped.push(`${value || '?'} → ${field || '?'}`);
+    continue;
+  }
+  clean.push({ value, field, fallback: allowed.includes(fallback) ? fallback : '' });
+}
+
+// Модель не дала ни одной годной пары — не гадаем и не подставляем перебор:
+// именно перебор «каждое слово в каждое поле» и приводил к запросам вида
+// `legal_unit_nm LIKE '%15%'`. Причина называется автору.
+if (!clean.length) {
+  return [{ json: { ...plan, values_sql: '', values_pairs: [],
+    values_reason: pickError ||
+      'модель не сопоставила ни одного слова заказчика с полями витрины',
+    values_dropped: dropped } }];
+}
+
+const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+const slice = plan.values_slice ? 'last_day_flg = 1' : '';
+
+// Слова одной пары: сама фраза плюс её слова по основам. Ищем только
+// в СВОЁМ поле — это и есть то, чего не хватало.
+const sqlFor = (field, value) => {
+  const v = `CAST(${field} AS varchar)`;
+  const needles = valueNeedles(value);
+  const expr = needles.map((w) => `lower(${v}) LIKE ${q('%' + w + '%')}`).join(' OR ') || 'false';
+  return {
+    sql:
+      `SELECT ${q(field)} AS fld, ${v} AS val, count(*) AS cnt,\n` +
+      `       (${expr}) AS matched\n` +
+      `FROM ${table}\n` +
+      (slice ? `WHERE ${slice}\n` : '') +
+      `GROUP BY ${field}\n` +
+      `ORDER BY matched DESC, cnt DESC\n` +
+      `LIMIT ${MAX_ROWS}`,
+    needles,
+  };
+};
+
+return clean.map((p) => {
+  const built = sqlFor(p.field, p.value);
+  return { json: {
+    ...plan,
+    values_sql: built.sql,
+    values_field: p.field,
+    values_value: p.value,
+    values_fallback: p.fallback,
+    values_needles: built.needles,
+    values_limit: MAX_ROWS,
+    values_sample: 6,
+    values_matched_shown: 25,
+    values_pairs: clean,
+    values_dropped: dropped,
+    values_pick_error: pickError,
+  } };
+});
+"""
+
+# ВТОРОЙ ПРОХОД — по ЗАПАСНЫМ полям, и без второго вызова модели.
+#
+# «Одна попытка, ничего не нашлось, успокоился» — так было, и это неверно.
+# Но ретрай тем же запросом бессмыслен: причина промаха не в запросе,
+# а в ВЫБОРЕ поля. Поэтому модель сразу называет запасное поле к каждой
+# паре, а второй проход идёт по нему — детерминированно и ровно один раз.
+RETRY_VALUES_JS = COMMON_JS + r"""
+const MAX_ROWS = 60;
+
+const built = $('Build values SQL').all().map((i) => i.json);
+let got = [];
+try { got = $('dd_values').all().map((i) => i.json); } catch (e) { got = []; }
+
+// Совпало ли хоть что-то по каждой паре. Пары идут по порядку, и ответы
+// тоже: узел выполняется по разу на элемент. Но опираться на порядок здесь
+// не нужно — в каждой строке есть `fld`.
+const hitFields = new Set();
+for (const r of got) {
+  const rows = (r && Array.isArray(r.data)) ? r.data : [r];
+  for (const row of rows) {
+    if (row && (row.matched === true || row.matched === 'true') && row.fld) {
+      hitFields.add(String(row.fld));
+    }
+  }
+}
+
+const plan = built[0] || {};
+const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+const slice = plan.values_slice ? 'last_day_flg = 1' : '';
+const table = String(plan.values_table || '');
+
+// Вторая попытка нужна только там, где первая не дала совпадений
+// И у пары есть запасное поле.
+const retry = built.filter((b) => b.values_field && b.values_fallback &&
+  !hitFields.has(b.values_field));
+
+if (!retry.length || !table) {
+  return [{ json: { ...plan, values_sql: '', retry_none: true } }];
+}
+
+return retry.map((b) => {
+  const f = b.values_fallback;
+  const v = `CAST(${f} AS varchar)`;
+  const needles = valueNeedles(b.values_value);
+  const expr = needles.map((w) => `lower(${v}) LIKE ${q('%' + w + '%')}`).join(' OR ') || 'false';
+  return { json: {
+    ...b,
+    values_field: f,
+    values_first_field: b.values_field,
+    values_needles: needles,
+    values_sql:
+      `SELECT ${q(f)} AS fld, ${v} AS val, count(*) AS cnt,\n` +
+      `       (${expr}) AS matched\n` +
+      `FROM ${table}\n` +
+      (slice ? `WHERE ${slice}\n` : '') +
+      `GROUP BY ${f}\n` +
+      `ORDER BY matched DESC, cnt DESC\n` +
+      `LIMIT ${MAX_ROWS}`,
+  } };
+});
+"""
+
+# ---------------------------------------------- выбор полей под значения
+#
+# ЧТО ПРОВЕРЯТЬ — РЕШАЕТ МОДЕЛЬ, КАК ЗАПРАШИВАТЬ — РЕШАЕТ КОД.
+#
+# Живой прогон 2026-08-28 показал, почему нужен первый: слова заказчика
+# и поля витрины связывались перебором — КАЖДОЕ слово подставлялось
+# в КАЖДОЕ поле. В запрос ушло `lower(legal_unit_nm) LIKE '%аналит%'`
+# и `LIKE '%15%'`: искать специализацию и грейд внутри названия
+# юридического подразделения бессмысленно, а сам юнит из вопроса
+# относится к УПРАВЛЕНЧЕСКОЙ структуре, то есть к другому полю.
+# Различить их по имени и описанию — суждение о смысле, и код его
+# не сделает: `legal_unit_nm` и `mapped_management_unit_nm` для фильтра
+# по подстроке одинаково похожи на «юнит».
+#
+# А вот SQL модель не пишет. Это сознательная граница: канонический срез
+# `last_day_flg = 1`, запрет тянуть ПДн и потолки строк — свойства кода,
+# и если запрос начнёт писать модель, они перестанут быть гарантиями
+# и станут пожеланиями. Тот же довод, по которому мастеров домена
+# добирает код, а не промпт.
+#
+# Модель отдаёт ПАРЫ и ЗАПАСНОЕ поле к каждой: запасное — это и есть
+# второй проход. Промах выбора лечится без второго вызова модели.
+PICK_VALUES_PROMPT = """=Ты сопоставляешь слова заказчика с полями витрины. Ничего не считаешь \
+и запросов не пишешь — только раскладываешь.
+
+ВОПРОС ЗАКАЗЧИКА:
+{{ $('When called by agent').first().json.question || $('When called by agent').first().json.values }}
+
+ЗНАЧЕНИЯ-ФИЛЬТРЫ, которые он назвал: {{ $('When called by agent').first().json.values }}
+
+ПОЛЯ ВИТРИНЫ (имя — описание из каталога):
+{{ $json.fields_text }}
+
+Верни JSON и ничего кроме него:
+{"pairs": [{"value": "<слово заказчика>", "field": "<имя поля>", "fallback": "<имя другого поля или пустая строка>"}]}
+
+Правила:
+1. Одно слово — одна пара. Значение бери ДОСЛОВНО из списка выше.
+2. field — поле, в котором это значение может лежать. Только из списка,
+   имя дословно. Придуманное имя сломает запрос.
+3. fallback — второе по вероятности поле для этого же значения, если такое
+   есть. По нему пойдёт ВТОРАЯ попытка, когда в первом ничего не нашлось.
+   Нет второго кандидата — пустая строка.
+4. Смотри на ОПИСАНИЕ, а не только на имя. «Юнит» из вопроса — это чаще
+   управленческая структура, а не юридическая; поля похожи по имени
+   и различаются описанием.
+5. Значение, которому не соответствует ни одно поле, в pairs не включай.
+   Лишняя пара — это скан витрины впустую.
+6. Числа и коды (грейд, табельный номер) включай, только если есть поле
+   именно под них: искать «15» внутри названия подразделения бессмысленно.
+"""
+
+pick_values = {
+    "parameters": {
+        "promptType": "define",
+        "text": PICK_VALUES_PROMPT,
+        "maxIterations": 1,
+        "options": {},
+    },
+    "type": "@n8n/n8n-nodes-langchain.agent",
+    "typeVersion": 3.2,
+    "position": [520, 200],
+    "id": "dd-pick-values",
+    "name": "Pick value fields",
+    # Ответ модели — материал для кода, а не для человека: сломанный формат
+    # не должен ронять лукап, инвентарь полей важнее значений.
+    "onError": "continueRegularOutput",
+}
+
+_llm_src = next(n for n in wf["nodes"] if n["name"] == "T-Bank LLM proxy")
+pick_model = copy.deepcopy(_llm_src)
+pick_model["name"] = "Pick values model"
+pick_model["id"] = "dd-pick-values-model"
+pick_model["position"] = [520, 420]
+
+value_cands = code("Value candidates", VALUE_CANDIDATES, [340, 200])
 values_sql = code("Build values SQL", VALUES_SQL, [700, 200])
+retry_sql = code("Retry values SQL", RETRY_VALUES_JS, [1320, 340])
+
+# Гейт второго прохода: он нужен только там, где первая попытка не дала
+# совпадений И у пары есть запасное поле. Пустой SQL — второй попытки нет.
+need_retry = {
+    "parameters": {
+        "conditions": {
+            "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
+            "conditions": [{
+                "id": "has-retry",
+                "leftValue": "={{ $json.values_sql }}",
+                "rightValue": "",
+                "operator": {"type": "string", "operation": "notEmpty", "singleValue": True},
+            }],
+            "combinator": "and",
+        },
+        "looseTypeValidation": True,
+        "options": {},
+    },
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [1500, 340],
+    "id": "dd-need-retry",
+    "name": "Need retry",
+}
 
 # Гейт: пустой SQL — значит слов не задали, или все поля исключены как
 # чувствительные, или из URN не вывелось имя таблицы. Во всех трёх случаях
@@ -1696,6 +1938,14 @@ dd_values = {
     "onError": "continueRegularOutput",
 }
 
+
+# Вторая попытка — тот же узел с другим SQL. Отдельным узлом, а не циклом:
+# проходов ровно два, и это видно по схеме флоу, а не по счётчику итераций.
+dd_values_retry = copy.deepcopy(dd_values)
+dd_values_retry["name"] = "dd_values_retry"
+dd_values_retry["id"] = "dd-values-retry"
+dd_values_retry["position"] = [1680, 340]
+
 shape_table = code("Shape table meta", SHAPE_TABLE, [1380, 200])
 shape_report = code("Shape report meta", SHAPE_REPORT, [480, 440])
 
@@ -1737,9 +1987,15 @@ sub = {
         need_cards,
         column_summary,
         column_attrs,
+        value_cands,
+        pick_values,
+        pick_model,
         values_sql,
         need_values,
         dd_values,
+        retry_sql,
+        need_retry,
+        dd_values_retry,
         shape_table,
         report_markdown,
         report_attrs,
@@ -1778,6 +2034,15 @@ sub = {
             "main": [[{"node": "dd_column_attrs", "type": "main", "index": 0}]]
         },
         "dd_column_attrs": {
+            "main": [[{"node": "Value candidates", "type": "main", "index": 0}]]
+        },
+        # Кандидаты → модель раскладывает слова по полям → код строит запрос.
+        # Цепочкой, а не веером: у «Shape table meta» и так три входа,
+        # и параллельная ветвь запустила бы его дважды.
+        "Value candidates": {
+            "main": [[{"node": "Pick value fields", "type": "main", "index": 0}]]
+        },
+        "Pick value fields": {
             "main": [[{"node": "Build values SQL", "type": "main", "index": 0}]]
         },
         "Build values SQL": {
@@ -1793,7 +2058,28 @@ sub = {
                 [{"node": "Shape table meta", "type": "main", "index": 0}],
             ]
         },
+        # Модель подключается ai_languageModel-входом, как роутер и автор.
+        "Pick values model": {
+            "ai_languageModel": [
+                [{"node": "Pick value fields", "type": "ai_languageModel", "index": 0}]
+            ]
+        },
+        # Первый проход ведёт НЕ в шейпер, а в построение второго: код решает,
+        # нужен ли он вообще. Пустой SQL — второй попытки нет, и ложная ветвь
+        # IF уводит поток в шейпер напрямую.
         "dd_values": {
+            "main": [[{"node": "Retry values SQL", "type": "main", "index": 0}]]
+        },
+        "Retry values SQL": {
+            "main": [[{"node": "Need retry", "type": "main", "index": 0}]]
+        },
+        "Need retry": {
+            "main": [
+                [{"node": "dd_values_retry", "type": "main", "index": 0}],
+                [{"node": "Shape table meta", "type": "main", "index": 0}],
+            ]
+        },
+        "dd_values_retry": {
             "main": [[{"node": "Shape table meta", "type": "main", "index": 0}]]
         },
         # Три независимых запроса цепочкой — просто ради порядка выполнения,

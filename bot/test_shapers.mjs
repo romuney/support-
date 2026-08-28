@@ -82,14 +82,13 @@ function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = n
 }
 
 // Прогон ноды «Build values SQL»: какой SQL она построит и что исключит.
-function runValuesSql(inputs, cols, picked, cards, summaries = null, all = false) {
+// Цепочка «кандидаты → модель раскладывает слова по полям → код строит SQL».
+// Гоняем обе Code-ноды подряд, подставляя ответ модели: что именно она
+// вернёт — предмет промпта, а не кода, и тесты держат КОД.
+function runValueCandidates(inputs, cols, picked, cards, summaries = null) {
   const $ = (name) => {
-    if (name === 'Pick columns') {
-      return { all: () => picked.map((json) => ({ json })) };
-    }
-    if (name === 'dd_column_attrs') {
-      return { all: () => cards.map((json) => ({ json })) };
-    }
+    if (name === 'Pick columns') return { all: () => picked.map((json) => ({ json })) };
+    if (name === 'dd_column_attrs') return { all: () => cards.map((json) => ({ json })) };
     if (name === 'dd_column_summary') {
       const list = summaries !== null ? summaries : picked.map(() => ({ body: { data: '' } }));
       return { all: () => list.map((json) => ({ json })) };
@@ -98,7 +97,23 @@ function runValuesSql(inputs, cols, picked, cards, summaries = null, all = false
       first: () => ({ json: { 'When called by agent': inputs, dd_columns: cols }[name] }),
     };
   };
-  const out = new Function('$', js('Build values SQL'))($);
+  return new Function('$', js('Value candidates'))($)[0].json;
+}
+
+// pairs — то, что вернула бы модель. null = «взять все кандидаты по порядку»,
+// чтобы старые проверки отбора полей остались про отбор, а не про промпт.
+function runValuesSql(inputs, cols, picked, cards, summaries = null, all = false,
+                      pairs = null) {
+  const cand = runValueCandidates(inputs, cols, picked, cards, summaries);
+  const auto = (cand.values_candidates || []).map((field) => ({
+    value: (cand.values_words || [])[0] || '', field, fallback: '',
+  }));
+  const answer = JSON.stringify({ pairs: pairs !== null ? pairs : auto });
+  const $ = (name) => {
+    if (name === 'Value candidates') return { first: () => ({ json: cand }) };
+    throw new Error('node not executed: ' + name);
+  };
+  const out = new Function('$', '$json', js('Build values SQL'))($, { output: answer });
   return all ? out.map((x) => x.json) : out[0].json;
 }
 
@@ -860,7 +875,7 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     plan.values_slice === true && /last_day_flg = 1/.test(plan.values_sql));
   // ПДн не тянем никогда, даже если признак чувствительности пуст.
   checkS('поле с именем ПДн исключено',
-    !plan.values_fields.includes('full_nm') &&
+    !plan.values_candidates.includes('full_nm') &&
     plan.values_skipped.some((x) => /full_nm/.test(x)));
   checkS('исключение названо, а не молча', plan.values_skipped.length === 1);
   // LIKE по числовому столбцу Trino не выполнит — приводим тип. Приведение
@@ -945,8 +960,8 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
      { body: { data: 'Специализация сотрудника' } }],
   );
   checkS('by_meaning: значения тянутся по совпавшему полю',
-    meaning.values_fields.length === 1 &&
-    meaning.values_fields[0] === 'emp_specialization_desc');
+    meaning.values_candidates.length === 1 &&
+    meaning.values_candidates[0] === 'emp_specialization_desc');
   checkS('by_meaning: несовпавшие поля в запрос не попали',
     !/a_first_col|b_second_col/.test(meaning.values_sql));
 
@@ -964,8 +979,8 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
      { field: 'emp_specialization_desc' }],
     [{ body: {} }, { body: {} }, { body: {} }]);
   checkS('ключ в запрос не попал', !/legal_unit_rk AS varchar/.test(keys.values_sql));
-  checkS('флаг в запрос не попал', !keys.values_fields.includes('last_day_flg'));
-  checkS('название попало', keys.values_fields.includes('emp_specialization_desc'));
+  checkS('флаг в запрос не попал', !keys.values_candidates.includes('last_day_flg'));
+  checkS('название попало', keys.values_candidates.includes('emp_specialization_desc'));
   checkS('исключение ключа названо',
     keys.values_skipped.some((x) => /legal_unit_rk.*ключ или флаг/.test(x)));
   // Канонический срез при этом остаётся: last_day_flg не годится как поле
@@ -1003,11 +1018,11 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
      { field: 'ad_login' }, { field: 'contact_main_phone_no' }],
     [{ body: {} }, { body: {} }, { body: {} }, { body: {} }, { body: {} }]);
   checkS('название юнита не считается ПДн',
-    named.values_fields.includes('legal_unit_nm'));
-  checkS('название должности тоже', named.values_fields.includes('position_nm'));
-  checkS('а вот ФИО — считается', !named.values_fields.includes('full_nm'));
-  checkS('и логин', !named.values_fields.includes('ad_login'));
-  checkS('и телефон', !named.values_fields.includes('contact_main_phone_no'));
+    named.values_candidates.includes('legal_unit_nm'));
+  checkS('название должности тоже', named.values_candidates.includes('position_nm'));
+  checkS('а вот ФИО — считается', !named.values_candidates.includes('full_nm'));
+  checkS('и логин', !named.values_candidates.includes('ad_login'));
+  checkS('и телефон', !named.values_candidates.includes('contact_main_phone_no'));
 
   // НАЗВАНИЯ ВПЕРЁД КОДОВ: потолок в четыре поля выбирает из совпавших,
   // и порядок решает. В том же прогоне места заняли `legal_unit_type_cd`
@@ -1020,12 +1035,12 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     { statusCode: 200, body: { data: live.map((x) => ({ entity: { fqn: `emart.t.${x}` } })) } },
     live.map((field) => ({ field })), live.map(() => ({ body: {} })));
   checkS('название юнита попало в запрос',
-    ranked.values_fields.includes('legal_unit_nm'));
-  checkS('стрим тоже попал', ranked.values_fields.includes('emp_stream_desc'));
+    ranked.values_candidates.includes('legal_unit_nm'));
+  checkS('стрим тоже попал', ranked.values_candidates.includes('emp_stream_desc'));
   checkS('код типа юнита вытеснен',
-    !ranked.values_fields.includes('legal_unit_type_cd'));
+    !ranked.values_candidates.includes('legal_unit_type_cd'));
   checkS('операционный код вытеснен',
-    !ranked.values_fields.includes('emp_specialization_oper_code'));
+    !ranked.values_candidates.includes('emp_specialization_oper_code'));
 
   // ЭЛЕМЕНТ НА ПОЛЕ: n8n выполнит ноду запроса по разу на каждый, и отказ
   // одного поля больше не роняет выдачу по остальным.
@@ -1050,6 +1065,65 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
   checkS('общие факты в каждом элементе',
     JSON.stringify(perField[0].values_words) === JSON.stringify(perField[1].values_words) &&
     perField[0].values_table === perField[1].values_table);
+
+  // СЛОВО ИЩЕТСЯ ТОЛЬКО В СВОЁМ ПОЛЕ.
+  //
+  // Живой прогон 2026-08-28: слова и поля связывались перебором — каждое
+  // слово подставлялось в каждое поле, и в запрос ушло
+  // `lower(legal_unit_nm) LIKE '%аналит%'` и `LIKE '%15%'`. Искать
+  // специализацию и грейд внутри названия юридического подразделения
+  // бессмысленно, а сам юнит из вопроса относится к УПРАВЛЕНЧЕСКОЙ
+  // структуре — различить их по подстроке «юнит» код не может.
+  const LIVE = ['emp_specialization_desc', 'emp_stream_desc',
+                'legal_unit_nm', 'mapped_management_unit_nm'];
+  const liveCols = { statusCode: 200, body: { data: LIVE.map(
+    (x) => ({ entity: { fqn: `emart.t.${x}` } })) } };
+  const routed = runValuesSql(
+    { urn: URN_T, values: 'BI-аналитик, Дата, Human Capital Origination',
+      question: 'сколько BI-аналитиков в стриме Дата в юните Human Capital Origination' },
+    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
+    null, true,
+    [{ value: 'BI-аналитик', field: 'emp_specialization_desc', fallback: '' },
+     { value: 'Дата', field: 'emp_stream_desc', fallback: '' },
+     { value: 'Human Capital Origination', field: 'mapped_management_unit_nm',
+       fallback: 'legal_unit_nm' }]);
+  checkS(`запрос на пару (${routed.length})`, routed.length === 3);
+  const byF = Object.fromEntries(routed.map((r) => [r.values_field, r.values_sql]));
+  checkS('специализация ищется в своём поле',
+    /аналит/.test(byF.emp_specialization_desc));
+  checkS('и не ищется в названии юрлица',
+    !/аналит/.test(byF.legal_unit_nm || '') &&
+    !/аналит/.test(byF.mapped_management_unit_nm || ''));
+  checkS('юнит ищется в управленческой структуре',
+    /origination/.test(byF.mapped_management_unit_nm));
+  checkS('и не ищется в специализации',
+    !/origination/.test(byF.emp_specialization_desc));
+  checkS('запасное поле сохранено для второго прохода',
+    routed.find((r) => r.values_field === 'mapped_management_unit_nm')
+      .values_fallback === 'legal_unit_nm');
+
+  // ПОЛЕ ИЗ ОТВЕТА МОДЕЛИ ПРОВЕРЯЕТСЯ ПО СПИСКУ КАНДИДАТОВ. Придуманное имя —
+  // это либо ошибка Trino, либо, хуже, обращение к полю, которое мы намеренно
+  // исключили как персональное. Ответ модели здесь данные, а не команда.
+  const invented = runValuesSql(
+    { urn: URN_T, values: 'BI-аналитик', question: 'вопрос' },
+    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
+    null, true,
+    [{ value: 'BI-аналитик', field: 'full_nm', fallback: '' },
+     { value: 'BI-аналитик', field: 'emp_specialization_desc', fallback: '' }]);
+  checkS('выдуманное поле в запрос не идёт',
+    invented.every((r) => r.values_field !== 'full_nm'));
+  checkS('годная пара при этом остаётся',
+    invented.some((r) => r.values_field === 'emp_specialization_desc'));
+
+  // Модель не дала ни одной годной пары — не гадаем и не возвращаемся
+  // к перебору: именно перебор и приводил к запросам в чужие поля.
+  const nothing = runValuesSql(
+    { urn: URN_T, values: 'BI-аналитик', question: 'вопрос' },
+    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
+    null, false, []);
+  checkS('без пар запроса нет', nothing.values_sql === '');
+  checkS('и причина названа', /не сопоставила ни одного слова/.test(nothing.values_reason));
 
   // Слов не задали — запроса нет вовсе: тянуть значения «на всякий случай»
   // значит платить сканом витрины на каждой выгрузке.

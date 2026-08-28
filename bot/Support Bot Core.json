@@ -276,7 +276,8 @@
           "value": {
             "urn": "={{ $json.urn }}",
             "search": "={{ $json.hint }}",
-            "values": "={{ $json.values }}"
+            "values": "={{ $json.values }}",
+            "question": "={{ $('When called by adapter').first().json.question }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -301,6 +302,15 @@
             {
               "id": "values",
               "displayName": "values",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "question",
+              "displayName": "question",
               "required": false,
               "defaultMatch": false,
               "display": true,
