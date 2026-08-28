@@ -480,7 +480,7 @@ try {
   const rawDD = Array.isArray(got.dd)
     ? got.dd
     : typeof got.dd_urn === 'string' && got.dd_urn.trim()
-      ? [{ urn: got.dd_urn, hint: got.field_hint, values: got.field_values }]
+      ? [{ urn: got.dd_urn, hint: got.field_hint }]
       : [];
 
   // Повтор URN СКЛЕИВАЕТ иглы, а не выбрасывает вторую.
@@ -493,7 +493,6 @@ try {
   // не искали вовсе. Поле в витрине есть.
   // Объект по-прежнему один, запрос один — фильтр стал списком.
   const byUrnHints = new Map();
-  const byUrnValues = new Map();
   for (const it of rawDD) {
     // Элемент может прийти и просто строкой-урном, без обёртки.
     const urn = String((it && typeof it === 'object' ? it.urn : it) ?? '').trim();
@@ -505,34 +504,20 @@ try {
     // «отдай весь инвентарь», и рядом с конкретным словом он только
     // сбивает режим поиска. Дубли слов тоже ни к чему.
     if (hint && !hints.includes(hint)) hints.push(hint);
-
-    // ЗНАЧЕНИЯ ФИЛЬТРОВ — отдельный список, а не часть hint.
-    //
-    // hint отвечает на «какое поле», values — на «какое в нём значение», и
-    // это разные вопросы к разным источникам: имя поля есть в каталоге,
-    // значения полей в каталоге нет вовсе (подтверждено владельцем задачи),
-    // их видно только в данных. Слить их в один список значило бы искать
-    // поле по слову «аналитик» и значение по слову «специализация» — оба
-    // промаха тихие: первый вернёт полный инвентарь, второй пустой список
-    // значений, и оба читаются как «такого нет».
-    if (!byUrnValues.has(urn)) byUrnValues.set(urn, []);
-    const vals = byUrnValues.get(urn);
-    const rawVals = it && typeof it === 'object' ? it.values : '';
-    for (const v of (Array.isArray(rawVals) ? rawVals : String(rawVals ?? '').split(','))) {
-      const w = String(v ?? '').trim();
-      if (w && !vals.includes(w)) vals.push(w);
-    }
   }
-  // Предел на число игл: фильтр из десяти слов совпадёт с половиной таблицы,
-  // и «найдено по смыслу» перестанет что-либо сужать. Тот же потолок у
-  // значений, и по той же причине: ilike по десяти словам вернёт полсправочника.
+  // ЗНАЧЕНИЙ ФИЛЬТРОВ РОУТЕР БОЛЬШЕ НЕ ВЫДЕЛЯЕТ, и это следствие переноса
+  // проверки за автора. Раньше он возвращал values рядом с hint, и по ним
+  // каталог ходил в данные ещё до того, как хоть что-то прочитано. Выбор
+  // «в каком поле искать слово заказчика» делается по правилу из статьи,
+  // а у роутера статьи нет — он раз за разом отправлял искать «юнит»
+  // в юридической структуре вместо управленческой.
+  // Теперь пары «поле = слово» называет автор, у которого есть и статья,
+  // и рецепт, и инвентарь разом. Оставлять сбор values «на всякий случай»
+  // нельзя: это код, который не работает и выглядит рабочим, — ровно то,
+  // из-за чего в проекте заведён отдельный запрет.
   const MAX_HINTS = 4;
   for (const [urn, hints] of byUrnHints) {
-    plan.dd.push({
-      urn,
-      hint: hints.slice(0, MAX_HINTS).join(', '),
-      values: (byUrnValues.get(urn) || []).slice(0, MAX_HINTS).join(', '),
-    });
+    plan.dd.push({ urn, hint: hints.slice(0, MAX_HINTS).join(', ') });
   }
 } catch (e) {
   routerError = `не удалось разобрать план роутера: ${e.message}`;
@@ -866,7 +851,7 @@ const selfServiceDropped = selfServiceAll.slice(MAX_SELF_SERVICE).map((s) => s.i
 const selfService = selfServiceAll.slice(0, MAX_SELF_SERVICE);
 for (const s of selfService) {
   if (s.urn && !plan.dd.some((d) => d.urn === s.urn)) {
-    plan.dd.push({ urn: s.urn, hint: '', values: '' });
+    plan.dd.push({ urn: s.urn, hint: '' });
   }
 }
 
@@ -1065,7 +1050,7 @@ const tablesRead = needInventory
 const addedDd = [];
 for (const t of tablesRead) {
   if (plan.dd.some((d) => d.urn === t.urn)) continue;
-  plan.dd.push({ urn: t.urn, hint: '', values: '' });
+  plan.dd.push({ urn: t.urn, hint: '' });
   addedDd.push(t.urn);
 }
 // Потолок применяется ЗАНОВО: добор мог его перебрать. Обрезанное
@@ -1152,11 +1137,6 @@ return [{
     topic_kind_used: topicKind,
     report_url_found: reportUrlFound,
     dd_count: plan.dd.length,
-    // Сколько объектов уехало со значениями фильтров. Метрика роутера, а не
-    // каталога: доля вопросов, где заказчик назвал конкретное значение, а
-    // роутер его не выделил, по логу иначе не видна вовсе — блок значений
-    // просто не появится, и это неотличимо от «значений не называли».
-    values_asked: plan.dd.filter((d) => String(d.values || '').trim()).length,
     no_question: plan.no_question,
     router_error: routerError,
     router_raw: rawOut,
@@ -1335,11 +1315,6 @@ core_nodes += [
                     # Значения фильтров: по ним DD Lookup сходит в данные
                     # и вернёт РЕАЛЬНЫЕ значения поля. Пусто — ветка значений
                     # в субворкфлоу не запускается вовсе, скана витрины нет.
-                    "values": "={{ $json.values }}",
-                    # Вопрос целиком — узлу, который раскладывает слова
-                    # заказчика по полям витрины: без него «юнит» одинаково
-                    # похож и на управленческую структуру, и на юридическую.
-                    "question": "={{ $('When called by adapter').first().json.question }}",
                 },
                 "matchingColumns": [],
                 "schema": [
@@ -1352,7 +1327,7 @@ core_nodes += [
                         "canBeUsedToMatch": True,
                         "type": "string",
                     }
-                    for k in ("urn", "search", "values", "question")
+                    for k in ("urn", "search")
                 ],
                 "attemptToConvertTypes": False,
                 "convertFieldsToString": True,
@@ -1967,6 +1942,12 @@ const LABELS = [
   ['sources', 'ИСТОЧНИКИ'],
   ['confidence', 'УВЕРЕННОСТЬ'],
   ['gaps', 'ЧЕГО НЕ ХВАТИЛО'],
+  // Пары «поле = слово заказчика», которые автор просит проверить в данных.
+  // Перечня значений в каталоге нет вовсе, а знает, ЧТО проверять, только
+  // автор: у него статья, рецепт и инвентарь разом. Раньше это решал
+  // отдельный узел в каталоге — у него статьи не было, и он раз за разом
+  // уходил в юридическую структуру вместо управленческой.
+  ['check_values', 'ПРОВЕРИТЬ ЗНАЧЕНИЯ'],
 ];
 
 // Позиция каждого ярлыка в тексте.
@@ -1994,7 +1975,7 @@ for (const [key, label] of LABELS) {
 found.sort((a, b) => a.start - b.start);
 
 const out = { draft: '', tech_spec: '', sources: '', confidence: '', gaps: '',
-              parse_error: '' };
+              check_values: '', parse_error: '' };
 for (let i = 0; i < found.length; i++) {
   const end = i + 1 < found.length ? found[i + 1].start : raw.length;
   out[found[i].key] = raw.slice(found[i].bodyAt, end).trim();
@@ -2057,7 +2038,6 @@ out.articles_read = Array.isArray(plan.files) ? plan.files : [];
 // стояло dd_count: 4 при нуле полученных полей, и по логу это выглядело
 // нормально — ветка каталога не выполнялась вовсе (см. dd_never_ran).
 out.dd_count = plan.dd_count ?? 0;
-out.values_asked = plan.values_asked ?? 0;
 out.router_error = plan.router_error ?? '';
 
 // ==================================================== уверенность и пробелы
@@ -2542,6 +2522,238 @@ out.kb_tasks = tasks;
 return [{ json: out }];
 """
 
+# Основы слов для поиска значений. Тот же приём, что в каталоге: режем хвост,
+# но не короче четырёх букв — «грейд» → «гре» совпало бы со структурой,
+# стратегией и страной. Фраза ищется и целиком, и по словам: «BI-аналитик»
+# в витрине записан как «Бизнес-аналитик BI», и по всей фразе не совпадёт.
+# Стемминг применяется ОДИН раз: он не идемпотентен, «аналитик» → «аналит»
+# → «анал» это четыре буквы, которые совпадут с чем угодно.
+NEEDLES_JS = r"""
+function needleStem(s) {
+  return /^[а-яё]+$/.test(s) && s.length >= 5 ? s.slice(0, Math.max(4, s.length - 2)) : s;
+}
+
+function valueNeedles(raw) {
+  const out = [];
+  const add = (w) => { if (w && !out.includes(w)) out.push(w); };
+  for (const phrase of String(raw || '').toLowerCase().split(/[,;\n]+/)) {
+    const p = phrase.trim();
+    if (!p) continue;
+    add(needleStem(p));
+    for (const part of p.split(/[\s\-–—_/]+/)) {
+      if (part.length < 3) continue;
+      add(needleStem(part));
+    }
+  }
+  return out;
+}
+"""
+
+
+# ============================================ 1.7 проверка значений в данных
+#
+# ПРОВЕРКА СТОИТ ПОСЛЕ АВТОРА, А НЕ ДО НЕГО. Это главное решение здесь.
+#
+# Сначала она стояла внутри «DD Lookup»: отдельный узел раскладывал слова
+# заказчика по полям витрины ещё до того, как автор что-либо прочитал.
+# Живой прогон 2026-08-28 показал, почему это не работает и не может:
+# у того узла есть имена и описания полей, но НЕТ СТАТЬИ. А выбор между
+# `mapped_management_unit_nm` и `legal_unit_nm` делается по правилу
+# из `rc-structure-choice`, а не по описанию поля — и он раз за разом
+# уходил в юридическую структуру, потому что «юнит» одинаково похож на обе.
+#
+# Автор в это же время выбирал верно: у него статья, рецепт и инвентарь.
+# То есть знание было, просто не в том месте. Поэтому проверку двигаем
+# туда, где контекст уже собран: автор называет пары «поле = слово», код
+# идёт в данные, и автор переписывает черновик с реальными значениями.
+#
+# Проходов ровно два, и это видно по схеме флоу, а не по счётчику итераций.
+# Второй проход — ПРАВКА, а не новый ответ: ему не нужны материалы целиком,
+# только вопрос, свой черновик и то, что вернули данные. Полный второй вызов
+# автора стоил бы ещё ~18k токенов, правка стоит ~5k.
+CHECK_SQL_JS = NEEDLES_JS + r"""
+const MAX_PAIRS = 4;
+const MAX_ROWS = 60;
+
+const a = $json;
+const mat = $('Build materials').first().json;
+
+// Пары «поле = слово» из блока автора. Формат сломан или блока нет —
+// проверять нечего, и это нормальный путь, а не ошибка.
+const raw = String(a.check_values || '');
+const pairs = [];
+for (const line of raw.split('\n')) {
+  const m = line.match(/^\s*[-—*]?\s*([a-z_][a-z0-9_]*)\s*=\s*(.+?)\s*$/i);
+  if (m) pairs.push({ field: m[1], value: m[2].replace(/^[«"']|[»"']$/g, '').trim() });
+}
+
+// ИМЯ ПОЛЯ ПРОВЕРЯЕТСЯ ПО ИНВЕНТАРЮ. Придуманное имя — это либо ошибка
+// Trino, либо обращение к полю, которого мы не показывали. Ответ модели
+// здесь данные, а не команда.
+const meta = String(mat.materials || '');
+// Идентификатор — это просто токен из материалов длиной от трёх символов.
+// Требовать подчёркивание нельзя: `grade` — настоящее поле витрины и самое
+// частое слово в живом трафике, а по такому правилу оно молча объявлялось бы
+// выдуманным, и отсев отправлял бы джуна править реестр, где всё верно.
+// Направление послабления выбрано по цене промаха: лишнее имя стоит одной
+// ошибки Trino, которая приезжает в check_failed и прямо запрещает автору
+// что-либо утверждать; пропущенное имя тихо выключает проверку целиком.
+const known = new Set((meta.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []));
+const table = (meta.match(/urn:dd:tables:greenplum:table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
+const hasSlice = known.has('last_day_flg');
+
+const skipped = [];
+const use = [];
+for (const p of pairs) {
+  if (use.length >= MAX_PAIRS) { skipped.push(`${p.field} (потолок ${MAX_PAIRS} пар)`); continue; }
+  if (!known.has(p.field)) { skipped.push(`${p.field} (нет в инвентаре)`); continue; }
+  if (!p.value) { skipped.push(`${p.field} (пустое слово)`); continue; }
+  use.push(p);
+}
+
+if (!use.length || !table) {
+  return [{ json: { check_sql: '', check_pairs: [], check_skipped: skipped,
+                    check_table: table, check_reason: !table
+                      ? 'в материалах нет витрины, к которой идти'
+                      : (pairs.length ? 'ни одна пара не прошла сверку с инвентарём'
+                                      : 'автор не просил проверять значения') } }];
+}
+
+const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+const tbl = `prod_v_${table}`;
+
+// SQL пишет КОД: канонический срез, потолок строк и приведение типа —
+// свойства кода, а не пожелания к модели.
+return use.map((p) => {
+  const v = `CAST(${p.field} AS varchar)`;
+  const words = valueNeedles(p.value);
+  const expr = words.map((w) => `lower(${v}) LIKE ${q('%' + w + '%')}`).join(' OR ') || 'false';
+  return { json: {
+    check_sql:
+      `SELECT ${q(p.field)} AS fld, ${v} AS val, count(*) AS cnt,\n` +
+      `       (${expr}) AS matched\n` +
+      `FROM ${tbl}\n` +
+      (hasSlice ? `WHERE last_day_flg = 1\n` : '') +
+      `GROUP BY ${p.field}\n` +
+      `ORDER BY matched DESC, cnt DESC\n` +
+      `LIMIT ${MAX_ROWS}`,
+    check_field: p.field,
+    check_value: p.value,
+    check_pairs: use,
+    check_skipped: skipped,
+    check_table: tbl,
+    check_slice: hasSlice,
+  } };
+});
+"""
+
+# Результат проверки — блоком для второго прохода автора.
+CHECK_RESULT_JS = r"""
+const plan = $('Build check SQL').first().json;
+let rows = [];
+let failed = '';
+try {
+  for (const it of $('Check values').all().map((i) => i.json)) {
+    if (!it || typeof it !== 'object') continue;
+    if (Object.keys(it).length === 0) continue;      // пустой ответ = строк нет
+    if (it.error || it.message) { failed = String(it.error || it.message); continue; }
+    const list = Array.isArray(it.data) ? it.data : [it];
+    for (const r of list) if (r && r.val !== undefined && r.val !== null) rows.push(r);
+  }
+} catch (e) { failed = 'узел проверки не выполнялся'; }
+
+const isYes = (v) => v === true || v === 'true' || v === 1 || v === '1';
+const byField = new Map();
+for (const r of rows) {
+  const f = String(r.fld || '');
+  if (!byField.has(f)) byField.set(f, { hit: [], rest: [] });
+  (isYes(r.matched) ? byField.get(f).hit : byField.get(f).rest).push(r);
+}
+
+const out = ['=== РЕАЛЬНЫЕ ЗНАЧЕНИЯ ПОЛЕЙ ==='];
+if (failed) {
+  out.push(`Запрос к данным не выполнился: ${failed}.`);
+  out.push('Это отказ запроса, а НЕ отсутствие значений: про наличие или');
+  out.push('отсутствие значения ничего не утверждай.');
+} else if (!byField.size) {
+  out.push('Запрос выполнился, но строк не вернул. Про наличие значений');
+  out.push('ничего не утверждай — скажи, что проверить не удалось.');
+} else {
+  for (const [f, g] of byField) {
+    out.push('');
+    out.push(`— ${f}:`);
+    if (g.hit.length) {
+      out.push('  совпало со словом заказчика:');
+      for (const r of g.hit.slice(0, 25)) out.push(`    «${r.val}» — ${r.cnt} строк`);
+    }
+    // Не совпало ничего — перечень и ЕСТЬ ответ, и резать его нельзя:
+    // справочники витрины часто ведутся по-английски, а заказчик называет
+    // их по-русски. Стрим «Дата» записан как «Data», и по буквам они
+    // не совпадают никогда — искомое находится только глазами по списку.
+    if (g.rest.length) {
+      out.push(g.hit.length
+        ? '  прочие значения поля:'
+        : '  НЕ СОВПАЛО НИЧЕГО. Все значения этого поля — найди подходящее ' +
+          'ПО СМЫСЛУ, а не по буквам («Дата» → «Data»):');
+      for (const r of g.rest.slice(0, g.hit.length ? 6 : 60)) {
+        out.push(`    «${r.val}» — ${r.cnt} строк`);
+      }
+    }
+  }
+}
+if ((plan.check_skipped || []).length) {
+  out.push('');
+  out.push('Не проверялись: ' + plan.check_skipped.join(', ') + '.');
+}
+
+return [{ json: {
+  check_block: out.join('\n'),
+  check_rows: rows.length,
+  check_failed: failed,
+  check_fields: [...byField.keys()],
+} }];
+"""
+
+
+# ---------------------------------------------------- нода Trino для проверки
+#
+# Тип и credential берутся из собранного «Telemetry Flush», а не дублируются:
+# аккаунт и имена полей CUSTOM.trino подтверждены живым прогоном 2026-08-17,
+# и вторая копия разъехалась бы молча — ровно как разъезжались credential'ы
+# каталога и списки тем.
+TRINO_SRC = "../telemetry/Telemetry Flush.json"
+# Потолок ожидания проверки. Дороже ждать нечего: черновик уже собран,
+# и лучше отдать его без подтверждённых значений, чем не отдать вовсе.
+CHECK_TIMEOUT_S = 60
+_TRINO = None
+if os.path.exists(TRINO_SRC):
+    _flush = json.load(open(TRINO_SRC, encoding="utf-8"))
+    _tn = next(
+        (n for n in _flush["nodes"] if n.get("type", "").lower().endswith("trino")), None
+    )
+    if _tn is not None:
+        _opts = {k: v for k, v in _tn["parameters"].items() if k != "query"}
+        # ИМЕНА полей берутся из «Telemetry Flush» — они подтверждены живым
+        # прогоном, и вторая копия разъехалась бы молча. А вот ЗНАЧЕНИЕ
+        # таймаута оттуда не годится: у крон-перелива в запасе четверть часа,
+        # а здесь человек ждёт ответа в чате. Зависший запрос выглядел бы
+        # как «бот промолчал» — то есть неотличимо от «ответа в базе нет».
+        # Наследуем ключ, а не число: пропадёт поле в источнике — пропадёт
+        # и здесь, и это будет видно при импорте.
+        if "timeout" in _opts:
+            _opts["timeout"] = CHECK_TIMEOUT_S
+        _TRINO = {
+            "type": _tn["type"],
+            "typeVersion": _tn["typeVersion"],
+            "credentials": copy.deepcopy(_tn["credentials"]),
+            "options": _opts,
+        }
+if _TRINO is None:
+    raise SystemExit(
+        f"нет ноды Trino в {TRINO_SRC} — сначала cd telemetry && "
+        f"python3 build_telemetry_flows.py: проверка значений собирается оттуда"
+    )
+
 core_nodes.append(
     node(
         "Parse answer",
@@ -2551,6 +2763,138 @@ core_nodes.append(
         {"jsCode": PARSE_JS},
     )
 )
+
+# Общий финал обеих ветвей. Без него сабворкфлоу возвращал бы вызывающему
+# данные ПОСЛЕДНЕГО выполненного узла — а это «Need check» на ветке
+# «проверять нечего», то есть служебный элемент вместо разобранного ответа.
+# Адаптеры при этом не упали бы: они читают поля, которых там просто нет,
+# и в канал уехал бы пустой черновик. Ровно тот тихий отказ, от которого
+# защищена вся остальная конструкция.
+FINAL_ANSWER_JS = r"""
+// Ответ второго прохода, если он был, иначе первого. Обе ветви
+// взаимоисключающие, поэтому узел выполняется один раз.
+let out = null;
+let revised = false;
+try {
+  const r = $('Parse revised').first().json;
+  if (r && r.draft !== undefined) { out = { ...r }; revised = true; }
+} catch (e) { /* цикл не понадобился — нормальный путь */ }
+
+if (!out) out = { ...$('Parse answer').first().json };
+// Присваивается отдельной строкой, а не внутри спреда: поля ядра ищутся
+// по `out.<имя> =`, и спрятанное в спреде поле проверка не увидит — ровно
+// так `experts_invented` и `draft_own_tools` однажды проскочили мимо теста.
+out.revised = revised;
+
+// Факты о самой проверке — в телеметрию и в служебный блок джуну: по ним
+// видно, спрашивал ли автор значения и что вернули данные.
+try {
+  const plan = $('Build check SQL').first().json;
+  out.check_asked = (plan.check_pairs || []).length;
+  out.check_skipped = (plan.check_skipped || []).length;
+} catch (e) { out.check_asked = 0; out.check_skipped = 0; }
+try {
+  const res = $('Check result').first().json;
+  out.check_rows = res.check_rows || 0;
+  out.check_failed = res.check_failed || '';
+} catch (e) { out.check_rows = 0; out.check_failed = ''; }
+
+return [{ json: out }];
+"""
+
+# Второй проход — ПРАВКА черновика, а не новый ответ. Ему не нужны материалы
+# целиком: только вопрос, свой же черновик и то, что вернули данные. Полный
+# второй вызов автора стоил бы ещё ~18k токенов, правка стоит ~5k.
+REVISE_PROMPT = """=Ты уже отвечал на этот вопрос.
+Пришли РЕАЛЬНЫЕ значения полей из витрины — перепиши черновик с ними.
+
+ВОПРОС: {{ $('When called by adapter').first().json.question }}
+
+ТВОЙ ЧЕРНОВИК:
+{{ $('Parse answer').first().json.draft }}
+
+{{ $json.check_block }}
+
+Правила правки:
+1. Подставь ТОЧНОЕ значение из списка — дословно, включая регистр и пробелы.
+2. Не совпало ничего, но перечень пришёл — найди подходящее ПО СМЫСЛУ:
+   справочники витрины часто ведутся по-английски, а заказчик называет их
+   по-русски («Дата» → «Data»). Нашёл — назови и скажи, что заказчик
+   называл иначе. Не нашёл — так и напиши, и предложи уточнить.
+3. Запрос не выполнился или строк нет — НЕ утверждай ни что значение есть,
+   ни что его нет. Скажи, что проверить не удалось.
+4. Всё остальное в черновике оставь как было: структуру, источники, тон.
+   Ты правишь значения, а не переписываешь ответ заново.
+
+Верни тот же формат блоков, что и в прошлый раз:
+ЧЕРНОВИК ОТВЕТА: <текст>
+ИСТОЧНИКИ: <как было>
+УВЕРЕННОСТЬ: высокая / средняя / нет ответа
+ЧЕГО НЕ ХВАТИЛО: <только при средней или «нет ответа»>
+Блок ПРОВЕРИТЬ ЗНАЧЕНИЯ больше не пиши: второго круга проверки нет.
+"""
+
+check_sql = node("Build check SQL", "n8n-nodes-base.code", 2, [1960, 300],
+                 {"jsCode": CHECK_SQL_JS})
+
+# Гейт: пустой SQL — автор не просил проверки, или ни одна пара не прошла
+# сверку с инвентарём. Тогда цикла нет и ответ первого прохода окончателен.
+need_check = {
+    "parameters": {
+        "conditions": {
+            "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
+            "conditions": [{
+                "id": "has-check",
+                "leftValue": "={{ $json.check_sql }}",
+                "rightValue": "",
+                "operator": {"type": "string", "operation": "notEmpty", "singleValue": True},
+            }],
+            "combinator": "and",
+        },
+        "looseTypeValidation": True,
+        "options": {},
+    },
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [2140, 300],
+    "id": "need-check",
+    "name": "Need check",
+}
+
+# alwaysOutputData обязателен: ноль строк — нормальный исход, а n8n на нём
+# останавливает выполнение. Без флага пустой ответ убил бы весь конвейер
+# после того, как автор уже отработал и токены уплачены.
+check_values = {
+    "parameters": {"query": "={{ $json.check_sql }}", **copy.deepcopy(_TRINO["options"])},
+    "type": _TRINO["type"],
+    "typeVersion": _TRINO["typeVersion"],
+    "credentials": copy.deepcopy(_TRINO["credentials"]),
+    "position": [2320, 220],
+    "id": "check-values",
+    "name": "Check values",
+    "alwaysOutputData": True,
+    "onError": "continueRegularOutput",
+}
+
+check_result = node("Check result", "n8n-nodes-base.code", 2, [2500, 220],
+                    {"jsCode": CHECK_RESULT_JS})
+
+core_nodes += [
+    check_sql,
+    need_check,
+    check_values,
+    check_result,
+    node("Revise draft", "@n8n/n8n-nodes-langchain.agent", 3.2, [2680, 220], {
+        "promptType": "define",
+        "text": REVISE_PROMPT,
+        "maxIterations": 1,
+        "options": {},
+    }),
+    llm("Revise model", [2680, 440]),
+    node("Parse revised", "n8n-nodes-base.code", 2, [2860, 220], {"jsCode": PARSE_JS}),
+    node("Final answer", "n8n-nodes-base.code", 2, [3040, 300],
+         {"jsCode": FINAL_ANSWER_JS}),
+]
 
 # ------------------------------------------------------- 1.7 проводка ядра
 #
@@ -2603,6 +2947,23 @@ core_conn["Need DD"] = {
 core_conn.update(chain("Split DD", "Call DD Lookup", "Build materials"))
 
 core_conn.update(chain("Build materials", "Author", "Parse answer"))
+
+# Цикл проверки значений. Проходов ровно два, и это видно по схеме:
+# автор → разбор → сборка запроса → гейт → данные → правка → разбор.
+# Ложная ветвь гейта уводит поток в конец: проверять нечего, ответ готов.
+core_conn.update(chain("Parse answer", "Build check SQL", "Need check"))
+# Ложная ветвь гейта ведёт НЕ в никуда, а в общий финал: иначе последним
+# выполненным узлом окажется «Need check», и вызывающий получит служебный
+# элемент вместо разобранного ответа.
+core_conn["Need check"] = {"main": [
+    [{"node": "Check values", "type": "main", "index": 0}],
+    [{"node": "Final answer", "type": "main", "index": 0}],
+]}
+core_conn.update(chain("Check values", "Check result", "Revise draft",
+                       "Parse revised", "Final answer"))
+core_conn["Revise model"] = {"ai_languageModel": [
+    [{"node": "Revise draft", "type": "ai_languageModel", "index": 0}]
+]}
 
 # Модели подключаются ai_languageModel-входом. Отдельный узел на каждого агента:
 # один узел модели нельзя развести на два агента.
@@ -3356,6 +3717,19 @@ return [{ json: {
     // что бот вообще может сделать.
     experts_invented: (Array.isArray(a.experts_invented) ? a.experts_invented : []).length,
     draft_own_tools: (Array.isArray(a.draft_own_tools) ? a.draft_own_tools : []).length,
+    // Проверка значений в данных — она идёт ПОСЛЕ автора. Четыре числа,
+    // а не одно: «автор не просил» (0 пар), «просил, но запрос отказал»,
+    // «проверили, строк нет» и «проверили, черновик переписан» чинятся
+    // в разных местах, а слитые в одну колонку неразличимы — ровно как
+    // до 2026-08-27 были неразличимы ddFailed и ddMissing.
+    check_asked: a.check_asked || 0,
+    check_skipped: a.check_skipped || 0,
+    check_rows: a.check_rows || 0,
+    check_failed: a.check_failed || '',
+    // Доля правок от числа проверок отвечает на вопрос, стоит ли второй
+    // проход своих токенов: правок нет вовсе — значит данные ничего
+    // не меняли, и цикл можно гасить.
+    revised: a.revised === true,
     // Витрины, чью статью автор прочитал, а состав полей не получил.
     // Числом, а не списком: разрез «как часто бот отвечал, не видя
     // инвентаря» — это метрика полноты, а какие именно витрины,
@@ -3571,6 +3945,32 @@ if (Array.isArray(a.routes) && a.routes.length) {
     return `${addr}${by}${when}`;
   }).join(' · ');
   parts.push('🧭 **Позвать эксперта по теме:** ' + line);
+}
+
+// Проверка значений в данных — до основания: она отвечает не «насколько
+// верить черновику вообще», а «сходится ли конкретное значение фильтра,
+// которое в нём названо». Без этой строки подтверждённое данными значение
+// и придуманное выглядят в треде одинаково, а разница между ними — это
+// разница между верной цифрой и молча неверной.
+//
+// Печатается ТОЛЬКО когда автор просил проверку: строка, которая горит
+// на каждом обращении, перестаёт читаться — ровно так «ФИО» из шаблона
+// формы обесценило подсказку про самообслуживание.
+if (a.check_asked) {
+  if (a.check_failed) {
+    parts.push('🔢 **Значения фильтров проверить не удалось:** ' +
+      a.check_failed + '. Значение в черновике данными НЕ подтверждено — ' +
+      'проверьте перед отправкой.');
+  } else if (!a.check_rows) {
+    parts.push('🔢 **Значения фильтров проверялись, но данные строк ' +
+      'не вернули.** Значение в черновике не подтверждено.');
+  } else if (a.revised) {
+    parts.push('🔢 **Значения фильтров сверены с данными** (' + a.check_rows +
+      ' строк), черновик переписан по реальным значениям.');
+  } else {
+    parts.push('🔢 **Значения фильтров сверены с данными** (' + a.check_rows +
+      ' строк), правок не потребовалось.');
+  }
 }
 
 if (Array.isArray(a.confidence_basis) && a.confidence_basis.length) {

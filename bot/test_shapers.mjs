@@ -3,6 +3,20 @@
 // пустой ответ, HTTP-ошибки, разные варианты обёртки массива.
 import fs from 'fs';
 
+// ПРОВЕРКА ОБЯЗАНА УМЕТЬ УРОНИТЬ ПРОГОН.
+//
+// Группы 0–11 писались как `checkS('имя', выражение)` — они ПЕЧАТАЛИ
+// true/false и не считались нигде: файл выходил с кодом 0 и словами «проверки
+// прошли», даже когда половина из них печатала false посреди длинного лога.
+// То есть регрессия шейпера таблицы выглядела точно так же, как её отсутствие.
+// Ровно тот же класс, что `gs.includes('root_id')`: проверка, которая читается
+// как проверка и не гарантирует ничего.
+let ddFails = 0;
+const checkS = (name, ok) => {
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}`);
+  if (!ok) ddFails++;
+};
+
 const wf = JSON.parse(fs.readFileSync('DD Lookup.json', 'utf8'));
 const js = (n) => wf.nodes.find((x) => x.name === n).parameters.jsCode;
 
@@ -82,40 +96,10 @@ function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = n
 }
 
 // Прогон ноды «Build values SQL»: какой SQL она построит и что исключит.
-// Цепочка «кандидаты → модель раскладывает слова по полям → код строит SQL».
-// Гоняем обе Code-ноды подряд, подставляя ответ модели: что именно она
-// вернёт — предмет промпта, а не кода, и тесты держат КОД.
-function runValueCandidates(inputs, cols, picked, cards, summaries = null) {
-  const $ = (name) => {
-    if (name === 'Pick columns') return { all: () => picked.map((json) => ({ json })) };
-    if (name === 'dd_column_attrs') return { all: () => cards.map((json) => ({ json })) };
-    if (name === 'dd_column_summary') {
-      const list = summaries !== null ? summaries : picked.map(() => ({ body: { data: '' } }));
-      return { all: () => list.map((json) => ({ json })) };
-    }
-    return {
-      first: () => ({ json: { 'When called by agent': inputs, dd_columns: cols }[name] }),
-    };
-  };
-  return new Function('$', js('Value candidates'))($)[0].json;
-}
+
 
 // pairs — то, что вернула бы модель. null = «взять все кандидаты по порядку»,
 // чтобы старые проверки отбора полей остались про отбор, а не про промпт.
-function runValuesSql(inputs, cols, picked, cards, summaries = null, all = false,
-                      pairs = null) {
-  const cand = runValueCandidates(inputs, cols, picked, cards, summaries);
-  const auto = (cand.values_candidates || []).map((field) => ({
-    value: (cand.values_words || [])[0] || '', field, fallback: '',
-  }));
-  const answer = JSON.stringify({ pairs: pairs !== null ? pairs : auto });
-  const $ = (name) => {
-    if (name === 'Value candidates') return { first: () => ({ json: cand }) };
-    throw new Error('node not executed: ' + name);
-  };
-  const out = new Function('$', '$json', js('Build values SQL'))($, { output: answer });
-  return all ? out.map((x) => x.json) : out[0].json;
-}
 
 // Прогон ноды Pick columns: что она отдаст дальше по флоу.
 function runPick(inputs, cols) {
@@ -227,15 +211,15 @@ let real = runTable(
 );
 console.log(real);
 console.log('\nПРОВЕРКИ:');
-console.log('  тип «date», не [object Object]:', /\(date\)/.test(real) && !/object Object/.test(real));
-console.log('  versioning_type НЕ выдан за тип:', !/BSN/.test(real));
-console.log('  описание «Дата среза»:          ', /Дата среза/.test(real));
-console.log('  комментарий владельца есть:     ', /подневно развернута/.test(real));
-console.log('  ключ PK показан:                ', /\[PK\]/.test(real));
+checkS('  тип «date», не [object Object]', /\(date\)/.test(real) && !/object Object/.test(real));
+checkS('  versioning_type НЕ выдан за тип', !/BSN/.test(real));
+checkS('  описание «Дата среза»', /Дата среза/.test(real));
+checkS('  комментарий владельца есть', /подневно развернута/.test(real));
+checkS('  ключ PK показан', /\[PK\]/.test(real));
 
 line('00б. Pick columns — какие URN уйдут за карточками');
-console.log('пустой search:', JSON.stringify(runPick({ urn: URN, search: '' }, { statusCode: 200, body: { data: REAL_COLS } })));
-console.log('search=hire: ', JSON.stringify(runPick({ urn: URN, search: 'hire' }, { statusCode: 200, body: { data: REAL_COLS } })));
+checkS('пустой search', JSON.stringify(runPick({ urn: URN, search: '' }, { statusCode: 200, body: { data: REAL_COLS } })));
+checkS('search=hire', JSON.stringify(runPick({ urn: URN, search: 'hire' }, { statusCode: 200, body: { data: REAL_COLS } })));
 
 line('00в. КОММЕНТАРИЙ ТАБЛИЦЫ (dd_entity_attrs) — печатается, если отличается от summary');
 // dd_entity_card отдаёт только summary; comment таблицы — на dd_entity_attrs,
@@ -258,7 +242,7 @@ const withComment = runTable(
   tableAttrs,
 );
 console.log('\nПРОВЕРКИ:');
-console.log('  комментарий из DD показан:    ', /КОММЕНТАРИЙ ИЗ DD: Витрина считается только/.test(withComment));
+checkS('  комментарий из DD показан', /КОММЕНТАРИЙ ИЗ DD: Витрина считается только/.test(withComment));
 
 // Comment совпадает с summary дословно — дублировать незачем.
 const sameAsSummary = runTable(
@@ -269,7 +253,7 @@ const sameAsSummary = runTable(
   null,
   { statusCode: 200, body: { comment: { type: 'text', data: card.body.data } } },
 );
-console.log('  дубль summary не печатается:  ', (sameAsSummary.match(/сотрудник на каждый календарный день/g) || []).length === 1);
+checkS('  дубль summary не печатается', (sameAsSummary.match(/сотрудник на каждый календарный день/g) || []).length === 1);
 
 // Атрибутов у таблицы нет вовсе — как и раньше, строка просто не появляется.
 const noComment = runTable(
@@ -277,7 +261,7 @@ const noComment = runTable(
   card,
   { statusCode: 200, body: { totalCount: 267, data: REAL_COLS } },
 );
-console.log('  без атрибутов — без строки:  ', !/КОММЕНТАРИЙ ИЗ DD/.test(noComment));
+checkS('  без атрибутов — без строки', !/КОММЕНТАРИЙ ИЗ DD/.test(noComment));
 
 line('0. РЕАЛЬНАЯ ФОРМА ОТВЕТА DD — entity внутри, без описаний, totalCount 267');
 real = runTable({ urn: URN, search: '' }, card, {
@@ -286,11 +270,11 @@ real = runTable({ urn: URN, search: '' }, card, {
 });
 console.log(real);
 console.log('\nПРОВЕРКИ:');
-console.log('  поля распакованы из entity:', /business_dt, mdm_employee_rk/.test(real));
-console.log('  сказано «получено 4 из 267»:', /получено 4 из 267/.test(real));
-console.log('  список назван НЕПОЛНЫМ:     ', /НЕПОЛНЫЙ/.test(real));
-console.log('  предложен шаг 2 с фильтром: ', /вызови dd_lookup ещё раз/.test(real));
-console.log('  подробностей нет (шаг 1):   ', !/ПОДРОБНО ПО ПОЛЯМ/.test(real));
+checkS('  поля распакованы из entity', /business_dt, mdm_employee_rk/.test(real));
+checkS('  сказано «получено 4 из 267»', /получено 4 из 267/.test(real));
+checkS('  список назван НЕПОЛНЫМ', /НЕПОЛНЫЙ/.test(real));
+checkS('  предложен шаг 2 с фильтром', /вызови dd_lookup ещё раз/.test(real));
+checkS('  подробностей нет (шаг 1)', !/ПОДРОБНО ПО ПОЛЯМ/.test(real));
 
 line('0б. РЕАЛЬНАЯ ФОРМА + фильтр: таблицы с прочерками быть не должно');
 real = runTable({ urn: URN, search: 'dt' }, card, {
@@ -299,8 +283,8 @@ real = runTable({ urn: URN, search: 'dt' }, card, {
 });
 console.log(real);
 console.log('\nПРОВЕРКИ:');
-console.log('  нет пустой таблицы с «—»:', !/\| — \| — \|/.test(real));
-console.log('  найдены поля по фильтру: ', /business_dt, company_hire_dt, company_fire_dt/.test(real));
+checkS('  нет пустой таблицы с «—»', !/\| — \| — \|/.test(real));
+checkS('  найдены поля по фильтру', /business_dt, company_hire_dt, company_fire_dt/.test(real));
 
 line('1. ШАГ 1: БЕЗ ФИЛЬТРА — полный инвентарь 211 имён, обрезки нет');
 let out = runTable({ urn: URN, search: '' }, card, cols210);
@@ -309,9 +293,9 @@ console.log(lines.slice(0, 7).join('\n'));
 console.log('   ...');
 console.log(lines.slice(-4).join('\n'));
 console.log('\nПРОВЕРКИ:');
-console.log('  все 211 имён в тексте:', /field_209/.test(out) && /emp_grade_desc/.test(out));
-console.log('  нет слова СКРЫТО:     ', !/СКРЫТО/.test(out));
-console.log('  размер, КБ:           ', (Buffer.byteLength(out) / 1024).toFixed(1));
+checkS('  все 211 имён в тексте', /field_209/.test(out) && /emp_grade_desc/.test(out));
+checkS('  нет слова СКРЫТО', !/СКРЫТО/.test(out));
+checkS('  размер, КБ', (Buffer.byteLength(out) / 1024).toFixed(1));
 
 line('2. ШАГ 2: ФИЛЬТР grade — таблица с типом и описанием');
 console.log(runTable({ urn: URN, search: 'grade' }, card, cols210));
@@ -322,8 +306,8 @@ lines = out.split('\n');
 console.log(lines.slice(0, 9).join('\n'));
 console.log('   ...');
 console.log('\nПРОВЕРКИ:');
-console.log('  инвентарь приложен:   ', /field_100/.test(out));
-console.log('  сказано, что поля нет:', /такого названия в таблице нет|поля с таким/.test(out));
+checkS('  инвентарь приложен', /field_100/.test(out));
+checkS('  сказано, что поля нет', /такого названия в таблице нет|поля с таким/.test(out));
 
 line('4. DD вернул пусто (другой ключ связи)');
 console.log(runTable({ urn: URN, search: '' }, card, { statusCode: 200, body: {} }));
@@ -369,8 +353,8 @@ console.log(lines.slice(0, 6).join('\n'));
 console.log('   ...');
 console.log(lines.slice(-5).join('\n'));
 console.log('\nПРОВЕРКИ:');
-console.log('  сказано про 99 без описаний:', /описания получены по 12/.test(out) && /остальным 99/.test(out));
-console.log('  подробности по 12 есть:     ', /ПОДРОБНО ПО ПОЛЯМ \(12\)/.test(out));
+checkS('  сказано про 99 без описаний', /описания получены по 12/.test(out) && /остальным 99/.test(out));
+checkS('  подробности по 12 есть', /ПОДРОБНО ПО ПОЛЯМ \(12\)/.test(out));
 
 line('8б. ПОИСК ПО СМЫСЛУ — живой кейс: hint «причины» не совпадает ни с одним\nименем колонки латиницей, но dismissal_reason_desc в описании есть');
 // Ровно воспроизводит найденный баг: hrmart.legal_position_dismissal_reason,
@@ -421,15 +405,15 @@ out = runTable(
   dismissalCards,
   dismissalPick[0],
 );
-console.log('Pick columns режим:', dismissalPick[0].mode);
+checkS('Pick columns режим', dismissalPick[0].mode);
 console.log(out);
 console.log('\nПРОВЕРКИ:');
-console.log('  режим by_meaning выбран:      ', dismissalPick[0].mode === 'by_meaning');
-console.log('  карточки заказаны на все поля:', dismissalPick.length === 4);
-console.log('  найдено по смыслу:            ', /НАЙДЕНО ПО СМЫСЛУ: 1/.test(out));
-console.log('  нужное поле в ответе:         ', /dismissal_reason_desc/.test(out));
-console.log('  описание по-русски пришло:    ', /Причины увольнения текстом от сотрудника/.test(out));
-console.log('  нерелевантные поля не показаны:', !/техническое поле/.test(out));
+checkS('  режим by_meaning выбран', dismissalPick[0].mode === 'by_meaning');
+checkS('  карточки заказаны на все поля', dismissalPick.length === 4);
+checkS('  найдено по смыслу', /НАЙДЕНО ПО СМЫСЛУ: 1/.test(out));
+checkS('  нужное поле в ответе', /dismissal_reason_desc/.test(out));
+checkS('  описание по-русски пришло', /Причины увольнения текстом от сотрудника/.test(out));
+checkS('  нерелевантные поля не показаны', !/техническое поле/.test(out));
 
 line('8в. ПОИСК ПО СМЫСЛУ — ни имя, ни описание не совпали');
 const dismissalPickMiss = runPick({ urn: URN, search: 'зарплата' }, dismissalCols);
@@ -437,7 +421,10 @@ const dismissalCardsMiss = dismissalPickMiss.map((t) => ({
   statusCode: 200,
   body: {
     fqn: `hrmart.legal_position_dismissal_reason.${t.field}`,
-    summary: { data: `служебное поле ${t.field}, к зарплате отношения не имеет` },
+    // Описание НЕ должно содержать само слово поиска: «зарплата» режется
+    // до основы «зарплат», а «к зарплате отношения не имеет» эту основу
+    // содержит — фикстура промаха сама себе противоречила и совпадала.
+    summary: { data: `служебное поле ${t.field}, нужно для загрузки данных` },
   },
 }));
 out = runTable(
@@ -448,8 +435,8 @@ out = runTable(
   dismissalPickMiss[0],
 );
 console.log('\nПРОВЕРКИ:');
-console.log('  сказано, что не встретилось:  ', /не встретилось ни в одном/.test(out));
-console.log('  инвентарь имён приложен:      ', /dismissal_reason_desc/.test(out) && /ВСЕ ПОЛЯ ТАБЛИЦЫ/.test(out));
+checkS('  сказано, что не встретилось', /не встретилось ни в одном/.test(out));
+checkS('  инвентарь имён приложен', /dismissal_reason_desc/.test(out) && /ВСЕ ПОЛЯ ТАБЛИЦЫ/.test(out));
 
 line('8г. ПОИСК ПО СМЫСЛУ на широкой таблице — проверяются ВСЕ поля, без потолка');
 // Живой баг: таблица на 289 колонок, потолок в 60 карточек обрывал поиск
@@ -484,10 +471,10 @@ const wideCards = widePick.map((t) => ({
 }));
 out = runTable({ urn: URN, search: 'декрет' }, wideCard, wideCols, wideCards, widePick[0]);
 console.log('\nПРОВЕРКИ:');
-console.log('  Pick columns не режет по 60:  ', widePick.length === N_WIDE);
-console.log('  проверены ВСЕ поля:           ', new RegExp(`проверены ${N_WIDE} из ${N_WIDE} полей`).test(out));
-console.log('  нет упоминания потолка:       ', !/потолок/.test(out));
-console.log('  поле за старым потолком найдено:', /field_100/.test(out) && /декретном отпуске/.test(out));
+checkS('  Pick columns не режет по 60', widePick.length === N_WIDE);
+checkS('  проверены ВСЕ поля', new RegExp(`проверены ${N_WIDE} из ${N_WIDE} полей`).test(out));
+checkS('  нет упоминания потолка', !/потолок/.test(out));
+checkS('  поле за старым потолком найдено', /field_100/.test(out) && /декретном отпуске/.test(out));
 
 // ====================================================================== 8д
 line('8д. ДВА ПОНЯТИЯ В ОДНОМ ФИЛЬТРЕ и запрет судить об отсутствии по блоку');
@@ -526,21 +513,19 @@ const mixRun = (search) => {
 
 const one = mixRun('логин');
 console.log('\nПРОВЕРКИ:');
-console.log('  одна игла: логин найден:      ', /ad_login/.test(one.out));
-console.log('  одна игла: почта НЕ найдена:  ', !/wrk_email_address_txt/.test(one.out));
-console.log('  но сказано, что показаны не все:',
-  /Показаны ТОЛЬКО поля, совпавшие/.test(one.out));
-console.log('  и запрещено судить об отсутствии:',
-  /об отсутствии в таблице ДРУГОГО поля/.test(one.out));
+checkS('  одна игла: логин найден', /ad_login/.test(one.out));
+checkS('  одна игла: почта НЕ найдена', !/wrk_email_address_txt/.test(one.out));
+checkS('  но сказано, что показаны не все', /Показаны ТОЛЬКО поля, совпавшие/.test(one.out));
+checkS('  и запрещено судить об отсутствии', /об отсутствии в таблице ДРУГОГО поля/.test(one.out));
 
 const two = mixRun('логин, почта');
-console.log('  две иглы: логин найден:       ', /ad_login/.test(two.out));
-console.log('  две иглы: почта найдена:      ', /wrk_email_address_txt/.test(two.out));
-console.log('  две иглы: лишнее не притянуло:', !/business_dt/.test(two.out));
+checkS('  две иглы: логин найден', /ad_login/.test(two.out));
+checkS('  две иглы: почта найдена', /wrk_email_address_txt/.test(two.out));
+checkS('  две иглы: лишнее не притянуло', !/business_dt/.test(two.out));
 
 // Склонение: «почты» не содержит подстроку «почта», а описание — «Рабочая почта».
 const infl = mixRun('почты');
-console.log('  склонение: «почты» → найдено: ', /wrk_email_address_txt/.test(infl.out));
+checkS('  склонение: «почты» → найдено', /wrk_email_address_txt/.test(infl.out));
 
 // Формы ответов подтверждены живым запросом 2026-08-13 на report:1728:
 // markdown — плоский объект {ключ: {data}} без обёртки type; attribute —
@@ -591,8 +576,8 @@ line('10б. ОТЧЁТ — одна из ручек упала (401), остал
   );
   console.log(out);
   console.log('\nПРОВЕРКИ:');
-  console.log('  ошибка атрибутов названа:  ', /ОШИБКИ DD:.*атрибуты/.test(out));
-  console.log('  markdown при этом виден:   ', /НАЗНАЧЕНИЕ:/.test(out));
+  checkS('  ошибка атрибутов названа', /ОШИБКИ DD:.*атрибуты/.test(out));
+  checkS('  markdown при этом виден', /НАЗНАЧЕНИЕ:/.test(out));
 }
 
 // ==========================================================================
@@ -602,12 +587,6 @@ line('10б. ОТЧЁТ — одна из ручек упала (401), остал
 // по умолчанию не выгружаются и требуют согласования. Цена ошибки
 // несимметрична — принять «признака нет» за «поле открыто» значит уверенно
 // сказать заказчику, что согласование не нужно, и ошибиться именно на ПДн.
-let ddFails = 0;
-const checkS = (name, ok) => {
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}`);
-  if (!ok) ddFails++;
-};
-
 line('11. ГРУППЫ ДОСТУПА');
 {
   const colUrn = (n) => ({
@@ -849,456 +828,7 @@ line('11б. НЕПРИШЕДШИЕ КАРТОЧКИ: проверенным сч
     /карточки в этом режиме не запрашивались/.test(noCards));
 }
 
-// ===================================================================== 12
-line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, а не по вере');
-{
-  const URN_T = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d';
-  const colsWithSlice = { statusCode: 200, body: { totalCount: 3, data: [
-    { entity: { fqn: 'emart.mdm_employee_structure_d.emp_specialization_desc' } },
-    { entity: { fqn: 'emart.mdm_employee_structure_d.full_nm' } },
-    { entity: { fqn: 'emart.mdm_employee_structure_d.last_day_flg' } },
-  ] } };
-  const picked = [{ field: 'emp_specialization_desc' }, { field: 'full_nm' }];
-  const cardsOpen = [{ body: {} }, { body: {} }];
 
-  const plan = runValuesSql({ urn: URN_T, search: 'специализация', values: 'аналитик' },
-    colsWithSlice, picked, cardsOpen);
-  checkS('SQL построен', plan.values_sql.length > 0);
-  checkS('поле названо в элементе', plan.values_field === 'emp_specialization_desc');
-  // Имя таблицы выводится из URN и получает префикс prod_v_: читать из emart
-  // напрямую нельзя, запросы идут из prod_v-схемы.
-  checkS('таблица с префиксом prod_v_',
-    plan.values_table === 'prod_v_emart.mdm_employee_structure_d');
-  // Канонический срез добавляется, ТОЛЬКО если поле есть в таблице: слепое
-  // добавление уронило бы запрос на витрине без last_day_flg.
-  checkS('канонический срез добавлен, раз поле есть',
-    plan.values_slice === true && /last_day_flg = 1/.test(plan.values_sql));
-  // ПДн не тянем никогда, даже если признак чувствительности пуст.
-  checkS('поле с именем ПДн исключено',
-    !plan.values_candidates.includes('full_nm') &&
-    plan.values_skipped.some((x) => /full_nm/.test(x)));
-  checkS('исключение названо, а не молча', plan.values_skipped.length === 1);
-  // LIKE по числовому столбцу Trino не выполнит — приводим тип. Приведение
-  // теперь в группирующей ветви, а сравнение — над ней: список LIKE пишется
-  // один раз, а не в каждую ветвь объединения.
-  checkS('тип приводится в ветви',
-    /CAST\(emp_specialization_desc AS varchar\) AS val/.test(plan.values_sql));
-  checkS('сравнение идёт по приведённому значению',
-    /lower\(CAST\(emp_specialization_desc AS varchar\)\) LIKE/.test(plan.values_sql));
-  // Фильтр по словам НЕ в WHERE: он не экономит скан (GROUP BY и так идёт
-  // по всему срезу), а промах слов давал ноль строк — «таких значений нет»
-  // при живых данных, и второй попытки в конвейере нет.
-  checkS('слова не фильтруют выдачу, а помечают её',
-    /\) AS matched/.test(plan.values_sql) &&
-    !/WHERE[^\n]*LIKE/.test(plan.values_sql));
-  // В TRINO НЕТ ILIKE — это синтаксис Postgres и Greenplum. Живой прогон
-  // 2026-08-28 ответил «mismatched input 'ILIKE'», то есть запрос не разобрался
-  // вовсе. Регистронезависимость делается через lower() на колонке: слова
-  // уже приведены к нижнему регистру в needlesOf.
-  checkS('ILIKE не используется', !/ILIKE/i.test(plan.values_sql));
-  // Сортировка и лимит — НАД подзапросом, а не сразу после UNION ALL:
-  // «UNION ALL … ORDER BY 3» читается двояко (всё объединение или последняя
-  // ветвь), и по порядковому номеру колонки после набора операций диалекты
-  // расходятся. Цена ошибки тут не отказ, а МОЛЧА неверный список.
-  // ЗАПРОС НА ПОЛЕ, а не один UNION на все. Соседние узлы этого же флоу
-  // (dd_column_summary, dd_column_attrs) уже выполняются по разу на колонку —
-  // до 289 запросов, — так что довод «пусть HTTP-вызов будет один» не стоил
-  // ни свода типов к общему через CAST, ни оконной функции с тремя уровнями
-  // вложенности, ни того, что шейпер всё равно резал результат обратно
-  // по fld. Плюс отказ одного поля ронял выдачу по всем остальным.
-  checkS('запрос плоский, без UNION', !/UNION/i.test(plan.values_sql));
-  checkS('и без оконной функции', !/OVER\s*\(/i.test(plan.values_sql));
-  checkS('совпавшее поднято сортировкой, а не фильтром',
-    /ORDER BY matched DESC, cnt DESC/.test(plan.values_sql));
-  // Потолок НА ПОЛЕ получается сам: у каждого поля свой запрос.
-  checkS('потолок на поле', /LIMIT 60$/.test(plan.values_sql));
-  checkS('сортировка по имени колонки, а не по номеру',
-    !/ORDER BY \d/.test(plan.values_sql));
-  // Слово режется до основы тем же needlesOf, что и фильтр по описаниям, и это
-  // здесь намеренно: ilike '%аналит%' поймает и «Бизнес-аналитик BI», и
-  // «Аналитики BI», а точное '%аналитик%' промахнулось бы мимо склонения —
-  // ровно как промахивалась подстрока «почты» до правки 2026-08-27.
-  checkS('слово подставлено с обёртками, по основе', /LIKE '%аналит%'/.test(plan.values_sql));
-  // Перенос строки в SQL обязан быть настоящим переносом: литеральный \\n
-  // Trino не разберёт, а по виду JSON это неотличимо от нормального запроса.
-  checkS('в SQL настоящие переносы строк',
-    plan.values_sql.includes('\n') && !/\\n/.test(plan.values_sql));
-
-  // Витрина без last_day_flg: срез не добавляем, иначе запрос упадёт.
-  const noSlice = runValuesSql({ urn: URN_T, values: 'аналитик' },
-    { statusCode: 200, body: { data: [
-      { entity: { fqn: 'emart.t.emp_specialization_desc' } }] } },
-    [{ field: 'emp_specialization_desc' }], [{ body: {} }]);
-  checkS('без last_day_flg срез не добавляется',
-    noSlice.values_slice === false && !/last_day_flg/.test(noSlice.values_sql));
-
-  // Чувствительное поле исключается по признаку из каталога.
-  const sens = runValuesSql({ urn: URN_T, values: 'аналитик' }, colsWithSlice,
-    [{ field: 'emp_specialization_desc' }],
-    [{ body: { sensitivity: { type: 'text-list', data: ['HR_PII_READ'] } } }]);
-  checkS('чувствительное поле исключено', sens.values_sql === '');
-  checkS('и причина названа', /чувствительн/.test(sens.values_reason));
-
-  // В by_meaning «Pick columns» отдаёт ВСЕ колонки таблицы — совпадение
-  // считается позже, по описаниям. Если брать «первые отобранные», запрос
-  // уйдёт по случайному полю: витрина просканирована, автору показаны
-  // значения не из того столбца, и по виду ответа это неотличимо от работы.
-  const wideCols = { statusCode: 200, body: { data: [
-    { entity: { fqn: 'emart.t.a_first_col' } },
-    { entity: { fqn: 'emart.t.b_second_col' } },
-    { entity: { fqn: 'emart.t.emp_specialization_desc' } },
-  ] } };
-  const widePicked = [
-    { field: 'a_first_col', mode: 'by_meaning' },
-    { field: 'b_second_col', mode: 'by_meaning' },
-    { field: 'emp_specialization_desc', mode: 'by_meaning' },
-  ];
-  const meaning = runValuesSql(
-    { urn: 'urn:dd:tables:greenplum:table:emart.t', search: 'специализация', values: 'аналитик' },
-    wideCols, widePicked, [{ body: {} }, { body: {} }, { body: {} }],
-    [{ body: { data: 'Дата приёма' } }, { body: { data: 'Табельный номер' } },
-     { body: { data: 'Специализация сотрудника' } }],
-  );
-  checkS('by_meaning: значения тянутся по совпавшему полю',
-    meaning.values_candidates.length === 1 &&
-    meaning.values_candidates[0] === 'emp_specialization_desc');
-  checkS('by_meaning: несовпавшие поля в запрос не попали',
-    !/a_first_col|b_second_col/.test(meaning.values_sql));
-
-  // СУРРОГАТНЫЕ КЛЮЧИ И ФЛАГИ значений не несут. Живой прогон 2026-08-28:
-  // запрос ушёл по `legal_unit_rk` — скан витрины ради списка чисел, тогда
-  // как заказчик называет «Human Capital Origination». Сопоставить одно
-  // с другим по такому списку нельзя, а стоит он столько же, сколько полезный.
-  const keys = runValuesSql({ urn: URN_T, values: 'аналитик' },
-    { statusCode: 200, body: { data: [
-      { entity: { fqn: 'emart.t.legal_unit_rk' } },
-      { entity: { fqn: 'emart.t.last_day_flg' } },
-      { entity: { fqn: 'emart.t.emp_specialization_desc' } },
-    ] } },
-    [{ field: 'legal_unit_rk' }, { field: 'last_day_flg' },
-     { field: 'emp_specialization_desc' }],
-    [{ body: {} }, { body: {} }, { body: {} }]);
-  checkS('ключ в запрос не попал', !/legal_unit_rk AS varchar/.test(keys.values_sql));
-  checkS('флаг в запрос не попал', !keys.values_candidates.includes('last_day_flg'));
-  checkS('название попало', keys.values_candidates.includes('emp_specialization_desc'));
-  checkS('исключение ключа названо',
-    keys.values_skipped.some((x) => /legal_unit_rk.*ключ или флаг/.test(x)));
-  // Канонический срез при этом остаётся: last_day_flg не годится как поле
-  // ДЛЯ ПОИСКА значений, но как фильтр обязателен.
-  checkS('канонический срез не пострадал', /last_day_flg = 1/.test(keys.values_sql));
-
-  // Все поля оказались ключами — причина называется по факту, а не
-  // «исключены как чувствительные»: это отправило бы запрашивать доступ
-  // там, где дело совсем в другом.
-  const allKeys = runValuesSql({ urn: URN_T, values: 'аналитик' },
-    { statusCode: 200, body: { data: [{ entity: { fqn: 'emart.t.legal_unit_rk' } }] } },
-    [{ field: 'legal_unit_rk' }], [{ body: {} }]);
-  checkS('без подходящих полей запроса нет', allKeys.values_sql === '');
-  checkS('и причина названа точно',
-    /не годится для поиска/.test(allKeys.values_reason) &&
-    !/чувствительн/.test(allKeys.values_reason));
-
-  // `_nm` — ЭТО НАЗВАНИЕ ЧЕГО-ТО, А НЕ ИМЯ ЧЕЛОВЕКА.
-  //
-  // Живой прогон 2026-08-28, вопрос про юнит Human Capital Origination:
-  // `legal_unit_nm` был выброшен как «похоже на ПДн», потому что в списке
-  // персональных стояло голое `nm`. Под фильтр попадало КАЖДОЕ поле
-  // с этим суффиксом — то есть ровно те, ради которых ветка и заведена:
-  // в проекте `_nm` по соглашению значит «название», `*_rk` против `*_nm`.
-  // Запрос ушёл по кодам и, разумеется, ничего не нашёл.
-  const named = runValuesSql({ urn: URN_T, values: 'origination' },
-    { statusCode: 200, body: { data: [
-      { entity: { fqn: 'emart.t.legal_unit_nm' } },
-      { entity: { fqn: 'emart.t.position_nm' } },
-      { entity: { fqn: 'emart.t.full_nm' } },
-      { entity: { fqn: 'emart.t.ad_login' } },
-      { entity: { fqn: 'emart.t.contact_main_phone_no' } },
-    ] } },
-    [{ field: 'legal_unit_nm' }, { field: 'position_nm' }, { field: 'full_nm' },
-     { field: 'ad_login' }, { field: 'contact_main_phone_no' }],
-    [{ body: {} }, { body: {} }, { body: {} }, { body: {} }, { body: {} }]);
-  checkS('название юнита не считается ПДн',
-    named.values_candidates.includes('legal_unit_nm'));
-  checkS('название должности тоже', named.values_candidates.includes('position_nm'));
-  checkS('а вот ФИО — считается', !named.values_candidates.includes('full_nm'));
-  checkS('и логин', !named.values_candidates.includes('ad_login'));
-  checkS('и телефон', !named.values_candidates.includes('contact_main_phone_no'));
-
-  // НАЗВАНИЯ ВПЕРЁД КОДОВ: потолок в четыре поля выбирает из совпавших,
-  // и порядок решает. В том же прогоне места заняли `legal_unit_type_cd`
-  // и `emp_specialization_oper_code`, а `emp_stream_desc` до запроса
-  // не доехал — заказчик же называет не код типа юнита.
-  const live = ['legal_unit_rk', 'legal_unit_nm', 'legal_unit_type_cd',
-                'legal_unit_type_desc', 'emp_specialization_desc',
-                'emp_specialization_oper_code', 'emp_stream_desc'];
-  const ranked = runValuesSql({ urn: URN_T, values: 'human capital origination' },
-    { statusCode: 200, body: { data: live.map((x) => ({ entity: { fqn: `emart.t.${x}` } })) } },
-    live.map((field) => ({ field })), live.map(() => ({ body: {} })));
-  checkS('название юнита попало в запрос',
-    ranked.values_candidates.includes('legal_unit_nm'));
-  checkS('стрим тоже попал', ranked.values_candidates.includes('emp_stream_desc'));
-  checkS('код типа юнита вытеснен',
-    !ranked.values_candidates.includes('legal_unit_type_cd'));
-  checkS('операционный код вытеснен',
-    !ranked.values_candidates.includes('emp_specialization_oper_code'));
-
-  // ЭЛЕМЕНТ НА ПОЛЕ: n8n выполнит ноду запроса по разу на каждый, и отказ
-  // одного поля больше не роняет выдачу по остальным.
-  const perField = runValuesSql({ urn: URN_T, values: 'аналитик' },
-    { statusCode: 200, body: { data: [
-      { entity: { fqn: 'emart.t.emp_specialization_desc' } },
-      { entity: { fqn: 'emart.t.emp_stream_desc' } },
-    ] } },
-    [{ field: 'emp_specialization_desc' }, { field: 'emp_stream_desc' }],
-    [{ body: {} }, { body: {} }], null, true);
-  checkS('элемент на поле', perField.length === 2);
-  checkS('у каждого свой запрос',
-    perField[0].values_sql !== perField[1].values_sql);
-  checkS('и своё имя поля',
-    perField[0].values_field === 'emp_specialization_desc' &&
-    perField[1].values_field === 'emp_stream_desc');
-  checkS('каждый запрос про своё поле',
-    perField[0].values_sql.includes('GROUP BY emp_specialization_desc') &&
-    perField[1].values_sql.includes('GROUP BY emp_stream_desc'));
-  // Общие факты едут в каждом элементе: шейпер читает их с первого,
-  // и разъехаться им негде.
-  checkS('общие факты в каждом элементе',
-    JSON.stringify(perField[0].values_words) === JSON.stringify(perField[1].values_words) &&
-    perField[0].values_table === perField[1].values_table);
-
-  // СЛОВО ИЩЕТСЯ ТОЛЬКО В СВОЁМ ПОЛЕ.
-  //
-  // Живой прогон 2026-08-28: слова и поля связывались перебором — каждое
-  // слово подставлялось в каждое поле, и в запрос ушло
-  // `lower(legal_unit_nm) LIKE '%аналит%'` и `LIKE '%15%'`. Искать
-  // специализацию и грейд внутри названия юридического подразделения
-  // бессмысленно, а сам юнит из вопроса относится к УПРАВЛЕНЧЕСКОЙ
-  // структуре — различить их по подстроке «юнит» код не может.
-  const LIVE = ['emp_specialization_desc', 'emp_stream_desc',
-                'legal_unit_nm', 'mapped_management_unit_nm'];
-  const liveCols = { statusCode: 200, body: { data: LIVE.map(
-    (x) => ({ entity: { fqn: `emart.t.${x}` } })) } };
-  const routed = runValuesSql(
-    { urn: URN_T, values: 'BI-аналитик, Дата, Human Capital Origination',
-      question: 'сколько BI-аналитиков в стриме Дата в юните Human Capital Origination' },
-    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
-    null, true,
-    [{ value: 'BI-аналитик', field: 'emp_specialization_desc', fallback: '' },
-     { value: 'Дата', field: 'emp_stream_desc', fallback: '' },
-     { value: 'Human Capital Origination', field: 'mapped_management_unit_nm',
-       fallback: 'legal_unit_nm' }]);
-  checkS(`запрос на пару (${routed.length})`, routed.length === 3);
-  const byF = Object.fromEntries(routed.map((r) => [r.values_field, r.values_sql]));
-  checkS('специализация ищется в своём поле',
-    /аналит/.test(byF.emp_specialization_desc));
-  checkS('и не ищется в названии юрлица',
-    !/аналит/.test(byF.legal_unit_nm || '') &&
-    !/аналит/.test(byF.mapped_management_unit_nm || ''));
-  checkS('юнит ищется в управленческой структуре',
-    /origination/.test(byF.mapped_management_unit_nm));
-  checkS('и не ищется в специализации',
-    !/origination/.test(byF.emp_specialization_desc));
-  // Иное написание значения едет в тот же запрос: справочники витрины часто
-  // ведутся по-английски. Поиск по обоим написаниям сразу дешевле, чем
-  // второй проход, и промах «Дата» против «Data» закрывается сразу.
-  const alt = runValuesSql(
-    { urn: URN_T, values: 'Дата', question: 'стрим Дата' },
-    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
-    null, false,
-    [{ value: 'Дата', field: 'emp_stream_desc', fallback: '', alt: 'Data' }]);
-  checkS('русское написание в запросе', /LIKE '%дата%'/.test(alt.values_sql));
-  checkS('и английское тоже', /LIKE '%data%'/.test(alt.values_sql));
-
-  checkS('запасное поле сохранено для второго прохода',
-    routed.find((r) => r.values_field === 'mapped_management_unit_nm')
-      .values_fallback === 'legal_unit_nm');
-
-  // ПОЛЕ ИЗ ОТВЕТА МОДЕЛИ ПРОВЕРЯЕТСЯ ПО СПИСКУ КАНДИДАТОВ. Придуманное имя —
-  // это либо ошибка Trino, либо, хуже, обращение к полю, которое мы намеренно
-  // исключили как персональное. Ответ модели здесь данные, а не команда.
-  const invented = runValuesSql(
-    { urn: URN_T, values: 'BI-аналитик', question: 'вопрос' },
-    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
-    null, true,
-    [{ value: 'BI-аналитик', field: 'full_nm', fallback: '' },
-     { value: 'BI-аналитик', field: 'emp_specialization_desc', fallback: '' }]);
-  checkS('выдуманное поле в запрос не идёт',
-    invented.every((r) => r.values_field !== 'full_nm'));
-  checkS('годная пара при этом остаётся',
-    invented.some((r) => r.values_field === 'emp_specialization_desc'));
-
-  // Модель не дала ни одной годной пары — не гадаем и не возвращаемся
-  // к перебору: именно перебор и приводил к запросам в чужие поля.
-  const nothing = runValuesSql(
-    { urn: URN_T, values: 'BI-аналитик', question: 'вопрос' },
-    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
-    null, false, []);
-  checkS('без пар запроса нет', nothing.values_sql === '');
-  checkS('и причина названа', /не сопоставила ни одного слова/.test(nothing.values_reason));
-
-  // Слов не задали — запроса нет вовсе: тянуть значения «на всякий случай»
-  // значит платить сканом витрины на каждой выгрузке.
-  const noWords = runValuesSql({ urn: URN_T, values: '' }, colsWithSlice, picked, cardsOpen);
-  checkS('без слов SQL не строится', noWords.values_sql === '');
-
-  // --------------------------------------------- три исхода в шейпере
-  const card = { statusCode: 200, body: {} };
-  const shape = (valuesPlan, valuesRes) => runTable(
-    { urn: URN_T, search: 'специализация' }, card, colsWithSlice,
-    [{ statusCode: 200, body: { fqn: 'emart.t.emp_specialization_desc', attributes: {} } }],
-    null, null, valuesPlan, valuesRes);
-
-  const okPlan = { values_sql: 'select 1', values_fields: ['emp_specialization_desc'],
-                   values_words: ['аналитик'], values_skipped: [],
-                   values_table: 'prod_v_emart.mdm_employee_structure_d',
-                   values_slice: true, values_reason: '' };
-
-  const found = shape(okPlan, [
-    { fld: 'emp_specialization_desc', val: 'Бизнес-аналитик BI', cnt: 42 },
-    { fld: 'emp_specialization_desc', val: 'Системный аналитик', cnt: 17 },
-  ]);
-  checkS('найденные значения показаны', /«Бизнес-аналитик BI» — 42 строк/.test(found));
-  checkS('сказано, что это реальные значения', /РЕАЛЬНЫЕ значения из витрины/.test(found));
-  // Значение выбирает АВТОР: автоподстановка «похожего» даст запрос, который
-  // выполнится и вернёт не те цифры.
-  checkS('подставлять похожее запрещено', /подставлять «похожее» нельзя/.test(found));
-
-  // ГЛАВНОЕ: промах слов больше не значит «значений нет».
-  //
-  // Живой прогон 2026-08-28: заказчик сказал «BI-аналитик», в витрине
-  // значение записано «Бизнес-аналитик BI», фильтр в WHERE не совпал —
-  // и бот сказал, что таких значений нет, при живых данных. Второй попытки
-  // в конвейере нет и быть не должно; вместо неё запрос теперь всегда
-  // возвращает и совпавшее, и словарь поля.
-  const missed = shape(okPlan, [
-    { fld: 'emp_specialization_desc', val: 'Бизнес-аналитик BI', cnt: 240, matched: false },
-    { fld: 'emp_specialization_desc', val: 'Системный аналитик', cnt: 180, matched: false },
-    { fld: 'emp_stream_desc', val: 'Дата', cnt: 900, matched: false },
-  ]);
-  checkS('промах слов назван промахом, а не отсутствием',
-    /не совпало НИ ОДНО значение/.test(missed) && !/НЕ НАЙДЕНО/.test(missed));
-  checkS('и словарь поля всё равно показан',
-    /«Бизнес-аналитик BI» — 240 строк/.test(missed) && /«Дата» — 900 строк/.test(missed));
-  checkS('и запрещено утверждать, что среза нет',
-    /НЕ УТВЕРЖДАЙ, что такого среза нет/.test(missed));
-
-  // КОГДА НЕ СОВПАЛО НИЧЕГО, СЛОВАРЬ ПОКАЗЫВАЕТСЯ ЦЕЛИКОМ.
-  //
-  // Живой прогон 2026-08-28: стрим в витрине называется «Data», заказчик
-  // сказал «Дата». Кириллица с латиницей не совпадает никогда, и найти
-  // нужное можно только глазами по полному перечню — стримов десятки.
-  // Потолок в шесть значений спрятал бы искомое.
-  const many = [];
-  for (let i = 0; i < 20; i++) {
-    many.push({ fld: 'emp_stream_desc', val: `Stream ${i}`, cnt: 100 - i, matched: false });
-  }
-  many.push({ fld: 'emp_stream_desc', val: 'Data', cnt: 1, matched: false });
-  const noHit = shape({ ...okPlan, values_sample: 6, values_limit: 60 }, many);
-  checkS('без совпадений словарь не режется до шести',
-    /«Data» — 1 строк/.test(noHit));
-  checkS('и назван всеми значениями', /ВСЕ значения этого поля/.test(noHit));
-  checkS('и сказано искать по смыслу, а не по буквам',
-    /по смыслу.*а не по буквам/s.test(noHit) && /«Дата» → «Data»/.test(noHit));
-
-  // А когда совпадения ЕСТЬ, словарь остаётся коротким: там он фон.
-  const withHit = shape({ ...okPlan, values_sample: 2, values_limit: 60 },
-    [{ fld: 'f', val: 'Бизнес-аналитик BI', cnt: 240, matched: true }].concat(
-      many.slice(0, 10).map((r) => ({ ...r, fld: 'f' }))));
-  checkS('при совпадении словарь короткий',
-    (withHit.match(/Stream \d/g) || []).length === 2);
-
-  // Совпало — словарь идёт рядом, но подписан иначе: «прочие значения»
-  // не являются ответом на вопрос заказчика, и путать их нельзя.
-  const both = shape(okPlan, [
-    { fld: 'emp_specialization_desc', val: 'Бизнес-аналитик BI', cnt: 240, matched: true },
-    { fld: 'emp_specialization_desc', val: 'Руководитель группы', cnt: 90, matched: false },
-  ]);
-  checkS('совпавшее названо найденным', /найденные в данных по словам/.test(both));
-  checkS('прочие подписаны отдельно', /прочие значения этого поля/.test(both));
-  checkS('и не выданы за совпадение',
-    both.indexOf('«Бизнес-аналитик BI»') < both.indexOf('прочие значения'));
-
-  // Значений нет — это НЕ то же самое, что «витрины нет».
-  const empty = shape(okPlan, []);
-  checkS('пусто названо отсутствием значений', /НЕ НАЙДЕНО/.test(empty));
-  checkS('и предложено уточнить, а не угадать', /Уточни формулировку/.test(empty));
-
-  // Витрина не доехала до Trino — третий, отдельный диагноз.
-  const missing = shape(okPlan, [{ error: "Table 'dl.prod_v_emart.x' does not exist" }]);
-  checkS('недоступная витрина названа отдельно',
-    /в хранилище запросов нет/.test(missing) && !/НЕ НАЙДЕНО/.test(missing));
-  checkS('и сказано, что значение неизвестно',
-    /КОНКРЕТНОГО значения мы не знаем/.test(missing));
-
-  // Прочий отказ запроса — не «значений нет».
-  const failed = shape(okPlan, [{ error: 'Query exceeded per-node memory limit' }]);
-  checkS('прочий отказ не выдан за отсутствие значений',
-    /отказ запроса, а не отсутствие значений/.test(failed));
-
-  // Узел не выполнялся, хотя SQL был построен — сбой конвейера.
-  const notRun = shape(okPlan, undefined);
-  checkS('неисполнившийся узел назван сбоем', /сбой конвейера/.test(notRun));
-
-  // Форма ответа CUSTOM.trino на SELECT живым прогоном не подтверждена.
-  // Строки могут приехать и обёрткой — разобрать обязаны обе формы.
-  const wrapped = shape(okPlan, [{ data: [
-    { fld: 'emp_specialization_desc', val: 'Бизнес-аналитик BI', cnt: 42 },
-  ] }]);
-  checkS('строки в обёртке разобраны', /«Бизнес-аналитик BI» — 42 строк/.test(wrapped));
-
-  // А вот НЕРАСПОЗНАННАЯ форма обязана называться сбоем разбора. Выдать её
-  // за «значений не найдено» значит ответить про данные, которых никто
-  // не смотрел, — и по виду ответа это неотличимо от проверенного факта.
-  const weird = shape(okPlan, [{ someUnknownShape: 1, columns: ['a'] }]);
-  checkS('нераспознанный ответ назван сбоем разбора',
-    /разобрать его не удалось/.test(weird) && !/НЕ НАЙДЕНО/.test(weird));
-  checkS('и запрещено утверждать про значения',
-    /ничего не утверждай/.test(weird));
-  // Пустая обёртка — это честное «строк нет», а не сбой разбора.
-  const emptyWrap = shape(okPlan, [{ data: [] }]);
-  checkS('пустая обёртка — это отсутствие значений', /НЕ НАЙДЕНО/.test(emptyWrap));
-
-  // ПУСТОЙ ЭЛЕМЕНТ — тоже «строк нет». Именно так выглядит ответ ноды
-  // при alwaysOutputData, который на ней стоит обязательно: без него ноль
-  // строк ОСТАНАВЛИВАЕТ весь воркфлоу, и «Shape table meta» не выполняется
-  // вовсе — бот остаётся без инвентаря, хотя каталог отработал полностью.
-  const emptyItem = shape(okPlan, [{}]);
-  checkS('пустой элемент — это отсутствие значений',
-    /НЕ НАЙДЕНО/.test(emptyItem) && !/разобрать его не удалось/.test(emptyItem));
-
-  // Список упёрся в потолок — обрезка называется, иначе «других значений
-  // нет» становится утверждением о факте, которого никто не проверял.
-  const capped = shape({ ...okPlan, values_limit: 3 }, [
-    { fld: 'f', val: 'a', cnt: 3, matched: true },
-    { fld: 'f', val: 'b', cnt: 2, matched: true },
-    { fld: 'f', val: 'c', cnt: 1, matched: true },
-  ]);
-  checkS('обрезка по лимиту названа', /хвост словаря ОБРЕЗАН/.test(capped));
-  checkS('и названо, у какого поля', /У полей f из хранилища пришли первые 3/.test(capped));
-  const notCapped = shape({ ...okPlan, values_limit: 60 }, [
-    { fld: 'f', val: 'a', cnt: 3, matched: true },
-  ]);
-  checkS('без обрезки лишнего не пишется', !/ОБРЕЗАН/.test(notCapped));
-
-  // Ветки значений не было вовсе (старый вызов без values) — блока нет.
-  const silent = shape(null, undefined);
-  checkS('без ветки значений блока нет', !/ЗНАЧЕНИЯ ПОЛЕЙ/.test(silent));
-
-  // Значения ПРОСИЛИ, а ветка не запустилась (пустой search — карточки полей
-  // не запрашивались вовсе). Молчать нельзя: по виду ответа это неотличимо
-  // от «значений не просили», и автор решит, что проверка была.
-  const askedButSkipped = runTable(
-    { urn: URN_T, search: '', values: 'BI-аналитик' }, card, colsWithSlice,
-    null, null, null, null, undefined);
-  checkS('непроверенные значения названы',
-    /НЕ ПРОВЕРЯЛИСЬ/.test(askedButSkipped) && /BI-аналитик/.test(askedButSkipped));
-  checkS('и запрещено утверждать про их наличие',
-    /не утверждай ничего/.test(askedButSkipped));
-  const notAsked = runTable(
-    { urn: URN_T, search: '' }, card, colsWithSlice, null, null, null, null, undefined);
-  checkS('без запроса значений блока нет', !/ЗНАЧЕНИЯ ПОЛЕЙ/.test(notAsked));
-}
-
-console.log(ddFails ? `ПРОВАЛОВ: ${ddFails}` : 'ПРОВЕРКИ ГРУПП ДОСТУПА ПРОШЛИ');
+console.log(ddFails ? `ПРОВАЛОВ: ${ddFails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(ddFails ? 1 : 0);

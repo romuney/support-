@@ -494,9 +494,13 @@ line('16. Проводка адаптеров: связи и фильтры');
   const models = Object.entries(core.connections)
     .filter(([, c]) => c.ai_languageModel)
     .map(([name, c]) => [name, c.ai_languageModel[0][0].node]);
-  check('два разных узла модели', models.length === 2
-    && new Set(models.map((m) => m[0])).size === 2
-    && new Set(models.map((m) => m[1])).size === 2);
+  // Агентов теперь три: роутер, автор и правка черновика после проверки
+  // значений в данных. Узел модели у каждого свой — один нельзя развести
+  // ai_languageModel-входом на двух агентов.
+  check(`у каждого агента свой узел модели (${models.length})`,
+    models.length === 3
+    && new Set(models.map((m) => m[0])).size === models.length
+    && new Set(models.map((m) => m[1])).size === models.length);
 
   // Реестр попадает только роутеру: автор платил бы за него зря.
   check('реестр только в промпте роутера',
@@ -1878,96 +1882,6 @@ line('41. КАЖДАЯ Code-нода всех флоу парсится как J
   check('Code-ноды найдены во всех флоу', total > 10);
 }
 
-// ===================================================================== 42
-line('42. ВХОД values проложен от роутера до запроса в данные');
-{
-  // Цепочка из четырёх звеньев, и разрыв любого тихий: поле просто
-  // не доедет, ветка значений не запустится, а по виду флоу это
-  // неотличимо от «заказчик значений не называл». Ровно так же молча
-  // терялись поля формы, пока их не начал проверять тест 16.
-  const call = core.nodes.find((n) => n.name === 'Call DD Lookup');
-  const mapped = call && call.parameters.workflowInputs &&
-    call.parameters.workflowInputs.value;
-  check('ядро передаёт values в каталог', Boolean(mapped && mapped.values));
-  check('значения берутся из плана, а не из вопроса',
-    mapped && /\$json\.values/.test(mapped.values));
-
-  const lookup = JSON.parse(fs.readFileSync('DD Lookup.json', 'utf8'));
-  const trig = lookup.nodes.find((n) => n.type.endsWith('executeWorkflowTrigger'));
-  const declared = ((trig.parameters.workflowInputs || {}).values || [])
-    .map((v) => v.name);
-  check('каталог объявляет вход values', declared.includes('values'));
-  // n8n не падает на поле, которого субворкфлоу не объявляет, — оно просто
-  // не доедет. Поэтому списки сверяются, а не проверяется наличие по одному.
-  for (const k of Object.keys(mapped || {})) {
-    check(`вход «${k}» объявлен в каталоге`, declared.includes(k));
-  }
-
-  // Схема ноды должна перечислять то же самое: n8n рисует поля по ней,
-  // и незаявленное в схеме поле в интерфейсе не появится.
-  const schema = (call.parameters.workflowInputs.schema || []).map((x) => x.id);
-  for (const k of Object.keys(mapped || {})) {
-    check(`вход «${k}» есть в схеме ноды`, schema.includes(k));
-  }
-
-  // Ветка значений внутри каталога: узел запроса в данные есть, стоит
-  // за гейтом и не роняет прогон отказом Trino — иначе весь ответ
-  // по витрине пропадёт из-за недоехавшей таблицы.
-  const val = lookup.nodes.find((n) => n.name === 'dd_values');
-  check('узел запроса значений есть', Boolean(val));
-  check('отказ запроса не роняет каталог',
-    val && val.onError === 'continueRegularOutput');
-  // ПУСТОЙ РЕЗУЛЬТАТ ТОЖЕ НЕ ДОЛЖЕН РОНЯТЬ КАТАЛОГ, и это не то же самое.
-  //
-  // n8n останавливает выполнение, когда нода вернула НОЛЬ элементов, —
-  // а ноль строк здесь нормальный исход: значений под слова заказчика
-  // в данных может не быть. Живой прогон 2026-08-28 («No output data
-  // returned») показал цену: «Shape table meta» не выполнился вовсе,
-  // и бот остался без инвентаря полей при полностью отработавшем каталоге.
-  // То есть ветка значений, задуманная как дополнение, отбирала основной
-  // ответ — и по виду флоу это выглядело успешным прогоном.
-  check('пустой результат не останавливает воркфлоу',
-    val && val.alwaysOutputData === true);
-  // ДВА ПРОХОДА, и ни один не может оборвать цепочку до шейпера. Первый
-  // ведёт не в шейпер, а в построение второго: код решает, нужен ли он.
-  // Ложная ветвь гейта и второй проход оба заканчиваются шейпером.
-  const after = ((lookup.connections['dd_values'] || {}).main || [])[0] || [];
-  check('первый проход ведёт в построение второго',
-    after.length === 1 && after[0].node === 'Retry values SQL');
-  const gate = (lookup.connections['Need retry'] || {}).main || [];
-  check('второй проход за гейтом',
-    (gate[0] || []).some((t) => t.node === 'dd_values_retry'));
-  check('и без второго прохода поток идёт в шейпер',
-    (gate[1] || []).some((t) => t.node === 'Shape table meta'));
-  const retryOut = ((lookup.connections['dd_values_retry'] || {}).main || [])[0] || [];
-  check('второй проход тоже ведёт в шейпер',
-    retryOut.length === 1 && retryOut[0].node === 'Shape table meta');
-  const retryNode = lookup.nodes.find((n) => n.name === 'dd_values_retry');
-  check('у второго прохода те же предохранители',
-    retryNode && retryNode.onError === 'continueRegularOutput' &&
-    retryNode.alwaysOutputData === true);
-
-  // ЧТО проверять — решает модель, КАК запрашивать — код. Граница
-  // сознательная: канонический срез, запрет ПДн и потолки строк остаются
-  // свойствами кода, а не пожеланиями к модели.
-  const picker = lookup.nodes.find((n) => n.name === 'Pick value fields');
-  check('узел выбора полей есть', Boolean(picker));
-  check('у него есть модель',
-    Boolean((lookup.connections['Pick values model'] || {}).ai_languageModel));
-  check('сломанный ответ модели не роняет каталог',
-    picker && picker.onError === 'continueRegularOutput');
-  const sqlNode = lookup.nodes.find((n) => n.name === 'Build values SQL');
-  check('SQL строит КОД, а не модель',
-    sqlNode && sqlNode.type === 'n8n-nodes-base.code');
-  // Вопрос заказчика доезжает до узла выбора: без него «юнит» одинаково
-  // похож и на управленческую структуру, и на юридическую.
-  const trg = lookup.nodes.find((n) => n.type.endsWith('executeWorkflowTrigger'));
-  const inputs = (trg.parameters.workflowInputs.values || []).map((v) => v.name);
-  check('вопрос объявлен входом каталога', inputs.includes('question'));
-  check('гейт перед запросом есть',
-    lookup.nodes.some((n) => n.name === 'Need values'));
-}
-
 // ===================================================================== 43
 line('43. \\w и \\b рядом с кириллицей — запрещены во ВСЕХ Code-нодах');
 {
@@ -2193,7 +2107,7 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
     domains: ['headcount-structure'], articles_read: ['kb/tables/x.md'],
     dd_count: 2, dd_received: 0, dd_never_ran: false, kb_tasks: ['пробел'],
     routes: [], experts_invented: [], draft_own_tools: [], tables_no_meta: [],
-    is_query_help: true, router_empty: false, values_asked: 1,
+    is_query_help: true, router_empty: false,
     articles_invented: 0, draft_leaks: [], draft_len: 5,
   };
   const guardOut = { post: { id: 'dmpost1' }, question: 'вопрос в личке' };
@@ -2274,6 +2188,163 @@ line('47. В Trino не уезжает синтаксис Postgres');
     !PG_ONLY[0][0].test("WHERE lower(CAST(x AS varchar)) LIKE '%а%'"));
   check('детектор ловит ::', PG_ONLY[1][0].test('x::varchar'));
   check('и не ругается на CAST', !PG_ONLY[1][0].test('CAST(x AS varchar)'));
+}
+
+// ===================================================================== 48
+line('48. ЦИКЛ ПОСЛЕ АВТОРА: проводка и общий финал');
+{
+  const conn = core.connections;
+  const out = (n) => (conn[n]?.main || []).map((b) => b.map((e) => e.node));
+
+  // Сабворкфлоу возвращает вызывающему данные ПОСЛЕДНЕГО выполненного узла.
+  // Если бы ветви сходились не на общем финале, на ветке «проверять нечего»
+  // адаптер получил бы служебный элемент «Need check» вместо разобранного
+  // ответа — и в канал уехал бы пустой черновик при зелёном прогоне.
+  const terminal = core.nodes
+    .filter((n) => !(conn[n.name]?.main || []).some((b) => b.length))
+    .map((n) => n.name)
+    .filter((n) => !/model$/i.test(n));
+  check('терминальный узел ядра ровно один', terminal.length === 1);
+  check('и это общий финал', terminal[0] === 'Final answer');
+
+  check('автор ведёт в разбор и дальше в сборку проверки',
+    out('Parse answer')[0].includes('Build check SQL'));
+  check('гейт разводит на проверку и на финал',
+    out('Need check')[0].includes('Check values') &&
+    out('Need check')[1].includes('Final answer'));
+  check('ветвь проверки заканчивается тем же финалом',
+    out('Parse revised')[0].includes('Final answer'));
+
+  // Ветви взаимоисключающие (выходы одного IF), поэтому финал выполняется
+  // один раз — это НЕ веер, за которым следит проверка схождения.
+  const toFinal = Object.entries(conn)
+    .filter(([, c]) => (c.main || []).some((b) => b.some((e) => e.node === 'Final answer')))
+    .map(([n]) => n);
+  check('в финал ведут ровно две взаимоисключающие ветви',
+    toFinal.length === 2 && toFinal.includes('Need check') && toFinal.includes('Parse revised'));
+
+  const cv = core.nodes.find((n) => n.name === 'Check values');
+  // Ноль строк — нормальный исход, а n8n на пустом выходе останавливает
+  // выполнение. Без флага пустой ответ убил бы конвейер ПОСЛЕ того, как автор
+  // отработал и токены уплачены: ровно так ветка значений однажды уже
+  // отобрала основной ответ, и по виду прогона это выглядело успехом.
+  check('пустой результат не роняет прогон', cv.alwaysOutputData === true);
+  check('и отказ запроса тоже', cv.onError === 'continueRegularOutput');
+  // У крон-перелива в запасе четверть часа, здесь человек ждёт в чате.
+  check('таймаут интерактивный, а не батчевый', cv.parameters.timeout <= 120);
+
+  // Второй проход — правка, а не новый ответ: материалы в него не едут.
+  const rev = core.nodes.find((n) => n.name === 'Revise draft').parameters.text;
+  check('правка не тянет материалы заново', !/Build materials/.test(rev));
+  check('и опирается на свой же черновик', /Parse answer'\)\.first\(\)\.json\.draft/.test(rev));
+  check('второго круга проверки нет', /больше не пиши/.test(rev));
+  check('в промпте нет висячего слеша', !/\\\s*$/m.test(rev));
+}
+
+// ===================================================================== 49
+line('49. ОБЩИЙ ФИНАЛ: какой разбор доезжает до адаптера');
+{
+  const finalJs = core.nodes.find((n) => n.name === 'Final answer').parameters.jsCode;
+  const runFinal = (first, revised, plan, res) => {
+    const $ = (name) => {
+      if (name === 'Parse answer') return { first: () => ({ json: first }) };
+      if (name === 'Parse revised') {
+        if (!revised) throw new Error('node not executed: Parse revised');
+        return { first: () => ({ json: revised }) };
+      }
+      if (name === 'Build check SQL') {
+        if (!plan) throw new Error('node not executed: Build check SQL');
+        return { first: () => ({ json: plan }) };
+      }
+      if (name === 'Check result') {
+        if (!res) throw new Error('node not executed: Check result');
+        return { first: () => ({ json: res }) };
+      }
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', finalJs)($, {})[0].json;
+  };
+
+  const FIRST = { draft: 'первый черновик', confidence_key: 'high', sources: 'kb/a.md' };
+  const REV = { draft: 'черновик со значениями', confidence_key: 'high', sources: 'kb/a.md' };
+
+  // Цикла не было: ответ первого прохода окончателен, и поля проверки
+  // всё равно объявлены — иначе телеметрия не отличит «не спрашивал»
+  // от «поле пропало».
+  const skip = runFinal(FIRST, null, { check_pairs: [], check_skipped: ['grade (нет)'] }, null);
+  check('без цикла доезжает первый разбор', skip.draft === 'первый черновик');
+  check('и это видно полем', skip.revised === false);
+  check('факт «не спрашивал» отличим от нуля строк',
+    skip.check_asked === 0 && skip.check_rows === 0);
+  check('отсев посчитан', skip.check_skipped === 1);
+
+  // Цикл был: до адаптера доезжает ПРАВЛЕНЫЙ черновик, а не первый.
+  const looped = runFinal(FIRST, REV,
+    { check_pairs: [{ field: 'emp_stream_desc' }], check_skipped: [] },
+    { check_rows: 12, check_failed: '' });
+  check('после цикла доезжает правленый черновик',
+    looped.draft === 'черновик со значениями');
+  check('и это видно полем', looped.revised === true);
+  check('число проверенных пар доехало', looped.check_asked === 1);
+  check('и число строк тоже', looped.check_rows === 12);
+
+  // Отказ запроса доезжает текстом: по нему видно, что чинить.
+  const failed = runFinal(FIRST, REV,
+    { check_pairs: [{ field: 'grade' }], check_skipped: [] },
+    { check_rows: 0, check_failed: "mismatched input 'ILIKE'" });
+  check('отказ запроса доезжает до телеметрии', /ILIKE/.test(failed.check_failed));
+
+  // Пустой разбор второго прохода не должен подменить нормальный первый.
+  const broken = runFinal(FIRST, {}, { check_pairs: [], check_skipped: [] }, null);
+  check('пустой второй разбор не затирает первый', broken.draft === 'первый черновик');
+
+  // Поля проверки обязаны быть в витрине или названы неиспользуемыми —
+  // тот же инвариант, что тест 37 держит для «Parse answer».
+  const view = fs.readFileSync('../telemetry/support_request.sql', 'utf8');
+  const fields = [...new Set(
+    (finalJs.match(/^\s*out\.([a-z_]+)\s*=/gm) || [])
+      .map((m) => m.replace(/^\s*out\./, '').replace(/\s*=$/, '')))];
+  check('поля финала найдены детектором', fields.length >= 4);
+  const unseen = fields.filter((f) => !view.includes(f));
+  check('и каждое читается витриной: ' + (unseen.join(', ') || 'все'), unseen.length === 0);
+}
+
+// ===================================================================== 50
+line('50. СТРОКА ПРО ЗНАЧЕНИЯ В ТРЕДЕ ДЖУНА');
+{
+  const run = (extra) => runChannelMsg({
+    draft: 'черновик', confidence_key: 'high', sources: 'kb/a.md',
+    confidence_basis: ['статей: 2'], ...extra,
+  });
+
+  // Не просили — строки нет. Строка, которая горит на каждом обращении,
+  // перестаёт читаться: ровно так «ФИО» из шаблона формы обесценила
+  // подсказку про самообслуживание.
+  check('без проверки строки нет', !/🔢/.test(run({ check_asked: 0 })));
+
+  // Четыре исхода звучат по-разному: подтверждённое данными значение
+  // и придуманное иначе выглядят в треде одинаково, а разница между ними —
+  // это разница между верной цифрой и молча неверной.
+  const ok1 = run({ check_asked: 2, check_rows: 14, revised: true });
+  check('сверено и черновик переписан',
+    /🔢/.test(ok1) && /переписан/.test(ok1) && /14/.test(ok1));
+
+  const ok2 = run({ check_asked: 1, check_rows: 9, revised: false });
+  check('сверено без правок', /правок не потребовалось/.test(ok2));
+
+  const failed = run({ check_asked: 1, check_rows: 0, check_failed: 'Table does not exist' });
+  check('отказ назван и значение объявлено неподтверждённым',
+    /не удалось/.test(failed) && /НЕ подтверждено/.test(failed));
+
+  const empty = run({ check_asked: 1, check_rows: 0, check_failed: '' });
+  check('ноль строк отличим от отказа',
+    /строк\s+не вернули/.test(empty) && !/Table does not exist/.test(empty));
+
+  // Порядок: строка про значения раньше основания — она про конкретную
+  // цифру в черновике, а основание про доверие к ответу в целом.
+  const both = run({ check_asked: 1, check_rows: 5, revised: true });
+  check('строка про значения раньше основания',
+    both.indexOf('🔢') < both.indexOf('**Основание:**'));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

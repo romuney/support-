@@ -272,11 +272,6 @@ bot AS (
            -- «роутер промахнулся» и «в базе нет ответа» по логу неразличимы.
            max_by(CAST(json_extract_scalar(payload, '$.router_empty') AS boolean),
                   event_ts) AS router_empty,
-           -- Значения фильтров, которые роутер выделил из вопроса. Ноль на
-           -- обращении, где заказчик назвал конкретное значение, значит,
-           -- что в данные не ходили — и блок значений просто не появился.
-           max_by(CAST(json_extract_scalar(payload, '$.values_asked') AS integer),
-                  event_ts) AS values_asked,
            -- Пути, которых нет в реестре: роутер их придумал. Метрика его
            -- качества, и путать её с пробелом базы нельзя — чинятся в разных
            -- местах, а по логу без этой колонки они неразличимы.
@@ -316,6 +311,24 @@ bot AS (
                   event_ts) AS experts_invented,
            max_by(CAST(json_extract_scalar(payload, '$.draft_own_tools') AS integer),
                   event_ts) AS draft_own_tools,
+           -- Проверка значений в данных: она стоит ПОСЛЕ автора, и по этим
+           -- четырём полям видно, дошла ли она до данных и что вернула.
+           -- Разводить их обязательно: «автор не просил проверять» (0 пар),
+           -- «просил, но запрос отказал» и «проверили, строк нет» чинятся
+           -- в разных местах, а слитые в одну колонку неразличимы.
+           max_by(CAST(json_extract_scalar(payload, '$.check_asked') AS integer),
+                  event_ts) AS check_asked,
+           max_by(CAST(json_extract_scalar(payload, '$.check_skipped') AS integer),
+                  event_ts) AS check_skipped,
+           max_by(CAST(json_extract_scalar(payload, '$.check_rows') AS integer),
+                  event_ts) AS check_rows,
+           max_by(json_extract_scalar(payload, '$.check_failed'),
+                  event_ts) AS check_failed,
+           -- Переписал ли автор черновик по реальным значениям. Доля правок
+           -- от числа проверок — метрика того, стоит ли второй проход своих
+           -- токенов: правок нет вовсе значит, что данные ничего не меняли.
+           max_by(CAST(json_extract_scalar(payload, '$.revised') AS boolean),
+                  event_ts) AS revised,
            max_by(CAST(json_extract_scalar(payload, '$.draft_too_long') AS boolean),
                   event_ts) AS draft_too_long,
            max_by(CAST(json_extract_scalar(payload, '$.draft_len') AS integer),
@@ -462,7 +475,11 @@ SELECT
     COALESCE(b.dd_never_ran, false)                         AS dd_never_ran,
     (b.dd_count > 0 AND COALESCE(b.dd_received, 0) = 0)     AS dd_planned_not_received,
     COALESCE(b.router_empty, false)                         AS router_empty,
-    COALESCE(b.values_asked, 0)                             AS values_asked,
+    COALESCE(b.check_asked, 0)                              AS check_asked,
+    COALESCE(b.check_skipped, 0)                            AS check_skipped,
+    COALESCE(b.check_rows, 0)                               AS check_rows,
+    b.check_failed                                          AS check_failed,
+    COALESCE(b.revised, false)                              AS revised,
     COALESCE(b.articles_invented, 0)                        AS articles_invented,
     COALESCE(b.ib_required, false)                          AS ib_required,
     COALESCE(b.ib_missing, false)                           AS ib_missing,
@@ -660,10 +677,16 @@ SELECT
     count_if(experts_invented > 0)                         AS experts_invented,
     count_if(draft_own_tools > 0)                          AS own_tools_offered,
 
-    -- Насколько живёт то, что добавлено последним: значения фильтров
-    -- из данных и маршруты к экспертам. Ноль здесь значит «ни разу
+    -- Насколько живёт то, что добавлено последним: проверка значений
+    -- в данных и маршруты к экспертам. Ноль здесь значит «ни разу
     -- не сработало», и это надо видеть, а не предполагать.
-    count_if(values_asked > 0)                             AS values_requested,
+    --
+    -- Три числа, а не одно: «автор не просил проверять», «просил, но запрос
+    -- отказал» и «проверили, и черновик переписан» чинятся в разных местах.
+    -- Слитые в одну колонку, они отправляют чинить не то.
+    count_if(check_asked > 0)                              AS check_requested,
+    count_if(check_failed IS NOT NULL AND check_failed <> '') AS check_failed,
+    count_if(revised)                                      AS draft_revised,
     count_if(routes IS NOT NULL AND routes <> '[]')        AS expert_suggested,
     -- Пробелы базы, найденные кодом. Приоритет наполнения копится сам —
     -- сумма по неделе и есть очередь на статьи.
@@ -721,7 +744,10 @@ ans AS (
            CAST(json_extract_scalar(payload, '$.router_empty') AS boolean) AS router_empty,
            CAST(json_extract_scalar(payload, '$.articles_invented') AS integer)
                                                                      AS articles_invented,
-           CAST(json_extract_scalar(payload, '$.values_asked') AS integer) AS values_asked,
+           CAST(json_extract_scalar(payload, '$.check_asked') AS integer)  AS check_asked,
+           CAST(json_extract_scalar(payload, '$.check_rows') AS integer)   AS check_rows,
+           json_extract_scalar(payload, '$.check_failed')                  AS check_failed,
+           CAST(json_extract_scalar(payload, '$.revised') AS boolean)      AS revised,
            CAST(json_extract_scalar(payload, '$.ib_required') AS boolean)  AS ib_required,
            CAST(json_extract_scalar(payload, '$.ib_missing') AS boolean)   AS ib_missing,
            CAST(json_extract_scalar(payload, '$.experts_invented') AS integer)
@@ -759,7 +785,9 @@ SELECT
     count_if(COALESCE(experts_invented, 0) > 0)            AS experts_invented,
     count_if(COALESCE(draft_own_tools, 0) > 0)             AS own_tools_offered,
 
-    count_if(COALESCE(values_asked, 0) > 0)                AS values_requested,
+    count_if(COALESCE(check_asked, 0) > 0)                 AS check_requested,
+    count_if(check_failed IS NOT NULL AND check_failed <> '') AS check_failed,
+    count_if(COALESCE(revised, false))                     AS draft_revised,
     sum(COALESCE(kb_tasks, 0))                             AS kb_gaps_found
 FROM ans
 WHERE answered_at >= current_timestamp - INTERVAL '30' DAY

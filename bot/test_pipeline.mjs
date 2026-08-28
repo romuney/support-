@@ -1271,14 +1271,17 @@ line('27. ПУСТОЙ ПЛАН РОУТЕРА — не «нет ответа»,
 }
 
 // ===================================================================== 28
-line('28. ЗНАЧЕНИЯ ФИЛЬТРОВ едут отдельным полем, а не внутри hint');
+line('28. ЗНАЧЕНИЯ ФИЛЬТРОВ: роутер их больше не выделяет');
 {
-  // hint отвечает на «какое поле», values — на «какое в нём значение».
-  // Источники у них разные: имена полей есть в каталоге, значений полей
-  // в каталоге нет вовсе — их видно только в данных. Слитые в один список,
-  // они промахиваются молча в обе стороны: фильтр полей по слову «аналитик»
-  // вернёт весь инвентарь, поиск значений по слову «специализация» — пустоту,
-  // и оба читаются как «такого нет».
+  // Раньше роутер возвращал values рядом с hint, и каталог ходил в данные
+  // ещё до того, как хоть что-то прочитано. Выбор «в каком поле искать слово
+  // заказчика» делается по правилу из статьи, а у роутера статьи нет — он
+  // раз за разом отправлял искать «юнит» в юридической структуре вместо
+  // управленческой. Проверку перенесли за автора, у которого есть и статья,
+  // и рецепт, и инвентарь разом.
+  //
+  // Оставлять сбор values «на всякий случай» нельзя: это код, который
+  // не работает и выглядит рабочим. Тест держит именно отсутствие пути.
   const p = runPlan(JSON.stringify({
     domains: ['headcount-structure'],
     articles: ['kb/tables/mdm-employee-structure-d.md'],
@@ -1288,45 +1291,34 @@ line('28. ЗНАЧЕНИЯ ФИЛЬТРОВ едут отдельным поле
   }), REGISTRY, { question: 'сколько BI-аналитиков в стриме Дата' });
   const d = p.dd.find((x) => /mdm_employee_structure_d/.test(x.urn));
   check('объект каталога есть', Boolean(d));
-  check('значения доехали отдельным полем', d && d.values === 'BI-аналитик, Дата');
+  check('значения роутера в план не едут', d && d.values === undefined);
   check('и не подмешаны в hint', d && !/BI-аналитик/.test(d.hint));
+  check('счётчика значений в плане тоже нет', p.values_asked === undefined);
 
-  // Повтор URN склеивает и значения — по той же причине, по которой склеивает
-  // иглы: объект один, а понятий в вопросе несколько.
+  // Живое поведение, которое переносом не тронуто: повтор URN склеивает
+  // иглы. Вопрос «какое поле хранит логин и есть ли рабочая почта» — это
+  // один объект и ДВА понятия, и вторая игла раньше выбрасывалась.
   const merged = runPlan(JSON.stringify({
     domains: ['headcount-structure'], articles: [],
     dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
-           hint: 'специализация', values: 'аналитик' },
+           hint: 'логин' },
          { urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
-           hint: 'юнит', values: 'Human Capital Origination' }],
+           hint: 'почта' }],
     no_question: false,
-  }), REGISTRY, { question: 'аналитики в юните Human Capital Origination' });
+  }), REGISTRY, { question: 'какое поле хранит логин и есть ли рабочая почта' });
   const m = merged.dd.find((x) => /mdm_employee_structure_d/.test(x.urn));
-  check('значения обоих элементов склеены',
-    m && /аналитик/.test(m.values) && /Human Capital Origination/.test(m.values));
+  check('объект по-прежнему один', merged.dd.filter(
+    (x) => /mdm_employee_structure_d/.test(x.urn)).length === 1);
+  check('иглы обоих элементов склеены',
+    m && /логин/.test(m.hint) && /почт/.test(m.hint));
 
-  // Потолок: ilike по десяти словам вернёт полсправочника, и «реальные
-  // значения» перестанут что-либо сужать.
-  const many = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [],
-    dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
-           hint: '', values: 'a, b, c, d, e, f' }],
-    no_question: false,
-  }), REGISTRY, { question: 'вопрос' });
-  const mn = many.dd.find((x) => /mdm_employee_structure_d/.test(x.urn));
-  check('значений не больше четырёх', mn && mn.values.split(',').length === 4);
-
-  // Витрина, добранная КОДОМ (инвентарь прочитанных статей, умолчание,
-  // самообслуживание), значений не несёт и нести не может: код не читал
-  // вопрос на предмет значений фильтров. Поле обязано быть, но пустым —
-  // undefined уехал бы в выражение ноды строкой «undefined» и стал бы
-  // словом для поиска значений.
-  const byCode = runPlan(JSON.stringify({
-    domains: [], articles: [], dd: [], no_question: false,
-  }), REGISTRY, { question: 'подскажи, как написать select по сотрудникам' });
-  check('добранные кодом объекты есть', byCode.dd.length > 0);
-  check('и у каждого values — строка, а не undefined',
-    byCode.dd.every((x) => typeof x.values === 'string'));
+  // Ни в сборщике, ни в промпте роутера мёртвого пути не осталось: иначе
+  // модель платит токенами за правила, по которым никто не действует.
+  const src = fs.readFileSync('build_time_flows.py', 'utf8');
+  check('в промпте роутера про values не сказано',
+    !/values/.test(fs.readFileSync('prompts/router.md', 'utf8')));
+  check('и сборщик их нигде не собирает',
+    !/byUrnValues|values_asked|field_values/.test(src));
 }
 
 // ===================================================================== 29
@@ -1449,6 +1441,168 @@ line('31. ВОПРОС ПРО ПОДРАЗДЕЛЕНИЕ: рецепт поис�
   check('рецепт добирается по id, а не по пути',
     src.includes("UNIT_IDS = ['rc-find-unit-level']") &&
     !src.includes("'kb/recipes/find-unit-level.md'"));
+}
+
+// ===================================================================== 32
+line('32. ПРОВЕРКА ЗНАЧЕНИЙ ПОСЛЕ АВТОРА: сборка запроса');
+{
+  // Инвентарь в материалах — то, по чему сверяются имена полей. Придуманное
+  // моделью имя это либо ошибка Trino, либо обращение к полю, которое мы
+  // намеренно не показывали: ответ модели здесь данные, а не команда.
+  const MAT = {
+    materials:
+      '=== МЕТАДАННЫЕ urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ===\n' +
+      'ПОЛЯ: business_dt, last_day_flg, emp_stream_desc, ' +
+      'mapped_management_unit_nm, legal_unit_nm, grade\n',
+  };
+
+  const runCheck = (parsed, mat = MAT) => {
+    const $ = (name) => {
+      if (name === 'Build materials') return { first: () => ({ json: mat }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', js('Build check SQL'))($, parsed).map((i) => i.json);
+  };
+
+  // --- автор ничего не просил: это НОРМАЛЬНЫЙ путь, а не отказ.
+  const none = runCheck({ check_values: '' });
+  check('без блока автора SQL пустой', none.length === 1 && none[0].check_sql === '');
+  check('и причина названа словами',
+    /не просил/.test(none[0].check_reason));
+
+  // --- обычный случай: две пары.
+  const two = runCheck({
+    check_values: 'emp_stream_desc = Дата\nmapped_management_unit_nm = Human Capital Origination',
+  });
+  check('запрос на КАЖДОЕ поле, а не один UNION на все', two.length === 2);
+  check('и UNION в них нет вовсе',
+    two.every((i) => !/\bUNION\b/i.test(i.check_sql)));
+  check('канонический срез на месте',
+    two.every((i) => /WHERE last_day_flg = 1/.test(i.check_sql)));
+  check('регистронезависимость через lower(), а не ILIKE',
+    two.every((i) => /lower\(/.test(i.check_sql) && !/ILIKE/i.test(i.check_sql)));
+  check('схема чтения prod_v_, а не каталожная',
+    two.every((i) => /FROM prod_v_emart\.mdm_employee_structure_d/.test(i.check_sql)));
+
+  // Совпавшее поднято сортировкой, поэтому потолок строк не может выбросить
+  // искомое — иначе «таких значений нет» стало бы утверждением о факте,
+  // которого никто не проверял.
+  check('совпавшее поднято сортировкой раньше потолка',
+    two.every((i) => /ORDER BY matched DESC[\s\S]*LIMIT/.test(i.check_sql)));
+
+  // Пятый случай литерального \n вместо переноса строки был именно в SQL.
+  check('в SQL настоящие переносы, а не литерал',
+    two.every((i) => i.check_sql.includes('\n') && !i.check_sql.includes('\\n')));
+
+  // Фраза бьётся на слова, кириллица режется до основы РОВНО ОДИН РАЗ:
+  // «аналитик» → «аналит», второй проход дал бы «анал».
+  const phrase = runCheck({ check_values: 'emp_stream_desc = BI-аналитики' })[0].check_sql;
+  check('фраза ищется целиком', phrase.includes("'%bi-аналитики%'"));
+  check('и слово из неё отдельно, срезанное до основы',
+    phrase.includes("'%аналити%'"));
+  check('стемминг не применён дважды', !/'%анал%'/.test(phrase));
+  check('короткие куски отброшены', !/'%bi%'/.test(phrase));
+
+  // --- имя поля не из инвентаря: отбрасывается и НАЗЫВАЕТСЯ.
+  const bad = runCheck({ check_values: 'employee_login_nm = Иванов' });
+  check('выдуманное поле не уходит в запрос', bad[0].check_sql === '');
+  check('и названо в отсеве',
+    bad[0].check_skipped.some((x) => /employee_login_nm/.test(x) && /инвентар/.test(x)));
+
+  // --- потолок пар: тоже называется, а не режет молча.
+  const many = runCheck({
+    check_values: ['emp_stream_desc = a', 'legal_unit_nm = b', 'grade = c',
+                   'business_dt = d', 'mapped_management_unit_nm = e'].join('\n'),
+  });
+  check('потолок пар соблюдён', many.length === 4);
+  check('и остаток назван числом',
+    many[0].check_skipped.some((x) => /потолок/.test(x)));
+  // Поле без подчёркивания — не выдуманное. `grade` самое частое слово
+  // в живом трафике, и требование `_` молча выключало бы проверку на нём.
+  check('однословное поле не считается выдуманным',
+    runCheck({ check_values: 'grade = 15' })[0].check_sql.includes('grade'));
+
+  // --- витрины в материалах нет: идти некуда, и это сказано.
+  const noTable = runCheck({ check_values: 'grade = 15' }, { materials: 'статья без метаданных' });
+  check('без витрины запроса нет', noTable[0].check_sql === '');
+  check('и причина отличается от «автор не просил»',
+    /витрин/.test(noTable[0].check_reason));
+
+  // --- апостроф в значении не ломает запрос.
+  const quote = runCheck({ check_values: "legal_unit_nm = O'Brien" })[0].check_sql;
+  check('кавычка экранирована', quote.includes("''"));
+}
+
+// ===================================================================== 33
+line('33. ПРОВЕРКА ЗНАЧЕНИЙ: пять исходов звучат по-разному');
+{
+  const PLAN = { check_pairs: [{ field: 'emp_stream_desc' }], check_skipped: [] };
+  const runRes = (rows, plan = PLAN) => {
+    const $ = (name) => {
+      if (name === 'Build check SQL') return { first: () => ({ json: plan }) };
+      if (name === 'Check values') {
+        if (rows === null) throw new Error('node not executed: Check values');
+        return { all: () => rows.map((json) => ({ json })) };
+      }
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', js('Check result'))($, {})[0].json;
+  };
+
+  // 1. Совпало: значения заказчика есть в данных.
+  const hit = runRes([
+    { fld: 'emp_stream_desc', val: 'Data', cnt: 120, matched: true },
+    { fld: 'emp_stream_desc', val: 'Retail', cnt: 90, matched: false },
+  ]);
+  check('совпавшее названо отдельно', /совпало со словом заказчика/.test(hit.check_block));
+  check('и значение дословно', hit.check_block.includes('«Data»'));
+  check('прочие подписаны иначе', /прочие значения поля/.test(hit.check_block));
+  check('строки посчитаны', hit.check_rows === 2);
+
+  // 2. Не совпало ничего: перечень и ЕСТЬ ответ. Справочники ведутся
+  //    по-английски, заказчик называет по-русски — по буквам не сойдётся
+  //    никогда, искомое находится только глазами по списку.
+  const miss = runRes([
+    { fld: 'emp_stream_desc', val: 'Data', cnt: 120, matched: false },
+    { fld: 'emp_stream_desc', val: 'Retail', cnt: 90, matched: false },
+  ]);
+  check('промах назван прямо', /НЕ СОВПАЛО НИЧЕГО/.test(miss.check_block));
+  check('и сказано искать по смыслу, а не по буквам',
+    /ПО СМЫСЛУ/.test(miss.check_block) && /«Дата» → «Data»/.test(miss.check_block));
+
+  // Потолок словаря зависит от исхода: при совпадениях словарь это фон
+  // и шести хватает, без совпадений словарь и есть ответ.
+  const wide = (matched) => runRes(
+    Array.from({ length: 40 }, (_, i) => (
+      { fld: 'emp_stream_desc', val: 'v' + i, cnt: 1, matched: false }))
+      .concat(matched ? [{ fld: 'emp_stream_desc', val: 'ЦЕЛЬ', cnt: 5, matched: true }] : []),
+  );
+  const cnt = (b) => (b.match(/^ {4}«/gm) || []).length;
+  check('без совпадений словарь печатается целиком', cnt(wide(false).check_block) === 40);
+  check('с совпадением словарь урезан до фона', cnt(wide(true).check_block) === 7);
+
+  // 3. Запрос отказал — это НЕ «значений нет».
+  const failed = runRes([{ error: "mismatched input 'ILIKE'" }]);
+  check('отказ назван отказом', /не выполнился/.test(failed.check_block));
+  check('и прямо запрещено утверждать отсутствие',
+    /ничего не утверждай/.test(failed.check_block));
+  check('текст отказа сохранён', /ILIKE/.test(failed.check_failed));
+
+  // 4. Ноль строк: n8n отдаёт пустой элемент при alwaysOutputData.
+  const empty = runRes([{}]);
+  check('пустой элемент читается как «строк нет»', empty.check_rows === 0);
+  check('и это не выдаётся за отсутствие значения',
+    /ничего не утверждай/.test(empty.check_block) && !/НЕ СОВПАЛО/.test(empty.check_block));
+
+  // 5. Узел не выполнялся вовсе.
+  const never = runRes(null);
+  check('невыполненный узел назван своим исходом',
+    /не выполнялся/.test(never.check_failed));
+
+  // Отсев пар доезжает до автора: молча урезанная проверка читается как полная.
+  const skipped = runRes([{ fld: 'emp_stream_desc', val: 'Data', cnt: 1, matched: true }],
+    { check_pairs: [], check_skipped: ['grade (нет в инвентаре)'] });
+  check('отсев назван автору', /Не проверялись: grade/.test(skipped.check_block));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
