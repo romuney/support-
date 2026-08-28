@@ -1373,9 +1373,16 @@ line('32. ОДИН Service Account во всех воркфлоу');
   // Проверяется не конкретный id, а СОГЛАСОВАННОСТЬ: id один на все
   // воркфлоу. Смена Service Account — правка одной константы DP_CRED
   // в build_dd_flow.py, а не обход четырёх файлов.
+  // ИСХОДНИК ПРОВЕРЯЕТСЯ НАРАВНЕ С СОБРАННЫМ. Прежде тест смотрел только
+  // на выход сборщика — а устаревший id лежал во ВХОДЕ, в «Support Bot.json»,
+  // и не попадал в проверку вовсе. Держалось всё на одной строке нормализации
+  // в build_dd_flow: пропади она, и старый аккаунт снова разъехался бы
+  // по трём воркфлоу, а тест остался бы зелёным. Ровно тот же класс, что
+  // gs.includes('root_id'): проверялось следствие, а не источник.
   const creds = new Map();      // id → [где встретился]
   for (const [name, wf] of [['DD Lookup', load('DD Lookup.json')],
                             ['Support Bot DD', load('Support Bot DD.json')],
+                            ['Support Bot (исходник)', load('Support Bot.json')],
                             ['Support Bot Core', core]]) {
     for (const n of wf.nodes) {
       const c = (n.credentials || {}).devplatformApi;
@@ -1398,6 +1405,13 @@ line('32. ОДИН Service Account во всех воркфлоу');
     ?.devplatformApi?.id;
   check('ядро читает GitLab тем же аккаунтом',
     Boolean(coreCred) && creds.has(coreCred));
+
+  // И тот единственный id обязан быть тем, что объявлен в сборщике: иначе
+  // «все четыре согласованы» может значить «все четыре одинаково устарели».
+  const builder = fs.readFileSync('build_dd_flow.py', 'utf8');
+  const declared = (builder.match(/DP_CRED = \{"devplatformApi": \{"id": "([^"]+)"/) || [])[1];
+  check('id объявлен в сборщике', Boolean(declared));
+  check('во флоу стоит именно объявленный id', creds.has(declared));
 }
 
 // ===================================================================== 34

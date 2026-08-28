@@ -51,8 +51,8 @@
       "name": "Get a file",
       "credentials": {
         "devplatformApi": {
-          "id": "RBgLA1Lw8UGBMCU3",
-          "name": "Spirit (Devplatform) Service Account account 2"
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
         }
       }
     },
@@ -115,8 +115,8 @@
       "name": "list_kb_folder",
       "credentials": {
         "devplatformApi": {
-          "id": "RBgLA1Lw8UGBMCU3",
-          "name": "Spirit (Devplatform) Service Account account 2"
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
         }
       }
     },
@@ -141,8 +141,8 @@
       "name": "read_kb_article",
       "credentials": {
         "devplatformApi": {
-          "id": "RBgLA1Lw8UGBMCU3",
-          "name": "Spirit (Devplatform) Service Account account 2"
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
         }
       }
     },
@@ -177,8 +177,8 @@
           "name": "Header Auth account 210"
         },
         "devplatformApi": {
-          "id": "RBgLA1Lw8UGBMCU3",
-          "name": "Spirit (Devplatform) Service Account account 2"
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
         }
       }
     }
