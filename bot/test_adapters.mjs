@@ -2408,5 +2408,36 @@ line('51. НЕПОДТВЕРЖДЁННОЕ ЗНАЧЕНИЕ ПОНИЖАЕТ У�
   check('unknown не подменяется средней', unk.confidence_key === 'unknown');
 }
 
+// ===================================================================== 52
+line('52. ЗАПРОС БЕЗ ФИЛЬТРА АКТИВНОСТИ — СТРОКА ДЖУНУ');
+{
+  const run = (extra) => runChannelMsg({
+    draft: 'черновик', confidence_key: 'high', sources: 'kb/a.md',
+    confidence_basis: ['статей: 2'], ...extra,
+  });
+
+  const flagged = run({ draft_no_active_filter: true });
+  check('строка есть', /🚩/.test(flagged) && /фильтра активной численности/.test(flagged));
+  check('и названо условие целиком',
+    /active_employee_flg = 1 and company_fire_flg = 0/.test(flagged));
+  check('сказано, почему это не видно по результату',
+    /завышенное число/.test(flagged));
+
+  check('на верном черновике строки нет',
+    !/фильтра активной численности/.test(run({ draft_no_active_filter: false })));
+
+  // Уверенность проверка НЕ трогает — как draft_leaks и ib_missing:
+  // основание под ответом от неё не меняется, а понижение на верном
+  // черновике (вопрос про уволенных) испортило бы калибровку.
+  const parseSrc = core.nodes.find((n) => n.name === 'Parse answer').parameters.jsCode;
+  const capBlock = parseSrc.slice(parseSrc.indexOf('const cap ='));
+  check('уверенность не понижается',
+    !/draft_no_active_filter/.test(capBlock.split('out.confidence_key =')[0]));
+
+  // Поле обязано читаться витриной — тот же инвариант, что тесты 37 и 49.
+  const view = fs.readFileSync('../telemetry/support_request.sql', 'utf8');
+  check('поле читается витриной', view.includes('draft_no_active_filter'));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

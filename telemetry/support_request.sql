@@ -311,6 +311,11 @@ bot AS (
                   event_ts) AS experts_invented,
            max_by(CAST(json_extract_scalar(payload, '$.draft_own_tools') AS integer),
                   event_ts) AS draft_own_tools,
+           -- Запрос по витрине сотрудников без фильтра активной численности.
+           -- Ошибка, которую заказчик не замечает: запрос не падает, просто
+           -- людей больше, чем есть. Доля показывает, держится ли умолчание.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_no_active_filter') AS boolean),
+                  event_ts) AS draft_no_active_filter,
            -- Проверка значений в данных: она стоит ПОСЛЕ автора, и по этим
            -- четырём полям видно, дошла ли она до данных и что вернула.
            -- Разводить их обязательно: «автор не просил проверять» (0 пар),
@@ -784,6 +789,7 @@ SELECT
     count_if(ib_required AND ib_missing)                   AS ib_missing_in_draft,
     count_if(COALESCE(experts_invented, 0) > 0)            AS experts_invented,
     count_if(COALESCE(draft_own_tools, 0) > 0)             AS own_tools_offered,
+    count_if(draft_no_active_filter)                       AS no_active_filter,
 
     count_if(COALESCE(check_asked, 0) > 0)                 AS check_requested,
     count_if(check_failed IS NOT NULL AND check_failed <> '') AS check_failed,

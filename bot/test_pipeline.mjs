@@ -1719,6 +1719,110 @@ line('35. ПДн НЕ ТЯНУТСЯ, И ФИЛЬТРОВ ДВА');
     runCheck("where emp_specialization_desc = 'Аналитик'").length === 1);
 }
 
+// ===================================================================== 36
+line('36. АКТИВНАЯ ЧИСЛЕННОСТЬ — УМОЛЧАНИЕ ЛЮБОГО ЗАПРОСА ПО СОТРУДНИКАМ');
+{
+  const EMPTY = JSON.stringify({ domains: [], articles: [], dd: [], no_question: false });
+  const ask = (q) => runPlan(EMPTY, REGISTRY, { question: q });
+
+  // Статья с формулой добирается КОДОМ. Роутер её не выбирает: вопрос
+  // выглядит как «выгрузи аналитиков», а не как «что такое численность».
+  const sql = ask('помоги написать sql, чтобы выгрузить продуктовых аналитиков 13 грейда');
+  check('на просьбе про запрос статья добрана',
+    sql.added_headcount.includes('m-active-headcount'));
+  check('и реально уехала автору',
+    sql.files.includes('kb/metrics/active-headcount.md'));
+
+  const exp = runPlan(EMPTY, REGISTRY,
+    { question: 'нужна выгрузка', topic_kind: 'Выгрузка данных' });
+  check('на выгрузке тоже добрана', exp.added_headcount.length === 1);
+
+  // На обычном вопросе не добирается: статья, которая приезжает всегда, —
+  // это расход на каждом обращении без причины.
+  check('на обычном вопросе правило молчит',
+    ask('что такое текучесть').added_headcount.length === 0);
+
+  // Путь берётся по id из реестра: переименование статьи не должно молча
+  // отключать правило.
+  const src = fs.readFileSync('build_time_flows.py', 'utf8');
+  check('добирается по id, а не по вписанному пути',
+    src.includes("HEADCOUNT_IDS = ['m-active-headcount']") &&
+    !src.includes("'kb/metrics/active-headcount.md'"));
+
+  // Формула НЕ дублируется в сборщике: правила расчёта живут в git, и вторая
+  // копия разъехалась бы молча. Код добирает статью и мерит результат,
+  // но условия не выписывает — кроме проверочного запроса, где SQL пишет он.
+  check('формулы метрики в узле Plan нет — ни кодом, ни комментарием',
+    !/active_employee_flg/.test(js('Plan')));
+
+  // ЕДИНСТВЕННАЯ копия формулы — в проверочном запросе, потому что там SQL
+  // пишет код. Копия и статья лежат рядом на диске, и разъехаться им нечем
+  // только если это проверять: тот же приём, что двусторонняя сверка
+  // reached_by. Изменится формула в базе — покраснеет здесь, а не в проде.
+  const article = ['../executive-support/kb/metrics/active-headcount.md',
+                   '../kb/metrics/active-headcount.md'].find((f) => fs.existsSync(f));
+  check('статья про активную численность найдена', Boolean(article));
+  const formula = fs.readFileSync(article, 'utf8')
+    .match(/```sql\n(active_employee_flg[^`]*?)\n```/);
+  check('формула в статье найдена детектором', Boolean(formula));
+  const want = formula[1].trim().toLowerCase().replace(/\s+/g, ' ');
+  const got = (js('Build check SQL')
+    .match(/'(active_employee_flg[^']*company_fire_flg[^']*)'/) || [])[1] || '';
+  check(`условие в коде совпадает со статьёй: «${want}»`,
+    got.toLowerCase().replace(/\s+/g, ' ') === want);
+}
+
+// ===================================================================== 37
+line('37. ЗАПРОС БЕЗ ФИЛЬТРА АКТИВНОСТИ НАЗЫВАЕТСЯ');
+{
+  const parseJs = js('Parse answer');
+  const runParse = (draft, question) => {
+    const $ = (name) => {
+      if (name === 'When called by adapter') return { first: () => ({ json: { question } }) };
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      if (name === 'Build materials') {
+        return { first: () => ({ json: { materials: 'x', has_materials: true } }) };
+      }
+      if (name === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', parseJs)($, {
+      output: 'ЧЕРНОВИК ОТВЕТА: ' + draft + '\nУВЕРЕННОСТЬ: высокая',
+    })[0].json;
+  };
+
+  const BAD = 'select count(*) from prod_v_emart.mdm_employee_structure_d ' +
+    "where last_day_flg = 1 and emp_specialization_desc = 'Продуктовый аналитик'";
+  const GOOD = BAD + ' and active_employee_flg = 1 and company_fire_flg = 0';
+
+  // Ошибка, которую заказчик не замечает: запрос не падает, просто людей
+  // больше, чем есть.
+  check('запрос без фильтра назван',
+    runParse(BAD, 'выгрузи продуктовых аналитиков').draft_no_active_filter === true);
+  check('с фильтром — молчит',
+    runParse(GOOD, 'выгрузи продуктовых аналитиков').draft_no_active_filter === false);
+
+  // Оба флага обязательны: одного мало, и половина правила хуже, чем видно.
+  check('одного флага недостаточно',
+    runParse(BAD + ' and active_employee_flg = 1',
+      'выгрузи аналитиков').draft_no_active_filter === true);
+
+  // Там, где спрашивают про уволенных, фильтр как раз НЕВЕРЕН — он выбросит
+  // ровно тех, про кого вопрос. Ложная тревога на верном черновике
+  // обесценивает и себя, и соседние строки.
+  for (const q of ['сколько человек уволилось за год', 'посчитай отток по юнитам',
+                   'текучесть в дирекции', 'динамика найма за период',
+                   'нужны все сотрудники, включая уволенных']) {
+    check(`не срабатывает на «${q.slice(0, 24)}…»`,
+      runParse(BAD, q).draft_no_active_filter === false);
+  }
+
+  // Черновик без запроса по витрине сотрудников проверку не трогает.
+  check('на ответе без SQL молчит',
+    runParse('текучесть считается по статье', 'что такое текучесть')
+      .draft_no_active_filter === false);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

@@ -748,6 +748,27 @@ if (isQueryHelp) {
 // Рецепт поиска юнита — по id из реестра, а не по вписанному пути: путь
 // живёт в одном месте, в реестре, и переименование статьи не должно
 // молча отключать правило.
+// АКТИВНАЯ ЧИСЛЕННОСТЬ — УМОЛЧАНИЕ ДЛЯ ЛЮБОГО ЗАПРОСА ПО СОТРУДНИКАМ.
+//
+// Витрина сотрудников хранит и уволенных. Запрос без фильтра активности
+// выполнится, вернёт правдоподобное число и будет молча завышен — заказчик
+// не узнает об этом никогда. Поэтому правило звучит как умолчание: если
+// человек прямо не просит всех, включая уволенных, фильтр обязателен.
+//
+// Само условие здесь НЕ ПОВТОРЯЕТСЯ — ни кодом, ни комментарием: формулы
+// метрик живут в git, и вторая копия разъезжается молча. Код отвечает
+// только за то, чтобы статья ДОЕХАЛА до автора на каждом запросе, где
+// пишется SQL или собирается выгрузка.
+const HEADCOUNT_IDS = ['m-active-headcount'];
+const addedHeadcount = [];
+if (isQueryHelp || isExport) {
+  for (const id of HEADCOUNT_IDS) {
+    const pth = byId.get(id);
+    if (pth && !seen.has(pth)) addedHeadcount.push(id);
+    add(pth);
+  }
+}
+
 const addedUnit = [];
 if (isUnitQuestion) {
   for (const id of UNIT_IDS) {
@@ -1094,6 +1115,7 @@ return [{
     // догадкой, а телеметрия считает, как часто такие обращения приходят.
     is_query_help: isQueryHelp,
     added_query: addedQuery,
+    added_headcount: addedHeadcount,
     added_unit: addedUnit,
     is_unit_question: isUnitQuestion,
     // Роутер не назвал ни домена, ни статьи — читалась витрина по умолчанию.
@@ -2262,6 +2284,35 @@ const OWN_TOOLS = ['get_table_info'];
   out.draft_own_tools = OWN_TOOLS.filter((t) => text.includes(t));
 }
 
+// ЗАПРОС ПО СОТРУДНИКАМ БЕЗ ФИЛЬТРА АКТИВНОСТИ.
+//
+// Витрина сотрудников хранит и уволенных, поэтому запрос без фильтра
+// выполнится, вернёт правдоподобное число и будет молча завышен. Ошибку
+// такого рода заказчик не заметит никогда: она не падает и не выглядит
+// странно — просто людей больше, чем есть.
+//
+// Статью с формулой код уже добирает автору на каждом запросе, но одной
+// статьи мало: словесное правило модель роняет — так было с мастерами
+// домена, лимитом итераций, согласованием ИБ и просьбой проверить значения.
+// Поэтому код ещё и МЕРИТ, а не только подкладывает.
+//
+// Измеряется факт, а не смысл: в черновике есть запрос по витрине
+// сотрудников, и в нём нет ни одного из двух обязательных флагов.
+{
+  const sql = String(out.draft || '') + '\n' + String(out.tech_spec || '');
+  const overStaff = /mdm_employee_structure_d/i.test(sql) && /\bfrom\b/i.test(sql);
+  const hasActive = /active_employee_flg/i.test(sql) && /company_fire_flg/i.test(sql);
+  // Escape: там, где спрашивают про уволенных, приём или динамику за период,
+  // фильтр активности как раз НЕВЕРЕН. Проверка молчит — ложная тревога
+  // на верном черновике обесценивает и себя, и соседние строки.
+  const ASK_ALL = ['увол', 'уход', 'ушедш', 'отток', 'текуч', 'покинул', 'бывш',
+                   'найм', 'нанят', 'принят', 'приём', 'прием', 'динамик',
+                   'за период', 'истори', 'всех сотрудник', 'включая'];
+  const q = String($('When called by adapter').first().json.question ?? '').toLowerCase();
+  out.draft_no_active_filter =
+    overStaff && !hasActive && !ASK_ALL.some((w) => q.includes(w));
+}
+
 // Короткое имя объекта DD: полный URN в сообщении для человека — шум.
 // urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d → emart.mdm_…
 const shortUrn = (u) => {
@@ -2642,6 +2693,16 @@ const meta = String(mat.materials || '');
 const known = new Set((meta.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []));
 const table = (meta.match(/urn:dd:tables:greenplum:table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
 const hasSlice = known.has('last_day_flg');
+// Словарь значений собирается по ТЕМ ЖЕ строкам, по которым заказчик будет
+// считать. Иначе значение, встречающееся только у уволенных, приедет автору
+// как живое — и фильтр из черновика вернёт заказчику ноль строк.
+// Условие берётся из статьи (`m-active-headcount`), а применяется, только
+// если оба флага есть в инвентаре: у другой витрины их может не быть вовсе.
+const hasActive = known.has('active_employee_flg') && known.has('company_fire_flg');
+const where = [
+  hasSlice ? 'last_day_flg = 1' : '',
+  hasActive ? 'active_employee_flg = 1 AND company_fire_flg = 0' : '',
+].filter(Boolean);
 
 // ПДн НЕ ТЯНУТСЯ НИКОГДА, И ФИЛЬТРОВ ДВА.
 //
@@ -2702,7 +2763,7 @@ return use.map((p) => {
       `SELECT ${q(p.field)} AS fld, ${v} AS val, count(*) AS cnt,\n` +
       `       (${expr}) AS matched\n` +
       `FROM ${tbl}\n` +
-      (hasSlice ? `WHERE last_day_flg = 1\n` : '') +
+      (where.length ? `WHERE ${where.join('\n  AND ')}\n` : '') +
       `GROUP BY ${p.field}\n` +
       `ORDER BY matched DESC, cnt DESC\n` +
       `LIMIT ${MAX_ROWS}`,
@@ -2712,6 +2773,7 @@ return use.map((p) => {
     check_skipped: skipped,
     check_table: tbl,
     check_slice: hasSlice,
+    check_active: hasActive,
   } };
 });
 """
@@ -3811,6 +3873,10 @@ return [{ json: {
     // что бот вообще может сделать.
     experts_invented: (Array.isArray(a.experts_invented) ? a.experts_invented : []).length,
     draft_own_tools: (Array.isArray(a.draft_own_tools) ? a.draft_own_tools : []).length,
+    // Запрос по сотрудникам без фильтра активности. Метрика того, насколько
+    // умолчание держится: статью код добирает на каждом запросе, и если доля
+    // не падает, значит одной статьи мало и правило надо усиливать иначе.
+    draft_no_active_filter: a.draft_no_active_filter === true,
     // Проверка значений в данных — она идёт ПОСЛЕ автора. Четыре числа,
     // а не одно: «автор не просил» (0 пар), «просил, но запрос отказал»,
     // «проверили, строк нет» и «проверили, черновик переписан» чинятся
@@ -4016,6 +4082,14 @@ if (a.ib_missing) {
 // протух, и поправит строку в реестре.
 // Названный, но не подобранный эксперт — раньше маршрута и основания:
 // это не «насколько верить черновику», а «черновик нельзя отправлять как есть».
+if (a.draft_no_active_filter) {
+  parts.push('🚩 **В запросе нет фильтра активной численности.** Витрина ' +
+    'хранит и уволенных, поэтому запрос вернёт завышенное число, ' +
+    'и по виду результата это не заметно. Добавить перед отправкой: ' +
+    '`active_employee_flg = 1 and company_fire_flg = 0` — или, если ' +
+    'уволенные нужны намеренно, сказать об этом в ответе.');
+}
+
 if (Array.isArray(a.draft_own_tools) && a.draft_own_tools.length) {
   parts.push('🚩 **В черновике предложен инструмент аналитика:** ' +
     a.draft_own_tools.join(', ') +
