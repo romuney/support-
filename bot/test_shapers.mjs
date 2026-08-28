@@ -1098,6 +1098,17 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     /origination/.test(byF.mapped_management_unit_nm));
   checkS('и не ищется в специализации',
     !/origination/.test(byF.emp_specialization_desc));
+  // Иное написание значения едет в тот же запрос: справочники витрины часто
+  // ведутся по-английски. Поиск по обоим написаниям сразу дешевле, чем
+  // второй проход, и промах «Дата» против «Data» закрывается сразу.
+  const alt = runValuesSql(
+    { urn: URN_T, values: 'Дата', question: 'стрим Дата' },
+    liveCols, LIVE.map((field) => ({ field })), LIVE.map(() => ({ body: {} })),
+    null, false,
+    [{ value: 'Дата', field: 'emp_stream_desc', fallback: '', alt: 'Data' }]);
+  checkS('русское написание в запросе', /LIKE '%дата%'/.test(alt.values_sql));
+  checkS('и английское тоже', /LIKE '%data%'/.test(alt.values_sql));
+
   checkS('запасное поле сохранено для второго прохода',
     routed.find((r) => r.values_field === 'mapped_management_unit_nm')
       .values_fallback === 'legal_unit_nm');
@@ -1170,6 +1181,31 @@ line('12. ЗНАЧЕНИЯ ПОЛЕЙ: SQL строится по данным, �
     /«Бизнес-аналитик BI» — 240 строк/.test(missed) && /«Дата» — 900 строк/.test(missed));
   checkS('и запрещено утверждать, что среза нет',
     /НЕ УТВЕРЖДАЙ, что такого среза нет/.test(missed));
+
+  // КОГДА НЕ СОВПАЛО НИЧЕГО, СЛОВАРЬ ПОКАЗЫВАЕТСЯ ЦЕЛИКОМ.
+  //
+  // Живой прогон 2026-08-28: стрим в витрине называется «Data», заказчик
+  // сказал «Дата». Кириллица с латиницей не совпадает никогда, и найти
+  // нужное можно только глазами по полному перечню — стримов десятки.
+  // Потолок в шесть значений спрятал бы искомое.
+  const many = [];
+  for (let i = 0; i < 20; i++) {
+    many.push({ fld: 'emp_stream_desc', val: `Stream ${i}`, cnt: 100 - i, matched: false });
+  }
+  many.push({ fld: 'emp_stream_desc', val: 'Data', cnt: 1, matched: false });
+  const noHit = shape({ ...okPlan, values_sample: 6, values_limit: 60 }, many);
+  checkS('без совпадений словарь не режется до шести',
+    /«Data» — 1 строк/.test(noHit));
+  checkS('и назван всеми значениями', /ВСЕ значения этого поля/.test(noHit));
+  checkS('и сказано искать по смыслу, а не по буквам',
+    /по смыслу.*а не по буквам/s.test(noHit) && /«Дата» → «Data»/.test(noHit));
+
+  // А когда совпадения ЕСТЬ, словарь остаётся коротким: там он фон.
+  const withHit = shape({ ...okPlan, values_sample: 2, values_limit: 60 },
+    [{ fld: 'f', val: 'Бизнес-аналитик BI', cnt: 240, matched: true }].concat(
+      many.slice(0, 10).map((r) => ({ ...r, fld: 'f' }))));
+  checkS('при совпадении словарь короткий',
+    (withHit.match(/Stream \d/g) || []).length === 2);
 
   // Совпало — словарь идёт рядом, но подписан иначе: «прочие значения»
   // не являются ответом на вопрос заказчика, и путать их нельзя.

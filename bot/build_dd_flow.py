@@ -888,7 +888,18 @@ function valuesBlock() {
   // список, где совпавшее поднято сортировкой наверх, а сколько из него
   // печатать — решение про контекст модели, а не про базу.
   const maxHit = Number(plan.values_matched_shown) || 25;
-  const maxSample = Number(plan.values_sample) || 6;
+  // ПОТОЛОК СЛОВАРЯ ЗАВИСИТ ОТ ТОГО, НАШЛОСЬ ЛИ ЧТО-ТО.
+  //
+  // Когда совпадения есть, словарь — это фон: шесть значений показывают
+  // форму поля, и больше не нужно. Когда не совпало НИЧЕГО, словарь и есть
+  // ответ, и резать его до шести — значит спрятать искомое.
+  //
+  // Живой прогон 2026-08-28: стрим в витрине называется «Data», а заказчик
+  // сказал «Дата». Кириллица с латиницей не совпадает никогда, и найти
+  // нужное можно только глазами по полному перечню — стримов там десятки,
+  // а не тысячи. То же с любым справочником, который ведут по-английски.
+  const sampleFull = Number(plan.values_limit) || 60;
+  const maxSample = anyHit ? (Number(plan.values_sample) || 6) : sampleFull;
   for (const [f, g] of byField) {
     out.push('');
     out.push(`— ${f}:`);
@@ -899,7 +910,9 @@ function valuesBlock() {
     if (g.sample.length) {
       out.push(g.hit.length
         ? '    прочие значения этого поля (для понимания, как оно устроено):'
-        : '    самые частые значения этого поля:');
+        : '    ВСЕ значения этого поля — ищи среди них подходящее по смыслу, ' +
+          'а не по буквам: справочники витрины часто ведутся по-английски, ' +
+          'а заказчик называет их по-русски («Дата» → «Data»):');
       for (const r of g.sample.slice(0, maxSample)) {
         out.push(`      «${r.val}» — ${r.cnt} строк`);
       }
@@ -948,11 +961,13 @@ function valuesBlock() {
         'но хвост словаря ОБРЕЗАН. Судить по нему о полном перечне нельзя.',
     );
   }
-  out.push(
-    '  Список «прочих значений» короткий по построению (' +
-      (plan.values_sample || 0) + ' на поле): он показывает форму значений, ' +
-      'а не их полный перечень.',
-  );
+  if (anyHit) {
+    out.push(
+      '  Список «прочих значений» короткий по построению (' +
+        (plan.values_sample || 0) + ' на поле): он показывает форму значений, ' +
+        'а не их полный перечень.',
+    );
+  }
 }
 
 // Сводка по чувствительности. Отдельным блоком, а не только строками у полей:
@@ -1663,11 +1678,16 @@ for (const p of pairs) {
   const value = String((p && p.value) || '').trim();
   const field = String((p && p.field) || '').trim();
   const fallback = String((p && p.fallback) || '').trim();
+  // Иное написание того же значения: справочники витрины часто ведутся
+  // по-английски, а заказчик называет их по-русски. Стрим «Дата» в данных
+  // записан как «Data», и поиск по кириллице не совпадает с ним никогда.
+  const alt = String((p && p.alt) || '').trim();
   if (!value || !allowed.includes(field)) {
     if (value || field) dropped.push(`${value || '?'} → ${field || '?'}`);
     continue;
   }
-  clean.push({ value, field, fallback: allowed.includes(fallback) ? fallback : '' });
+  clean.push({ value, field, alt,
+               fallback: allowed.includes(fallback) ? fallback : '' });
 }
 
 // Модель не дала ни одной годной пары — не гадаем и не подставляем перебор:
@@ -1685,9 +1705,9 @@ const slice = plan.values_slice ? 'last_day_flg = 1' : '';
 
 // Слова одной пары: сама фраза плюс её слова по основам. Ищем только
 // в СВОЁМ поле — это и есть то, чего не хватало.
-const sqlFor = (field, value) => {
+const sqlFor = (field, value, alt) => {
   const v = `CAST(${field} AS varchar)`;
-  const needles = valueNeedles(value);
+  const needles = valueNeedles(alt ? `${value}, ${alt}` : value);
   const expr = needles.map((w) => `lower(${v}) LIKE ${q('%' + w + '%')}`).join(' OR ') || 'false';
   return {
     sql:
@@ -1703,12 +1723,13 @@ const sqlFor = (field, value) => {
 };
 
 return clean.map((p) => {
-  const built = sqlFor(p.field, p.value);
+  const built = sqlFor(p.field, p.value, p.alt);
   return { json: {
     ...plan,
     values_sql: built.sql,
     values_field: p.field,
     values_value: p.value,
+    values_alt: p.alt,
     values_fallback: p.fallback,
     values_needles: built.needles,
     values_limit: MAX_ROWS,
@@ -1764,7 +1785,7 @@ if (!retry.length || !table) {
 return retry.map((b) => {
   const f = b.values_fallback;
   const v = `CAST(${f} AS varchar)`;
-  const needles = valueNeedles(b.values_value);
+  const needles = valueNeedles(b.values_alt ? `${b.values_value}, ${b.values_alt}` : b.values_value);
   const expr = needles.map((w) => `lower(${v}) LIKE ${q('%' + w + '%')}`).join(' OR ') || 'false';
   return { json: {
     ...b,
@@ -1817,7 +1838,7 @@ PICK_VALUES_PROMPT = """=Ты сопоставляешь слова заказч
 {{ $json.fields_text }}
 
 Верни JSON и ничего кроме него:
-{"pairs": [{"value": "<слово заказчика>", "field": "<имя поля>", "fallback": "<имя другого поля или пустая строка>"}]}
+{"pairs": [{"value": "<слово заказчика>", "field": "<имя поля>", "fallback": "<имя другого поля или пустая строка>", "alt": "<то же значение в другом написании или пустая строка>"}]}
 
 Правила:
 1. Одно слово — одна пара. Значение бери ДОСЛОВНО из списка выше.
@@ -1833,6 +1854,12 @@ PICK_VALUES_PROMPT = """=Ты сопоставляешь слова заказч
    Лишняя пара — это скан витрины впустую.
 6. Числа и коды (грейд, табельный номер) включай, только если есть поле
    именно под них: искать «15» внутри названия подразделения бессмысленно.
+7. alt — то же самое значение, записанное иначе. В витрине справочники
+   часто ведут по-английски, а заказчик называет их по-русски: стрим
+   «Дата» в данных записан как «Data», «Риски» как «Risk». Поиск идёт
+   по обоим написаниям сразу, поэтому alt дёшев, а его отсутствие
+   стоит промаха. Не уверен в переводе — оставь пустым, значения поля
+   всё равно придут списком.
 """
 
 pick_values = {
