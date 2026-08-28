@@ -1605,6 +1605,120 @@ line('33. ПРОВЕРКА ЗНАЧЕНИЙ: пять исходов звуча�
   check('отсев назван автору', /Не проверялись: grade/.test(skipped.check_block));
 }
 
+// ===================================================================== 34
+line('34. РЕШЕНИЕ «ПРОВЕРЯТЬ ЛИ» ПРИНИМАЕТ КОД, А НЕ АВТОР');
+{
+  const MAT = { materials:
+    '=== МЕТАДАННЫЕ urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ===\n' +
+    'ПОЛЯ: last_day_flg, emp_specialization_desc, emp_stream_desc, grade, ' +
+    'legal_unit_nm, mapped_management_unit_nm, full_nm, ad_login, ' +
+    'wrk_email_address_txt, contact_main_phone_no\n' };
+  const runCheck = (parsed, mat = MAT) => {
+    const $ = (name) => {
+      if (name === 'Build materials') return { first: () => ({ json: mat }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', js('Build check SQL'))($, parsed).map((i) => i.json);
+  };
+
+  // ЖИВОЙ КЕЙС 2026-08-28. Бот выдал готовый SQL с фильтром по специализации,
+  // сам написал в «Чего не хватило», что значение не проверено и нужен
+  // select distinct, — и блок ПРОВЕРИТЬ ЗНАЧЕНИЯ не поставил. В логе осталось
+  // «автор не просил проверять значения»: узел зелёный, ветка пропущена,
+  // по виду прогона отказ неотличим от нормы.
+  const live = runCheck({
+    check_values: '',
+    draft: "select count(*) from prod_v_emart.mdm_employee_structure_d\n" +
+           "where last_day_flg = 1 and grade = 13\n" +
+           "  and emp_specialization_desc = 'Продуктовый аналитик'",
+  });
+  check('проверка идёт без просьбы автора', live.length === 1);
+  check('и именно по полю из фильтра', live[0].check_field === 'emp_specialization_desc');
+  check('значение взято из литерала', live[0].check_value === 'Продуктовый аналитик');
+  check('источник пары назван', live[0].check_pairs[0].src === 'фильтр в черновике');
+
+  // Число без кавычек не берём: ошибаются на справочниках, которые ведутся
+  // словами, а grade = 13 стоил бы лишнего скана витрины.
+  check('числовой фильтр не проверяется',
+    !live.some((i) => i.check_field === 'grade'));
+
+  // Блок автора остаётся вторым каналом — им просят проверить то, чего
+  // в черновике ещё нет.
+  const asked = runCheck({ check_values: 'emp_stream_desc = Дата', draft: 'без SQL' });
+  check('блок автора по-прежнему работает', asked[0].check_field === 'emp_stream_desc');
+  check('и помечен своим источником', asked[0].check_pairs[0].src === 'блок автора');
+
+  // Дубль не удваивает запрос: одна пара — один поход в данные.
+  const dup = runCheck({
+    check_values: 'emp_stream_desc = Дата',
+    draft: "where emp_stream_desc = 'Дата'",
+  });
+  check('пара из двух источников не дублируется', dup.length === 1);
+
+  // Список IN разбирается целиком: проверить первое и промолчать про
+  // остальные значит назвать проверенным то, что не проверяли.
+  const inList = runCheck({ check_values: '',
+    draft: "where emp_specialization_desc in ('Аналитик BI', 'Продуктовый аналитик')" });
+  check('список IN разобран целиком', inList.length === 2);
+
+  // lower(...) LIKE '%...%' — самая частая форма в черновиках бота.
+  const like = runCheck({ check_values: '',
+    draft: "where lower(emp_stream_desc) like '%data%'" });
+  check('форма lower(...) LIKE разобрана', like.length === 1);
+  check('и проценты из литерала срезаны', like[0].check_value === 'data');
+
+  // Нет фильтров по значению — проверять нечего, и это НОРМАЛЬНЫЙ путь.
+  // Причина обязана отличаться от «пары были и не прошли»: чинится разное.
+  const none = runCheck({ check_values: '', draft: 'обычный текстовый ответ без запроса' });
+  check('без фильтров запроса нет', none[0].check_sql === '');
+  check('и причина не сваливает вину на автора',
+    /нет фильтров по значению/.test(none[0].check_reason));
+}
+
+// ===================================================================== 35
+line('35. ПДн НЕ ТЯНУТСЯ, И ФИЛЬТРОВ ДВА');
+{
+  const BASE = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ' +
+    'ПОЛЯ: last_day_flg, emp_specialization_desc, legal_unit_nm, ' +
+    'mapped_management_unit_nm, full_nm, ad_login, wrk_email_address_txt, ' +
+    'contact_main_phone_no';
+  const runCheck = (draft, materials = BASE) => {
+    const $ = () => ({ first: () => ({ json: { materials } }) });
+    return new Function('$', '$json', js('Build check SQL'))($, { draft, check_values: '' })
+      .map((i) => i.json);
+  };
+
+  // Пока пары приходили только от автора, дыру прикрывала дисциплина модели,
+  // то есть ничего. Теперь пары добывает код прямо из черновика, и запрос
+  // по ФИО собрался бы САМ, без чьего-либо решения.
+  const pii = runCheck("where full_nm = 'Иванов' and ad_login = 'ivanov' " +
+    "and wrk_email_address_txt like '%@t%' and contact_main_phone_no = '+7'");
+  check('по ПДн запрос не собирается', pii[0].check_sql === '');
+  check('и каждое поле названо в отсеве',
+    ['full_nm', 'ad_login', 'wrk_email_address_txt', 'contact_main_phone_no']
+      .every((f) => pii[0].check_skipped.some((x) => x.startsWith(f))));
+  check('причина отсева — именно ПДн',
+    pii[0].check_skipped.every((x) => /персональные данные/.test(x)));
+
+  // `_nm` — это название ЧЕГО-ТО, а не имя человека. Голый суффикс в списке
+  // отсеивал бы ровно те поля, ради которых ветка и заведена.
+  const units = runCheck("where legal_unit_nm = 'ООО Т' " +
+    "and mapped_management_unit_nm = 'Human Capital Origination'");
+  check('поля с _nm персональными не считаются', units.length === 2);
+
+  // Второй фильтр: признак каталога может стоять на поле, которого
+  // в списке имён нет.
+  const sens = runCheck("where emp_specialization_desc = 'Аналитик'",
+    BASE + ' ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ 1 из 9: emp_specialization_desc (ad_group_hr). Каждое');
+  check('признак каталога тоже отсеивает', sens[0].check_sql === '');
+  check('и назван отдельной причиной',
+    sens[0].check_skipped.some((x) => /признаку каталога/.test(x)));
+
+  // Без признака то же поле проверяется — иначе фильтр гасил бы всё подряд.
+  check('без признака поле проверяется',
+    runCheck("where emp_specialization_desc = 'Аналитик'").length === 1);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

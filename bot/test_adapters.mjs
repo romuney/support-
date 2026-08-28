@@ -2347,5 +2347,66 @@ line('50. СТРОКА ПРО ЗНАЧЕНИЯ В ТРЕДЕ ДЖУНА');
     both.indexOf('🔢') < both.indexOf('**Основание:**'));
 }
 
+// ===================================================================== 51
+line('51. НЕПОДТВЕРЖДЁННОЕ ЗНАЧЕНИЕ ПОНИЖАЕТ УВЕРЕННОСТЬ');
+{
+  const finalJs = core.nodes.find((n) => n.name === 'Final answer').parameters.jsCode;
+  const runFinal = (first, plan, res) => {
+    const $ = (name) => {
+      if (name === 'Parse answer') return { first: () => ({ json: first }) };
+      if (name === 'Build check SQL') return { first: () => ({ json: plan }) };
+      if (name === 'Check result') {
+        if (!res) throw new Error('node not executed: Check result');
+        return { first: () => ({ json: res }) };
+      }
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', finalJs)($, {})[0].json;
+  };
+  const HIGH = { draft: 'ответ', confidence_key: 'high', confidence_claimed: 'high',
+                 confidence_capped: false, confidence_capped_reason: '' };
+  const PLAN = { check_pairs: [{ field: 'emp_specialization_desc' }], check_skipped: [] };
+
+  // Пары код добывает из самого черновика, значит проверка запускается там,
+  // где ответ УТВЕРЖДАЕТ что-то о данных. Не подтвердилось — «высокая»
+  // относится к значению, которого никто не видел: заказчик скопирует
+  // фильтр и получит ноль строк.
+  const failed = runFinal(HIGH, PLAN, { check_rows: 0, check_failed: 'Table does not exist' });
+  check('отказ проверки понижает до средней', failed.confidence_key === 'medium');
+  check('и понижение помечено', failed.confidence_capped === true);
+  check('причина названа настоящая, а не выдуманная',
+    /Table does not exist/.test(failed.confidence_capped_reason));
+
+  const empty = runFinal(HIGH, PLAN, { check_rows: 0, check_failed: '' });
+  check('ноль строк тоже понижает', empty.confidence_key === 'medium');
+  check('и звучит иначе, чем отказ',
+    /не подтвердилось/.test(empty.confidence_capped_reason));
+
+  // Подтверждённое значение — норма, а не заслуга: повышений в коде нет.
+  const okRun = runFinal({ ...HIGH }, PLAN, { check_rows: 12, check_failed: '' });
+  check('подтверждённое значение не трогает уверенность',
+    okRun.confidence_key === 'high' && okRun.confidence_capped === false);
+
+  // Проверки не было вовсе — понижать не за что.
+  const skip = runFinal({ ...HIGH }, { check_pairs: [], check_skipped: [] }, null);
+  check('без проверки уверенность не трогается', skip.confidence_key === 'high');
+
+  // Прежняя причина понижения не затирается: их может быть несколько,
+  // и джун читает их одной строкой.
+  const both = runFinal(
+    { ...HIGH, confidence_key: 'medium', confidence_capped: true,
+      confidence_capped_reason: 'метаданные не дошли' },
+    PLAN, { check_rows: 0, check_failed: 'timeout' });
+  check('прежняя причина сохранена',
+    /метаданные не дошли/.test(both.confidence_capped_reason) &&
+    /timeout/.test(both.confidence_capped_reason));
+
+  // unknown не двигается вообще: это «модель отклонилась от формата»,
+  // а не «средняя уверенность» — рядом печатается parse_error.
+  const unk = runFinal({ ...HIGH, confidence_key: 'unknown', confidence_claimed: 'unknown' },
+    PLAN, { check_rows: 0, check_failed: 'x' });
+  check('unknown не подменяется средней', unk.confidence_key === 'unknown');
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);
