@@ -56,11 +56,11 @@ DLH_TRINO_CRED = {"trinoApi": {"id": "82c1YyhkiBGT25Ag",
 # процессная аналитика — это `support_request.sql` напрямую, не этот флоу.
 #
 # `confidence_claimed/confidence_key/confidence_downgraded/domains/
-# articles_read/dd_count/router_error/parse_error/prompt_version` будут NULL
-# до тех пор, пока в ядро бота не врезан узел `Ingest` (`bot_answered` пока
-# никто не пишет, см. комментарий у CTE `bot` в support_request.sql) —
-# это не повод убирать поля отсюда, а сигнал того, что врезка ещё не дошла
-# до прода.
+# articles_read/dd_count/router_error/parse_error/prompt_version` заполнены
+# только по ответам В КАНАЛЕ: событие `bot_answered` пишет узел «To Ingest»
+# в адаптере канала, а у `Adapter DM` такого узла нет вовсе (см. комментарий
+# у CTE `bot` в support_request.sql). Пустые значения по личке — это не сбой
+# врезки, а её граница, и путать эти две причины нельзя.
 REVIEW_SQL = (
     "SELECT\n"
     "    request_id,\n"

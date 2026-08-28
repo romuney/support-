@@ -105,7 +105,7 @@ SELECT
     party_rk,
     valid_from_dttm,
     valid_to_dttm
-FROM emart.mdm_employee_x_person_party
+FROM prod_v_emart.mdm_employee_x_person_party
 WHERE deleted_flg = 0
   AND fire_flg = 0
   AND valid_from_dttm <= CURRENT_DATE
@@ -121,7 +121,7 @@ SELECT
     -- Детали клиента из других витрин по party_rk
     c.client_name,
     c.product_type
-FROM emart.mdm_employee_x_person_party ep
+FROM prod_v_emart.mdm_employee_x_person_party ep
 JOIN <client_vitryna> c ON c.party_rk = ep.party_rk
 WHERE ep.deleted_flg = 0
   AND ep.fire_flg = 0
@@ -132,7 +132,7 @@ WHERE ep.deleted_flg = 0
 ```sql
 SELECT 
     COUNT(DISTINCT mdm_employee_rk) AS employee_clients_count
-FROM emart.mdm_employee_x_person_party
+FROM prod_v_emart.mdm_employee_x_person_party
 WHERE deleted_flg = 0
   AND fire_flg = 0
 ```

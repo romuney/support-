@@ -17,6 +17,7 @@
 
 Код возврата 0 — чисто, 1 — есть ошибки.
 """
+import glob
 import os
 import re
 import sys
@@ -456,6 +457,118 @@ def check_articles(ent_rows):
                 f"этой статьи не существует")
 
 
+# В блоке перечня в обратных кавычках попадаются и имена полей («фильтр по
+# `active_type_nm`»), и сами значения. Значения — человеческий текст, имена
+# полей — латинские идентификаторы; отличаем по форме, иначе имя поля уедет
+# в перечень значений и проверка начнёт ругаться сама на себя.
+def enum_values(block):
+    return {v for v in re.findall(r"`([^`]+)`", block)
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", v)}
+
+
+def check_enum_values():
+    """Значения полей-перечислений: одно написание на всю базу.
+
+    Статья витрины перечисляет значения поля (`### Значения active_type_nm`),
+    и остальные статьи фильтруют по ним. Расхождение здесь тихое В ОБЕ
+    СТОРОНЫ, и вторая сторона хуже: неверное ИМЯ поля роняет запрос громко,
+    а неверное НАПИСАНИЕ значения даёт ноль строк без ошибки — «в этой
+    категории никого нет» читается как факт.
+
+    Так и было: `m-active-headcount` фильтровал по `'Декрет', 'Прогульщик',
+    'Мобилизованный'` в единственном числе, а перечень в `t-emp-structure`
+    хранит их во множественном. Заметить это можно было только сверив
+    две статьи глазами.
+
+    Проверяются только поля, у которых В БАЗЕ ЕСТЬ явный перечень: без него
+    сравнивать не с чем, и молчать правильнее, чем угадывать.
+    """
+    # Перечни: «### Значения `field`» плюс список значений в обратных кавычках
+    # до следующего заголовка.
+    enums = {}
+    for path in sorted(glob.glob(os.path.join(KB, "*", "*.md"))):
+        text = open(path, encoding="utf-8").read()
+        for m in re.finditer(r"^#{2,4}\s+Значения\s+`([a-z0-9_]+)`\s*$",
+                             text, re.M):
+            field = m.group(1)
+            rest = text[m.end():]
+            nxt = re.search(r"^#{2,4}\s", rest, re.M)
+            block = rest[: nxt.start()] if nxt else rest
+            vals = enum_values(block)
+            if not vals:
+                continue
+            # Перечень одного поля может лежать в двух статьях: в статье
+            # витрины и в рецепте синонимов. ИСТОЧНИКОМ считается статья
+            # витрины — там живёт сама витрина, — а второй перечень
+            # проверяется наравне с остальными усто. Объединять их нельзя:
+            # тогда неверное написание в одном месте оправдывало бы
+            # неверное написание в другом, и проверка гасила бы ровно ту
+            # ошибку, ради которой заведена.
+            table = os.sep + "tables" + os.sep in path
+            prev = enums.get(field)
+            if prev is None or (table and os.sep + "tables" + os.sep not in prev[0]):
+                enums[field] = (path, vals)
+
+    if not enums:
+        return
+
+    for path in sorted(glob.glob(os.path.join(KB, "*", "*.md"))):
+        rel = os.path.relpath(path, os.path.dirname(KB))
+        text = open(path, encoding="utf-8").read()
+        for field, (src, vals) in enums.items():
+            if os.path.abspath(src) == os.path.abspath(path):
+                continue
+            # Второй перечень того же поля — тоже усто: значения из него
+            # сверяются со значениями источника построчно.
+            for m in re.finditer(
+                    rf"^#{{2,4}}\s+Значения\s+`{field}`\s*$", text, re.M):
+                rest = text[m.end():]
+                nxt = re.search(r"^#{2,4}\s", rest, re.M)
+                for v in enum_values(rest[: nxt.start()] if nxt else rest):
+                    if v not in vals:
+                        err(f"{rel}: значение «{v}» в перечне {field} расходится "
+                            f"со статьёй витрины "
+                            f"({os.path.relpath(src, os.path.dirname(KB))})")
+            # `field = 'Значение'` и `field in ('А', 'Б')`
+            for m in re.finditer(
+                    rf"{field}\s*(?:=|in)\s*\(?\s*((?:'[^']*'\s*,?\s*)+)\)?", text):
+                for v in re.findall(r"'([^']*)'", m.group(1)):
+                    if v and v not in vals:
+                        err(f"{rel}: значение «{v}» поля {field} не найдено "
+                            f"в перечне ({os.path.relpath(src, os.path.dirname(KB))}). "
+                            "Неверное написание даёт ноль строк БЕЗ ошибки — "
+                            "сверить с перечнем или дополнить его")
+
+
+def check_sql_schemas():
+    """В примерах запросов схема пишется с префиксом читаемых вью.
+
+    Каталожное имя (`emart.mdm_employee_x_person_party`) и имя для запроса
+    (`prod_v_emart.…`) — разные вещи: из каталожной схемы select не пойдёт.
+    В ПРОЗЕ каталожное имя уместно — там речь про объект каталога, — а внутри
+    блока кода оно означает запрос, который не выполнится.
+
+    Так и было: три FROM в `t-employee-client` ссылались на `emart.`, и любой,
+    кто скопировал бы пример, получил бы ошибку доступа. Промах при этом
+    громкий, но находится он у КОЛЛЕГИ, а не у нас, и стоит ему круга
+    переписки — поэтому проверяется здесь, а не оставляется на потом.
+    """
+    schemas = r"(?:emart|hrmart|dds|dds_dic|dwh_hr)"
+    for path in sorted(glob.glob(os.path.join(KB, "*", "*.md"))):
+        rel = os.path.relpath(path, os.path.dirname(KB))
+        inside = False
+        for num, line in enumerate(open(path, encoding="utf-8"), 1):
+            if line.lstrip().startswith("```"):
+                inside = not inside
+                continue
+            if not inside:
+                continue
+            for m in re.finditer(rf"\b(from|join)\s+({schemas})\.", line, re.I):
+                err(f"{rel}:{num}: в примере запроса схема без префикса — "
+                    f"«{m.group(1)} {m.group(2)}.…». Из каталожной схемы select "
+                    f"не пойдёт, нужно prod_v_{m.group(2)}")
+
+
 def main():
     if not os.path.isfile(INDEX):
         print(f"не найден {INDEX} — запускать из корня репозитория", file=sys.stderr)
@@ -482,6 +595,8 @@ def main():
     if rt_rows:
         check_routes(rt_rows)
     check_process()
+    check_enum_values()
+    check_sql_schemas()
 
     for w in warnings:
         print(f"ПРЕДУПРЕЖДЕНИЕ: {w}")
