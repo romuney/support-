@@ -1827,6 +1827,51 @@ line('41. Отчёт по темам: посчитанное ДОЕЗЖАЕТ д
   check('итог их суммирует', total && total.replies_human === 2 && total.conf_high === 1);
 }
 
+// ===================================================================== 42
+line('42. ЛИЧКА в логе: событие проходит нормализатор и не портит диагностику');
+{
+  // Врезка Ingest в адаптер лички. Два требования, и второе важнее первого:
+  // событие должно записаться — и не должно испортить счётчик отсева.
+  const SQL = fs.readFileSync('support_request.sql', 'utf8');
+
+  // 1. Нормализатор знает про источник dm и не отправляет событие
+  //    в unsupported_event. Список типов там закрытый намеренно.
+  const norm = run({
+    event: 'bot_answered', event_id: 'bot_answered:dm1:abc', thread_id: 'dm1',
+    event_ts: 1756300000000, actor: 'core', source: 'dm',
+    payload: { confidence_claimed: 'high', confidence_key: 'medium',
+               channel_kind: 'dm' },
+  });
+  check('событие из лички записано', norm.length === 1);
+  check('и не стало unsupported_event', norm[0].event_type === 'bot_answered');
+  check('источник сохранён', norm[0].source === 'dm');
+  check('payload доехал', norm[0].payload.channel_kind === 'dm');
+
+  // 2. Счётчик отсева. У обращения из лички нет request_created — формы там
+  //    нет вовсе, — и без исключения КАЖДЫЙ ответ бота в личку увеличивал бы
+  //    threads_without_root. Этот счётчик заведён ловить остановившийся
+  //    коллектор и поломанный разбор темы: нормальная работа лички
+  //    выглядела бы в нём как поломка канала.
+  check('личка исключена из счётчика отсева',
+    /dm_threads AS \(/.test(SQL) &&
+    /- count\(DISTINCT dm\.thread_id\)\s+AS threads_without_root/.test(SQL));
+  check('и названа своим числом', /AS dm_answers/.test(SQL));
+
+  // 3. Ответы из лички ЧИТАЮТСЯ. Без этого врезка писала бы данные,
+  //    на которые никто не смотрит: support_request построена на
+  //    request_created, и строк лички в ней нет и быть не может.
+  check('есть запрос качества ответов бота',
+    /FROM ans\s+WHERE answered_at/.test(SQL));
+  check('и он разрезан по источнику',
+    /GROUP BY channel_kind, prompt_version/.test(SQL));
+  check('разрез берётся из payload, а не из служебной колонки',
+    /json_extract_scalar\(payload, '\$\.channel_kind'\)/.test(SQL));
+
+  // 4. Схема лога знает про источник dm — иначе значение выглядело бы
+  //    опечаткой при разборе таблицы.
+  check('источник dm объявлен в схеме', /channel \| reaction \| core \| dm/.test(BUILDER));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

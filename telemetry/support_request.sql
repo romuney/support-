@@ -532,11 +532,22 @@ ev AS (
 ),
 roots AS (
     SELECT DISTINCT thread_id FROM ev WHERE event_type = 'request_created'
+),
+-- Треды из ЛИЧКИ. У обращения в личке нет `request_created`: формы там нет,
+-- intake-воркфлоу его не публикует, и корневого события просто не бывает.
+-- Без этого исключения каждый ответ бота в личку увеличивал бы
+-- `threads_without_root` — счётчик, который заведён ловить остановившийся
+-- коллектор и поломанный разбор темы. Нормальная работа лички выглядела бы
+-- в нём как поломка канала, и смысл счётчика пропал бы целиком.
+dm_threads AS (
+    SELECT DISTINCT thread_id FROM ev WHERE source = 'dm'
 )
 SELECT
     count(DISTINCT ev.thread_id)                                    AS threads_total,
     count(DISTINCT roots.thread_id)                                 AS requests,
-    count(DISTINCT ev.thread_id) - count(DISTINCT roots.thread_id)  AS threads_without_root,
+    count(DISTINCT dm.thread_id)                                    AS dm_answers,
+    count(DISTINCT ev.thread_id) - count(DISTINCT roots.thread_id)
+                                 - count(DISTINCT dm.thread_id)     AS threads_without_root,
     count_if(ev.event_type = 'unsupported_event')                   AS unsupported_events,
     -- Прогон backfill, который не нашёл ни одного поста: неверный channel_id
     -- или период. В лог это уезжает как `unsupported_event` (нормализатор
@@ -566,6 +577,7 @@ SELECT
     max(date_diff('second', ev.event_ts, ev.ingested_at))            AS max_ingest_lag_sec
 FROM ev
 LEFT JOIN roots ON roots.thread_id = ev.thread_id
+LEFT JOIN dm_threads dm ON dm.thread_id = ev.thread_id
 ;
 
 
@@ -661,4 +673,96 @@ WHERE ours
   AND created_at >= current_timestamp - INTERVAL '30' DAY
 GROUP BY kind
 ORDER BY requests DESC
+;
+
+
+-- ===========================================================================
+-- Качество ответов бота: КАНАЛ и ЛИЧКА рядом, но не в одной куче.
+--
+-- Отдельный запрос, а не колонки в support_request, и причина конструктивная:
+-- витрина обращений построена на `request_created`, а у обращения из лички
+-- такого события нет вовсе — формы там нет, intake-воркфлоу его не публикует.
+-- Ответы бота в личку в support_request не попадают и попасть не могут.
+--
+-- Смешивать их с канальными нельзя и по существу: у лички нет ни реакций
+-- дежурного, ни задачи в трекере, поэтому время реакции, время решения
+-- и доля закрытых по ней не считаются. Строки с NULL в этих полях разбавили
+-- бы каждую метрику процесса. А вот КАЛИБРОВКА считается одинаково: что бот
+-- заявил, что осталось после понижения кодом, на чём он это построил, —
+-- и её надо смотреть по обоим источникам, потому что в личке спрашивают
+-- иначе, чем через форму.
+--
+-- Разрез идёт по `channel_kind` из payload, а не по колонке `source`:
+-- колонку ставит нормализатор и может переопределить, а payload пишет
+-- сам адаптер и знает, откуда пришло обращение.
+-- ===========================================================================
+WITH dedup AS (
+    SELECT e.*,
+           ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY ingested_at DESC) AS rn
+    FROM dl.usr_cross_data.support_telemetry e
+    WHERE e.event_type = 'bot_answered'
+      AND e.event_type <> 'schema_sample'
+),
+ans AS (
+    SELECT thread_id,
+           CASE WHEN event_ts < TIMESTAMP '2000-01-01 00:00:00' THEN NULL
+                ELSE event_ts END                                   AS answered_at,
+           COALESCE(NULLIF(json_extract_scalar(payload, '$.channel_kind'), ''),
+                    source)                                         AS channel_kind,
+           json_extract_scalar(payload, '$.confidence_claimed')      AS confidence_claimed,
+           json_extract_scalar(payload, '$.confidence_key')          AS confidence_key,
+           CAST(json_extract_scalar(payload, '$.confidence_capped') AS boolean)
+                                                                     AS confidence_capped,
+           json_extract_scalar(payload, '$.capped_reason')           AS capped_reason,
+           json_extract_scalar(payload, '$.prompt_version')          AS prompt_version,
+           CAST(json_extract_scalar(payload, '$.dd_count') AS integer)    AS dd_count,
+           CAST(json_extract_scalar(payload, '$.dd_received') AS integer) AS dd_received,
+           CAST(json_extract_scalar(payload, '$.dd_never_ran') AS boolean) AS dd_never_ran,
+           CAST(json_extract_scalar(payload, '$.router_empty') AS boolean) AS router_empty,
+           CAST(json_extract_scalar(payload, '$.articles_invented') AS integer)
+                                                                     AS articles_invented,
+           CAST(json_extract_scalar(payload, '$.values_asked') AS integer) AS values_asked,
+           CAST(json_extract_scalar(payload, '$.ib_required') AS boolean)  AS ib_required,
+           CAST(json_extract_scalar(payload, '$.ib_missing') AS boolean)   AS ib_missing,
+           CAST(json_extract_scalar(payload, '$.experts_invented') AS integer)
+                                                                     AS experts_invented,
+           CAST(json_extract_scalar(payload, '$.draft_own_tools') AS integer)
+                                                                     AS draft_own_tools,
+           CAST(json_extract_scalar(payload, '$.kb_tasks') AS integer)     AS kb_tasks,
+           NULLIF(json_extract_scalar(payload, '$.parse_error'), '')  AS parse_error,
+           NULLIF(json_extract_scalar(payload, '$.router_error'), '') AS router_error
+    FROM dedup
+    WHERE rn = 1
+)
+SELECT
+    channel_kind,
+    prompt_version,
+    count(*)                                               AS answers,
+
+    -- Калибровка. Ключи английские — так их пишет ядро (см. тест 38).
+    count_if(confidence_claimed = 'high')                  AS claimed_high,
+    count_if(confidence_key = 'high')                      AS effective_high,
+    count_if(confidence_capped)                            AS downgraded_by_code,
+    count_if(confidence_key = 'none')                      AS no_answer,
+    count_if(confidence_claimed = 'unknown')               AS format_broken,
+
+    -- Отказы конструкции. Каждая строка — свой класс поломки, чинится
+    -- в своём месте, поэтому они и не сложены в один счётчик.
+    count_if(dd_never_ran)                                 AS dd_node_never_ran,
+    count_if(dd_count > 0 AND COALESCE(dd_received, 0) = 0) AS dd_planned_not_received,
+    count_if(router_empty)                                 AS router_empty_plan,
+    count_if(COALESCE(articles_invented, 0) > 0)           AS router_invented_paths,
+    count_if(parse_error IS NOT NULL OR router_error IS NOT NULL) AS bot_errors,
+
+    -- Черновик нельзя отправить как есть.
+    count_if(ib_required AND ib_missing)                   AS ib_missing_in_draft,
+    count_if(COALESCE(experts_invented, 0) > 0)            AS experts_invented,
+    count_if(COALESCE(draft_own_tools, 0) > 0)             AS own_tools_offered,
+
+    count_if(COALESCE(values_asked, 0) > 0)                AS values_requested,
+    sum(COALESCE(kb_tasks, 0))                             AS kb_gaps_found
+FROM ans
+WHERE answered_at >= current_timestamp - INTERVAL '30' DAY
+GROUP BY channel_kind, prompt_version
+ORDER BY channel_kind, prompt_version
 ;

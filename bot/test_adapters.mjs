@@ -2063,5 +2063,95 @@ line('45. ВЫДУМАННЫЙ РОУТЕРОМ ПУТЬ — не пробел �
     !clean.kb_tasks.some((t) => t.includes('которого нет в реестре')));
 }
 
+// ===================================================================== 46
+line('46. ЛИЧКА пишет в лог — тем же узлом, что канал, но своим источником');
+{
+  // До врезки ответы из лички в лог не попадали вовсе: узел Ingest стоял
+  // только в адаптере канала. Калибровка считалась по каналу, а в личке
+  // спрашивают иначе — без формы, свободным текстом, — и именно там
+  // промахи роутера видны лучше всего.
+  const ev = dm.nodes.find((n) => n.name === 'Answer event DM');
+  const ing = dm.nodes.find((n) => n.name === 'To Ingest DM');
+  check('узел события в личке есть', Boolean(ev));
+  check('узел записи в лог есть', Boolean(ing));
+  // Оба адаптера пишут в ОДИН Ingest: единственная точка записи в лог —
+  // это его смысл, и вторая точка означала бы вторую схему таблицы.
+  const chIng = channel.nodes.find((n) => n.name === 'To Ingest');
+  check('запись идёт в тот же Ingest, что из канала',
+    ing.parameters.workflowId.value === chIng.parameters.workflowId.value);
+  check('id Ingest не плейсхолдер',
+    /^[A-Za-z0-9]{8,}$/.test(String(ing.parameters.workflowId.value)));
+
+  // Ingest объявлен passthrough: пустой маппинг ХУЖЕ отсутствия — он говорит
+  // «поля заданы, их ноль», и в лог уехал бы unsupported_event при зелёном
+  // флоу. Тот же инвариант, что держит тест 24 для коллектора.
+  check('маппинг входов не задан', !('workflowInputs' in ing.parameters));
+
+  // Ветвь отдельная: падение Ingest не должно мешать ответу человеку.
+  const fromCore = dm.connections['Call core'].main[0].map((t) => t.node);
+  check('запись в лог — отдельная ветвь от ядра',
+    fromCore.includes('Answer event DM') &&
+    fromCore.includes('Build DM reply'));
+  // Ветви не сходятся — иначе узел выполнился бы дважды.
+  const targets = Object.values(dm.connections)
+    .flatMap((c) => (c.main || []).flatMap((b) => (b || []).map((t) => t.node)));
+  const twice = targets.filter((n, i) => targets.indexOf(n) !== i);
+  check('ни один узел не получает две ветви', twice.length === 0);
+
+  // ИСТОЧНИК различает канал и личку. У обращения из лички нет ни формы,
+  // ни реакций дежурного, ни задачи в трекере: время реакции и решения
+  // по нему не считаются, и смешать его с канальным значило бы разбавить
+  // каждую метрику процесса строками, у которых этих метрик нет.
+  const dmJs = ev.parameters.jsCode;
+  const chJs = channel.nodes.find((n) => n.name === 'Answer event').parameters.jsCode;
+  check('личка помечена источником dm', /source: "dm"/.test(dmJs));
+  check('канал помечен источником core', /source: "core"/.test(chJs));
+  check('личка читает свой guard', /\$\("Guard DM"\)/.test(dmJs));
+  check('канал читает свой guard', /\$\("Guard channel"\)/.test(chJs));
+
+  // ОДИН ТЕКСТ НА ДВА АДАПТЕРА. Поля payload читает витрина по именам,
+  // и вторая копия разъехалась бы с ней молча — ровно так же, как
+  // разъезжались credential'ы и списки тем.
+  const norm = (t) => t.replace(/"Guard [^"]+"/g, 'G').replace(/"(dm|core)"/g, 'S');
+  check('код узлов не разъехался', norm(dmJs) === norm(chJs));
+
+  // Поля payload обязаны совпадать: по ним считается калибровка, и колонка,
+  // которую пишет только один адаптер, даёт разрез с дырой.
+  const fields = (t) => [...t.matchAll(/^\s{4}([a-z_]+):/gm)].map((m) => m[1]).sort();
+  check('состав payload одинаков',
+    JSON.stringify(fields(dmJs)) === JSON.stringify(fields(chJs)));
+  check('payload не пуст', fields(dmJs).length > 15);
+
+  // ------------------------------------------------ прогон, а не подстрока
+  //
+  // Структурных проверок мало: узел может быть на месте и падать. Гоняем
+  // его на реальном ответе ядра и реальном событии лички.
+  const answer = {
+    draft: 'ответ', confidence_key: 'medium', confidence_claimed: 'high',
+    confidence_capped: true, confidence_capped_reason: 'метаданные не дошли',
+    domains: ['headcount-structure'], articles_read: ['kb/tables/x.md'],
+    dd_count: 2, dd_received: 0, dd_never_ran: false, kb_tasks: ['пробел'],
+    routes: [], experts_invented: [], draft_own_tools: [], tables_no_meta: [],
+    is_query_help: true, router_empty: false, values_asked: 1,
+    articles_invented: 0, draft_leaks: [], draft_len: 5,
+  };
+  const guardOut = { post: { id: 'dmpost1' }, question: 'вопрос в личке' };
+  const $ev = (n) => ({ first: () => ({ json: {
+    'Call core': answer, 'Guard DM': guardOut }[n] }) });
+  const out = new Function('$', ev.parameters.jsCode)($ev)[0].json;
+  check('событие названо bot_answered', out.event === 'bot_answered');
+  check('тред — пост из лички', out.thread_id === 'dmpost1');
+  check('источник в payload — личка', out.payload.channel_kind === 'dm');
+  check('ключ идемпотентности несёт версию промптов',
+    out.event_id.startsWith('bot_answered:dmpost1:') &&
+    out.event_id.split(':')[2].length > 0);
+  // Пара «заявлено / действует» — то, ради чего врезка и делалась.
+  check('калибровка доехала',
+    out.payload.confidence_claimed === 'high' &&
+    out.payload.confidence_key === 'medium' &&
+    out.payload.confidence_capped === true);
+  check('время проставлено', typeof out.event_ts === 'number' && out.event_ts > 0);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

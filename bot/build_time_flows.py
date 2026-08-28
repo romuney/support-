@@ -3246,8 +3246,20 @@ ANSWER_EVENT_JS = r"""
 // того же обращения на той же версии перезапишет строку, а прогон после
 // правки промпта добавит новую. Это ровно то, что нужно для сверки
 // «правка промпта → оценки кнопками».
+//
+// ОДИН УЗЕЛ НА ДВА АДАПТЕРА, а не копия. Поля payload читает витрина
+// по именам, и вторая копия разъехалась бы с ней молча — ровно так же,
+// как разъезжались credential'ы и списки тем. Различаются адаптеры только
+// именем guard'а и значением source, и оба подставляет сборщик.
+//
+// SOURCE РАЗДЕЛЯЕТ КАНАЛ И ЛИЧКУ, и это не украшение. У обращения из лички
+// нет ни формы, ни реакций дежурного, ни задачи в трекере: время реакции,
+// время решения и доля закрытых по нему не считаются вовсе. Смешать их
+// с канальными значило бы разбавить каждую метрику процесса строками,
+// у которых этих метрик нет. Витрина поэтому берёт обращения только
+// из канала, а калибровку бота — по обоим источникам, с разрезом.
 const a = $('Call core').first().json;
-const src = $('Guard channel').first().json;
+const src = $(__GUARD__).first().json;
 const postId = String((src.post ?? {}).id ?? '');
 
 return [{ json: {
@@ -3256,7 +3268,7 @@ return [{ json: {
   thread_id: postId,
   event_ts: Date.now(),
   actor: 'core',
-  source: 'core',
+  source: __SOURCE__,
   payload: {
     // Домены роутера — то, ради чего врезка и делалась.
     domains: Array.isArray(a.domains) ? a.domains : [],
@@ -3321,9 +3333,29 @@ return [{ json: {
     // Домен глазами заказчика против доменов бота — расхождение видно
     // без обращения к базе знаний.
     form_domain: a.form_domain || '',
+    // Откуда пришло обращение. Дублируется в payload намеренно: колонка
+    // source в логе служебная (её ставит нормализатор и может переопределить),
+    // а разрез «канал против лички» — содержательный, и терять его при
+    // пересчёте витрины нельзя.
+    channel_kind: __SOURCE__,
   },
 } }];
 """
+
+
+def answer_event_js(guard_node, source):
+    """Код узла «бот ответил» под конкретный адаптер.
+
+    Один текст на канал и личку: поля payload читает витрина по именам,
+    и вторая копия разъехалась бы с ней молча.
+    """
+    return (
+        ANSWER_EVENT_JS
+        .replace("PROMPT_VERSION", json.dumps(PROMPT_VERSION))
+        .replace("__GUARD__", json.dumps(guard_node, ensure_ascii=False))
+        .replace("__SOURCE__", json.dumps(source))
+    )
+
 
 # ==================================================== 2. Adapter Channel
 # Основной сценарий: слушаем рабочий канал, черновик уходит в канал джуна.
@@ -3560,8 +3592,7 @@ channel_nodes = [
     node("Build thread", "n8n-nodes-base.code", 2, [1160, 300],
          {"jsCode": CHANNEL_THREAD_JS}),
     node("Answer event", "n8n-nodes-base.code", 2, [680, 480],
-         {"jsCode": ANSWER_EVENT_JS.replace("PROMPT_VERSION",
-                                            json.dumps(PROMPT_VERSION))}),
+         {"jsCode": answer_event_js("Guard channel", "core")}),
     node("To Ingest", "n8n-nodes-base.executeWorkflow", 1.2, [920, 480], {
         "workflowId": {"__rl": True, "value": INGEST_ID, "mode": "id",
                        "cachedResultName": "Telemetry · Ingest"},
@@ -3773,18 +3804,35 @@ dm_nodes = [
         {"__rl": True, "mode": "name", "value": CHANNEL_DRAFTS},
         "={{ $json.text }}",
     ),
+    # Запись в лог телеметрии. Тот же узел, что в канале, — различаются
+    # только guard и source, оба подставляет сборщик.
+    node("Answer event DM", "n8n-nodes-base.code", 2, [680, 560],
+         {"jsCode": answer_event_js("Guard DM", "dm")}),
+    node("To Ingest DM", "n8n-nodes-base.executeWorkflow", 1.2, [920, 560], {
+        "workflowId": {"__rl": True, "value": INGEST_ID, "mode": "id",
+                       "cachedResultName": "Telemetry · Ingest"},
+        # workflowInputs не задаётся по той же причине, что в канале:
+        # триггер Ingest объявлен passthrough, а пустой маппинг ХУЖЕ
+        # отсутствия — он объявляет «поля заданы, их ноль».
+        "options": {"waitForSubWorkflow": True},
+    }),
 ]
 dm_conn = chain("Time Trigger DM", "Guard DM", "DM allowed")
 dm_conn["DM allowed"] = {"main": [
     [{"node": "Call core", "type": "main", "index": 0}],
     [],
 ]}
-# Две ветви от ядра: ответ человеку и копия в лог.
+# Три ветви от ядра: ответ человеку, копия в канал джуна и запись в лог.
+#
+# Веер НА ВЫХОДЕ здесь безопасен — ветви не сходятся ни в одном узле, и ни
+# один узел не выполняется дважды. Лог отдельной ветвью намеренно, как
+# и в канале: падение Ingest не должно мешать ответу человеку.
 dm_conn["Call core"] = {
     "main": [
         [
             {"node": "Build DM reply", "type": "main", "index": 0},
             {"node": "Build DM log", "type": "main", "index": 0},
+            {"node": "Answer event DM", "type": "main", "index": 0},
         ]
     ]
 }
@@ -3792,6 +3840,7 @@ dm_conn["Build DM reply"] = {"main": [[{"node": "Reply in DM", "type": "main", "
 dm_conn["Build DM log"] = {
     "main": [[{"node": "Log DM to junior channel", "type": "main", "index": 0}]]
 }
+dm_conn.update(chain("Answer event DM", "To Ingest DM"))
 dm = wf("Support Bot · Adapter DM", dm_nodes, dm_conn)
 
 

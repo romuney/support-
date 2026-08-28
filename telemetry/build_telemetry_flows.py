@@ -198,7 +198,7 @@ SCHEMA = [
     ("ingested_at", "number", "время записи в мс — расхождение с event_ts"
                               " показывает лаг и работу backfill"),
     ("actor", "string", "user_id, кто совершил действие"),
-    ("source", "string", "channel | reaction | core | webhook | tracker"),
+    ("source", "string", "channel | reaction | core | dm | webhook | tracker"),
     ("kind", "string", "тип обращения из префикса темы (kind_source=intake)"),
     ("domains", "string", "домены роутера бота через запятую — кластеризация"),
     ("payload", "string", "JSON: всё остальное, специфичное для типа события"),
