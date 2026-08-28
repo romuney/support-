@@ -2626,8 +2626,15 @@ CHECK_SQL_JS = NEEDLES_JS + r"""
 const MAX_PAIRS = 4;
 const MAX_ROWS = 60;
 
+// Узел ставится ДВАЖДЫ одним и тем же текстом — как «Parse answer»
+// и «Parse revised». Первый экземпляр читает блок автора из его же разбора,
+// второй — из доспроса. Поэтому пары берутся из ВХОДА ($json.check_values),
+// а черновик всегда у «Parse answer»: он один на оба прохода.
 const a = $json;
 const mat = $('Build materials').first().json;
+const parsed = (() => {
+  try { return $('Parse answer').first().json; } catch (e) { return a; }
+})();
 
 // РЕШЕНИЕ «ПРОВЕРЯТЬ ЛИ» ПРИНИМАЕТ КОД, А НЕ АВТОР.
 //
@@ -2685,7 +2692,7 @@ for (const line of String(a.check_values || '').split('\n')) {
 // поля: `emp_specialization_desc` после общей чистки стал бы тремя словами,
 // и в отбор ушло бы `desc` — «нет в инвентаре». То есть чистка разметки
 // съела бы ровно то, ради чего разбор и делается.
-const draft = (String(a.draft || '') + '\n' + String(a.tech_spec || ''))
+const draft = (String(parsed.draft || '') + '\n' + String(parsed.tech_spec || ''))
   .replace(/[`*~]+/g, ' ');
 // Кавычки у значения тоже разные: в SQL одинарные, в прозе часто ёлочки
 // или двойные. Пропустить пару из-за кавычки значит не проверить значение,
@@ -2765,8 +2772,20 @@ for (const p of pairs) {
 // был не про поля; пары были и не прошли — сверка с инвентарём или ПДн;
 // пар не было вовсе — в черновике нет ни одного фильтра по значению,
 // и это нормальный путь, а не отказ.
+// ГЕЙТ ДОСПРОСА. Пар не нашлось, а автор в «Чего не хватило» сам пишет,
+// что написание значения неизвестно — значит он ЗНАЕТ, что проверить,
+// и просто не назвал это в разборном виде. Спросить его об этом дешевле
+// и надёжнее, чем гнаться регуляркой за очередной формой разметки.
+//
+// Гейт узкий: без такого признания доспрос не запускается вовсе — лишний
+// вызов модели на каждом ответе, где значений и не было, не нужен.
+const said = String(parsed.gaps || '') + '\n' + String(parsed.draft || '');
+const NEEDS = /select\s+distinct|не\s+провер[а-яё]+|неизвестн[а-яё]*|уточни[а-яё]+\s+(?:точное\s+)?значени|подтверди[а-яё]+\s+(?:точное\s+)?(?:значени|написани)/i;
+const wantRetry = Boolean(table) && NEEDS.test(said);
+
 if (!use.length || !table) {
   return [{ json: { check_sql: '', check_pairs: [], check_skipped: skipped,
+                    check_retry: wantRetry,
                     check_table: table, check_reason: !table
                       ? 'в материалах нет витрины, к которой идти'
                       : (pairs.length ? 'ни одна пара не прошла отбор: ' + skipped.join(', ')
@@ -2812,13 +2831,20 @@ return use.map((p) => {
     check_table: tbl,
     check_slice: hasSlice,
     check_active: hasActive,
+    check_retry: false,
   } };
 });
 """
 
 # Результат проверки — блоком для второго прохода автора.
 CHECK_RESULT_JS = r"""
-const plan = $('Build check SQL').first().json;
+// Сборщиков ДВА: обычный и после доспроса. Читаем тот, что отработал —
+// иначе отсев и причина приедут от первого, то есть от прохода, который
+// как раз ничего не нашёл.
+const plan = (() => {
+  try { return $('Retry check SQL').first().json; } catch (e) { /* доспроса не было */ }
+  return $('Build check SQL').first().json;
+})();
 let rows = [];
 let failed = '';
 try {
@@ -2980,8 +3006,14 @@ out.revised = revised;
 // Факты о самой проверке — в телеметрию и в служебный блок джуну: по ним
 // видно, спрашивал ли автор значения и что вернули данные.
 let checkReason = '';
+out.check_retried = false;
 try {
-  const plan = $('Build check SQL').first().json;
+  // Тот же порядок, что в «Check result»: сборщик после доспроса главнее.
+  let plan;
+  try {
+    plan = $('Retry check SQL').first().json;
+    out.check_retried = true;
+  } catch (e) { plan = $('Build check SQL').first().json; }
   out.check_asked = (plan.check_pairs || []).length;
   out.check_skipped = (plan.check_skipped || []).length;
   checkReason = String(plan.check_reason || '');
@@ -3021,6 +3053,8 @@ try {
 {
   const said = String(out.gaps || '') + '\n' + String(out.draft || '');
   const NEEDS = /select\s+distinct|не\s+провер[а-яё]+|неизвестн[а-яё]*|уточни[а-яё]+\s+(?:точное\s+)?значени|подтверди[а-яё]+\s+(?:точное\s+)?(?:значени|написани)/i;
+  // После доспроса это уже не «разбор промахнулся», а «автор посмотрел
+  // и пар не назвал» — разные диагнозы, и чинятся они в разных местах.
   out.check_missed = out.check_asked === 0 && NEEDS.test(said);
   out.check_reason = checkReason;
 }
@@ -3100,6 +3134,66 @@ REVISE_PROMPT = """=Ты уже отвечал на этот вопрос.
 Блок ПРОВЕРИТЬ ЗНАЧЕНИЯ больше не пиши: второго круга проверки нет.
 """
 
+# ---------------------------------------------------- доспрос про значения
+#
+# АВТОР УЖЕ ЗНАЕТ, ЧЕГО НЕ ХВАТИЛО, — НАДО ПРОСТО СПРОСИТЬ.
+#
+# Пары «поле = значение» код достаёт из свободного текста, и каждый промах
+# разбора был тихим: сначала гейтом был блок автора, потом имя поля
+# в обратных кавычках. Гнаться регуляркой за очередной формой разметки —
+# гонка, которую не выиграть: список того, чем модель может обрамить пару,
+# открыт.
+#
+# А ответ уже есть: в «Чего не хватило» автор прямым текстом пишет, какие
+# значения не проверены. Выбрасывать это и гадать по разметке — расточительно.
+# Поэтому там, где разбор промахнулся, а автор признался, задаётся ОДИН
+# узкий вопрос: назови пары. Не «перепиши ответ» — только пары.
+#
+# Доспрос РОВНО ОДИН и включается КОДОМ. Цикл «пока не найдёт» вернул бы
+# счётчик итераций, от которого ушли вместе с tool-loop: два прохода видны
+# по схеме флоу, три — уже нет. Не нашлось и после доспроса — так и говорим.
+ASK_PAIRS_PROMPT = """=Ты отвечал на вопрос и сам написал, что точное написание
+некоторых значений в данных неизвестно. Эти значения можно проверить — назови,
+что именно проверять.
+
+ВОПРОС: {{ $('When called by adapter').first().json.question }}
+
+ТВОЙ ЧЕРНОВИК:
+{{ $('Parse answer').first().json.draft }}
+
+ЧТО ТЫ САМ НАЗВАЛ НЕПРОВЕРЕННЫМ:
+{{ $('Parse answer').first().json.gaps }}
+
+МЕТАДАННЫЕ (имена полей бери ТОЛЬКО отсюда, дословно):
+{{ $('Build materials').first().json.materials }}
+
+Верни ТОЛЬКО строки вида `имя_поля = слово заказчика`, по одной на строку,
+без markdown, без пояснений, без заголовков. Правила:
+— имя поля дословно из метаданных. Придуманное имя проверить нельзя;
+— слово заказчика — то, как ОН назвал значение в вопросе («GO разработчик»,
+  «Краснодар»), а не то, как оно, по-твоему, записано в витрине;
+— поле выбирай по смыслу вопроса и правилам статьи: «юнит» — это чаще
+  управленческая структура, а не юридическая;
+— не больше четырёх строк;
+— проверять действительно нечего — верни одно слово НЕТ.
+"""
+
+ASK_PAIRS_JS = r"""
+// Разбор доспроса. Модель просили вернуть голые строки, но она может
+// обернуть их в markdown или дописать пояснение — берём только то, что
+// похоже на пару, остальное молча игнорируем: это не ошибка, а шум.
+const raw = String($json.output ?? $json.text ?? '').replace(/[`*~]+/g, ' ');
+const lines = [];
+for (const line of raw.split('\n')) {
+  const m = line.match(/^\s*[-—*]?\s*([a-z_][a-z0-9_]*)\s*=\s*(.+?)\s*$/i);
+  if (m) lines.push(`${m[1]} = ${m[2].trim()}`);
+}
+// Пустой результат — нормальный исход: автор посмотрел и проверять нечего.
+// Он поедет дальше как пустой check_values, и второй сборщик честно скажет,
+// что пар нет; выдумывать за модель нельзя.
+return [{ json: { check_values: lines.join('\n'), ask_pairs_found: lines.length } }];
+"""
+
 check_sql = node("Build check SQL", "n8n-nodes-base.code", 2, [1960, 300],
                  {"jsCode": CHECK_SQL_JS})
 
@@ -3145,9 +3239,54 @@ check_values = {
 check_result = node("Check result", "n8n-nodes-base.code", 2, [2500, 220],
                     {"jsCode": CHECK_RESULT_JS})
 
+# Гейт доспроса: пар не нашлось, а автор сам написал, что значение
+# не проверено. Признак считает «Build check SQL» — там же, где разбор
+# промахнулся, и по тем же данным.
+need_retry = {
+    "parameters": {
+        "conditions": {
+            "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
+            "conditions": [{
+                "id": "want-retry",
+                "leftValue": "={{ $json.check_retry }}",
+                "rightValue": "true",
+                "operator": {"type": "boolean", "operation": "true", "singleValue": True},
+            }],
+            "combinator": "and",
+        },
+        "looseTypeValidation": True,
+        "options": {},
+    },
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2.2,
+    "position": [2140, 460],
+    "id": "need-retry",
+    "name": "Need retry",
+}
+
+# Второй экземпляр гейта проверки — тем же условием, что первый: доспрос
+# мог и не дать пар, и тогда идти в данные не с чем.
+need_check2 = copy.deepcopy(need_check)
+need_check2["id"] = "need-check-2"
+need_check2["name"] = "Need check after ask"
+need_check2["position"] = [2680, 600]
+need_check2["parameters"]["conditions"]["conditions"][0]["id"] = "has-check-2"
+
 core_nodes += [
     check_sql,
     need_check,
+    need_retry,
+    node("Ask pairs", "@n8n/n8n-nodes-langchain.agent", 3.2, [2320, 460], {
+        "promptType": "define",
+        "text": ASK_PAIRS_PROMPT,
+        "maxIterations": 1,
+        "options": {},
+    }),
+    llm("Ask model", [2320, 680]),
+    node("Parse pairs", "n8n-nodes-base.code", 2, [2500, 460], {"jsCode": ASK_PAIRS_JS}),
+    node("Retry check SQL", "n8n-nodes-base.code", 2, [2680, 460],
+         {"jsCode": CHECK_SQL_JS}),
+    need_check2,
     check_values,
     check_result,
     node("Revise draft", "@n8n/n8n-nodes-langchain.agent", 3.2, [2680, 220], {
@@ -3221,10 +3360,27 @@ core_conn.update(chain("Parse answer", "Build check SQL", "Need check"))
 # Ложная ветвь гейта ведёт НЕ в никуда, а в общий финал: иначе последним
 # выполненным узлом окажется «Need check», и вызывающий получит служебный
 # элемент вместо разобранного ответа.
+# Ложная ветвь ведёт не в финал напрямую, а в гейт доспроса: автор мог
+# сам написать, что значение не проверено, — тогда его об этом и спрашиваем.
 core_conn["Need check"] = {"main": [
+    [{"node": "Check values", "type": "main", "index": 0}],
+    [{"node": "Need retry", "type": "main", "index": 0}],
+]}
+# Доспрос РОВНО ОДИН: после него либо идём в данные, либо в финал. Обратной
+# связи в «Build check SQL» нет по конструкции — цикл «пока не найдёт» вернул
+# бы счётчик итераций, от которого ушли вместе с tool-loop.
+core_conn["Need retry"] = {"main": [
+    [{"node": "Ask pairs", "type": "main", "index": 0}],
+    [{"node": "Final answer", "type": "main", "index": 0}],
+]}
+core_conn.update(chain("Ask pairs", "Parse pairs", "Retry check SQL",
+                       "Need check after ask"))
+core_conn["Need check after ask"] = {"main": [
     [{"node": "Check values", "type": "main", "index": 0}],
     [{"node": "Final answer", "type": "main", "index": 0}],
 ]}
+core_conn["Ask model"] = {"ai_languageModel": [
+    [{"node": "Ask pairs", "type": "ai_languageModel", "index": 0}]]}
 core_conn.update(chain("Check values", "Check result", "Revise draft",
                        "Parse revised", "Final answer"))
 core_conn["Revise model"] = {"ai_languageModel": [
@@ -4009,6 +4165,9 @@ return [{ json: {
     // не запускалась. Каждый такой промах до сих пор был тихим и находился
     // только глазами по логу n8n — теперь он считается.
     check_missed: a.check_missed === true,
+    // Понадобился ли доспрос. Доля показывает, насколько часто автор
+    // не называет пары сам: растёт — надо чинить его промпт, а не разбор.
+    check_retried: a.check_retried === true,
     check_reason: a.check_reason || '',
     // Доля правок от числа проверок отвечает на вопрос, стоит ли второй
     // проход своих токенов: правок нет вовсе — значит данные ничего
@@ -4249,11 +4408,19 @@ if (Array.isArray(a.routes) && a.routes.length) {
 // на каждом обращении, перестаёт читаться — ровно так «ФИО» из шаблона
 // формы обесценило подсказку про самообслуживание.
 if (a.check_missed) {
-  parts.push('🚩 **Автор пишет, что значение не проверено, а проверка ' +
-    'не запускалась.** Разбор пар «поле = значение» промахнулся' +
-    (a.check_reason ? ' (' + a.check_reason + ')' : '') +
-    '. Значения в черновике данными НЕ подтверждены — и это поломка бота, ' +
-    'а не пробел базы: покажите этот тред тому, кто ведёт бота.');
+  parts.push(a.check_retried
+    // Доспрос был, и автор пар всё равно не назвал. Это уже не поломка
+    // разбора: бот посмотрел на свой ответ второй раз и проверять
+    // не нашёл чего. Значения в черновике всё равно неподтверждённые.
+    ? '🚩 **Значения данными не подтверждены.** Бота переспросили, какие ' +
+      'пары «поле = значение» проверить, — он не назвал ни одной' +
+      (a.check_reason ? ' (' + a.check_reason + ')' : '') +
+      '. Написание в черновике проверьте вручную перед отправкой.'
+    : '🚩 **Автор пишет, что значение не проверено, а проверка ' +
+      'не запускалась.** Разбор пар «поле = значение» промахнулся' +
+      (a.check_reason ? ' (' + a.check_reason + ')' : '') +
+      '. Значения в черновике данными НЕ подтверждены — и это поломка бота, ' +
+      'а не пробел базы: покажите этот тред тому, кто ведёт бота.');
 }
 
 if (a.draft_stale_caveat) {

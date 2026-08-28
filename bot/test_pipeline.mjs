@@ -1685,7 +1685,9 @@ line('35. ПДн НЕ ТЯНУТСЯ, И ФИЛЬТРОВ ДВА');
     'mapped_management_unit_nm, full_nm, ad_login, wrk_email_address_txt, ' +
     'contact_main_phone_no';
   const runCheck = (draft, materials = BASE) => {
-    const $ = () => ({ first: () => ({ json: { materials } }) });
+    const $ = (name) => ({ first: () => ({
+      json: name === 'Parse answer' ? { draft } : { materials },
+    }) });
     return new Function('$', '$json', js('Build check SQL'))($, { draft, check_values: '' })
       .map((i) => i.json);
   };
@@ -1837,9 +1839,10 @@ line('38. ТОЧНОЕ СОВПАДЕНИЕ НЕ ПОДМЕНЯЕТСЯ ПОХО
   const MAT = { materials:
     'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ' +
     'ПОЛЯ: last_day_flg, active_employee_flg, company_fire_flg, emp_specialization_desc' };
+  const D38 = "where emp_specialization_desc = 'Продуктовый аналитик'";
   const sql = new Function('$', '$json', js('Build check SQL'))(
-    () => ({ first: () => ({ json: MAT }) }),
-    { check_values: '', draft: "where emp_specialization_desc = 'Продуктовый аналитик'" },
+    (name) => ({ first: () => ({ json: name === 'Parse answer' ? { draft: D38 } : MAT }) }),
+    { check_values: '', draft: D38 },
   )[0].json.check_sql;
 
   check('признак точного совпадения есть в запросе',
@@ -1905,7 +1908,9 @@ line('39. ЧЕРНОВИК — MARKDOWN, А НЕ ЧИСТЫЙ SQL');
     'last_day_flg, active_employee_flg, company_fire_flg, ' +
     'emp_specialization_desc, residential_city_nm, emp_stream_desc' };
   const runCheck = (draft) => {
-    const $ = () => ({ first: () => ({ json: MAT }) });
+    const $ = (name) => ({ first: () => ({
+      json: name === 'Parse answer' ? { draft } : MAT,
+    }) });
     return new Function('$', '$json', js('Build check SQL'))($, { draft, check_values: '' })
       .map((i) => i.json);
   };
@@ -1946,6 +1951,79 @@ line('39. ЧЕРНОВИК — MARKDOWN, А НЕ ЧИСТЫЙ SQL');
     runCheck("where emp_stream_desc = 'Data'")[0].check_field === 'emp_stream_desc');
   check('и список IN тоже',
     runCheck("where emp_stream_desc in ('Data', 'Retail')").length === 2);
+}
+
+// ===================================================================== 40
+line('40. ДОСПРОС: автор сам знает, чего не хватило — надо спросить');
+{
+  const MAT = { materials:
+    'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ПОЛЯ: ' +
+    'last_day_flg, active_employee_flg, company_fire_flg, ' +
+    'emp_specialization_desc, residential_city_nm' };
+  const build = (parsed, input) => {
+    const $ = (name) => {
+      if (name === 'Build materials') return { first: () => ({ json: MAT }) };
+      if (name === 'Parse answer') return { first: () => ({ json: parsed }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', js('Build check SQL'))($, input ?? parsed)
+      .map((i) => i.json);
+  };
+
+  // ЖИВОЙ КЕЙС 2026-08-28. Разбор пар промахнулся, но автор в «Чего
+  // не хватило» прямым текстом написал, что проверить: выбрасывать это
+  // и гадать по разметке — расточительно.
+  const GAPS = 'Значения полей emp_specialization_desc и residential_city_nm ' +
+    'не проверены — точное написание «GO разработчик» и «Краснодар» ' +
+    'в данных неизвестно.';
+  const missed = build({ draft: 'запрос без литералов', gaps: GAPS, check_values: '' });
+  check('пар не нашлось', missed[0].check_sql === '');
+  check('но доспрос включён', missed[0].check_retry === true);
+
+  // Гейт узкий: без признания автора лишний вызов модели не нужен.
+  check('без признания автора доспроса нет',
+    build({ draft: 'обычный ответ', gaps: 'нет статьи про X', check_values: '' })[0]
+      .check_retry === false);
+  // Пары нашлись — доспрашивать не о чем.
+  const ok = build({ draft: "where emp_specialization_desc = 'GO разработчик'",
+                     gaps: GAPS, check_values: '' });
+  check('при найденных парах доспроса нет', ok[0].check_retry === false);
+
+  // Разбор ответа доспроса: модель просили вернуть голые строки, но она
+  // может обернуть их в markdown или дописать пояснение.
+  const parsePairs = (output) =>
+    new Function('$', '$json', js('Parse pairs'))(() => {
+      throw new Error('нет узлов');
+    }, { output })[0].json;
+  const p1 = parsePairs([
+    'Вот пары:',
+    '- `emp_specialization_desc` = GO разработчик',
+    '- **residential_city_nm** = Краснодар',
+  ].join('\n'));
+  check('пары из доспроса разобраны', p1.ask_pairs_found === 2);
+  check('и лишнее не попало', !/Вот пары/.test(p1.check_values));
+  check('пустой ответ — нормальный исход',
+    parsePairs('НЕТ').ask_pairs_found === 0);
+
+  // ВТОРОЙ сборщик работает тем же кодом: пары из доспроса, черновик
+  // по-прежнему у «Parse answer».
+  const retried = build({ draft: 'запрос без литералов', gaps: GAPS },
+    { check_values: p1.check_values });
+  check('после доспроса запросы собрались', retried.length === 2);
+  check('и по тем самым полям',
+    retried.map((i) => i.check_field).sort().join()
+      === 'emp_specialization_desc,residential_city_nm');
+  check('значения из доспроса доехали',
+    retried.some((i) => i.check_value === 'GO разработчик'));
+
+  // Доспрос РОВНО ОДИН: второй сборщик доспрос уже не включает, даже
+  // если пар опять нет. Иначе вернулся бы счётчик итераций.
+  const twice = build({ draft: 'x', gaps: GAPS }, { check_values: 'НЕТ' });
+  check('второго доспроса не запрашивается', twice[0].check_retry === true);
+  const conn = JSON.parse(fs.readFileSync('Support Bot Core.json', 'utf8')).connections;
+  check('и его некуда сделать: обратной связи в графе нет',
+    !(conn['Need check after ask']?.main || []).flat()
+      .some((e) => /Ask pairs|Need retry/.test(e.node)));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

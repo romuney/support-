@@ -494,11 +494,13 @@ line('16. Проводка адаптеров: связи и фильтры');
   const models = Object.entries(core.connections)
     .filter(([, c]) => c.ai_languageModel)
     .map(([name, c]) => [name, c.ai_languageModel[0][0].node]);
-  // Агентов теперь три: роутер, автор и правка черновика после проверки
-  // значений в данных. Узел модели у каждого свой — один нельзя развести
-  // ai_languageModel-входом на двух агентов.
+  // Агентов четыре: роутер, автор, правка черновика после проверки значений
+  // и доспрос «какие пары проверять» — он включается кодом только там, где
+  // разбор пар промахнулся, а автор сам написал, что значение не проверено.
+  // Узел модели у каждого свой — один нельзя развести ai_languageModel-входом
+  // на двух агентов.
   check(`у каждого агента свой узел модели (${models.length})`,
-    models.length === 3
+    models.length === 4
     && new Set(models.map((m) => m[0])).size === models.length
     && new Set(models.map((m) => m[1])).size === models.length);
 
@@ -2209,9 +2211,22 @@ line('48. ЦИКЛ ПОСЛЕ АВТОРА: проводка и общий фи�
 
   check('автор ведёт в разбор и дальше в сборку проверки',
     out('Parse answer')[0].includes('Build check SQL'));
-  check('гейт разводит на проверку и на финал',
+  // Ложная ветвь гейта ведёт НЕ в финал, а в доспрос: автор мог сам
+  // написать, что значение не проверено, — тогда его об этом и спрашиваем.
+  check('гейт разводит на проверку и на доспрос',
     out('Need check')[0].includes('Check values') &&
-    out('Need check')[1].includes('Final answer'));
+    out('Need check')[1].includes('Need retry'));
+  check('доспрос ведёт в данные через свой сборщик',
+    out('Need retry')[0].includes('Ask pairs') &&
+    out('Retry check SQL')[0].includes('Need check after ask') &&
+    out('Need check after ask')[0].includes('Check values'));
+
+  // Доспрос РОВНО ОДИН: обратной связи в первый сборщик нет по конструкции.
+  // Цикл «пока не найдёт» вернул бы счётчик итераций, от которого ушли
+  // вместе с tool-loop: два прохода видны по схеме, три — уже нет.
+  const backEdges = Object.entries(conn).filter(([n, c]) => /after ask|Retry|Ask pairs|Parse pairs/.test(n)
+    && (c.main || []).some((b) => b.some((e) => /^Build check SQL$|^Author$|^Parse answer$/.test(e.node))));
+  check('обратной связи в первый сборщик нет', backEdges.length === 0);
   check('ветвь проверки заканчивается тем же финалом',
     out('Parse revised')[0].includes('Final answer'));
 
@@ -2219,9 +2234,16 @@ line('48. ЦИКЛ ПОСЛЕ АВТОРА: проводка и общий фи�
   // один раз — это НЕ веер, за которым следит проверка схождения.
   const toFinal = Object.entries(conn)
     .filter(([, c]) => (c.main || []).some((b) => b.some((e) => e.node === 'Final answer')))
-    .map(([n]) => n);
-  check('в финал ведут ровно две взаимоисключающие ветви',
-    toFinal.length === 2 && toFinal.includes('Need check') && toFinal.includes('Parse revised'));
+    .map(([n]) => n).sort();
+  check('в финал ведут только взаимоисключающие ветви: ' + toFinal.join(', '),
+    toFinal.join() === 'Need check after ask,Need retry,Parse revised');
+  // Два входа у «Check values» — тоже сходящиеся ветви разных IF,
+  // а не веер: обычный путь и путь после доспроса исключают друг друга.
+  const toCheck = Object.entries(conn)
+    .filter(([, c]) => (c.main || []).some((b) => b.some((e) => e.node === 'Check values')))
+    .map(([n]) => n).sort();
+  check('и в проверку тоже: ' + toCheck.join(', '),
+    toCheck.join() === 'Need check,Need check after ask');
 
   const cv = core.nodes.find((n) => n.name === 'Check values');
   // Ноль строк — нормальный исход, а n8n на пустом выходе останавливает

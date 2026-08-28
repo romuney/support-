@@ -345,6 +345,11 @@ bot AS (
            -- промах до сих пор находился только глазами по логу n8n.
            max_by(CAST(json_extract_scalar(payload, '$.check_missed') AS boolean),
                   event_ts) AS check_missed,
+           -- Понадобился ли доспрос: автор не назвал пары сам, и его
+           -- переспросили отдельным вызовом. Доля растёт — чинить надо
+           -- промпт автора, а не разбор пар.
+           max_by(CAST(json_extract_scalar(payload, '$.check_retried') AS boolean),
+                  event_ts) AS check_retried,
            -- Почему проверка не запускалась, текстом. Разбивка по этой
            -- колонке и есть список того, что чинить: «нет фильтров
            -- по значению» и «ни одна пара не прошла отбор» — разные поломки.
@@ -507,6 +512,7 @@ SELECT
     COALESCE(b.check_exact, 0)                              AS check_exact,
     COALESCE(b.draft_stale_caveat, false)                   AS draft_stale_caveat,
     COALESCE(b.check_missed, false)                         AS check_missed,
+    COALESCE(b.check_retried, false)                        AS check_retried,
     b.check_reason                                          AS check_reason,
     b.check_failed                                          AS check_failed,
     COALESCE(b.revised, false)                              AS revised,
@@ -718,6 +724,7 @@ SELECT
     count_if(check_exact > 0)                              AS check_exact_hit,
     count_if(draft_stale_caveat)                           AS stale_caveat,
     count_if(check_missed)                                 AS check_missed,
+    count_if(check_retried)                                AS check_retried,
     count_if(check_failed IS NOT NULL AND check_failed <> '') AS check_failed,
     count_if(revised)                                      AS draft_revised,
     count_if(routes IS NOT NULL AND routes <> '[]')        AS expert_suggested,
