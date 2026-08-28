@@ -1225,8 +1225,19 @@ const parts = fields.map((f) =>
   like.map((l) => `lower(CAST(${f} AS varchar)) LIKE ${l}`).join(' OR ') +
   `)\nGROUP BY 1, 2`);
 
+// СОРТИРОВКА И ЛИМИТ — НАД ПОДЗАПРОСОМ, а не сразу после UNION ALL.
+//
+// `... UNION ALL ... ORDER BY 3 DESC LIMIT 60` читается двояко: относится
+// ORDER BY ко всему объединению или к последней ветви — и по порядковому
+// номеру колонки после набора операций поведение диалектов расходится.
+// Проверить это отсюда нечем (Trino доступен только из n8n), а цена ошибки —
+// не отказ, а МОЛЧА неверный список: показались бы значения одного поля
+// вместо самых частых по всем. Обёртка в подзапрос и сортировка по ИМЕНИ
+// колонки не оставляют места для трактовок.
+const union = parts.join('\nUNION ALL\n');
+
 return [{ json: {
-  values_sql: parts.join('\nUNION ALL\n') + `\nORDER BY 3 DESC\nLIMIT ${MAX_ROWS}`,
+  values_sql: `SELECT fld, val, cnt FROM (\n${union}\n) v\nORDER BY cnt DESC\nLIMIT ${MAX_ROWS}`,
   values_limit: MAX_ROWS,
   values_fields: fields,
   values_words: words,
