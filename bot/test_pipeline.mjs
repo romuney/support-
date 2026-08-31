@@ -2406,6 +2406,59 @@ line('45. ВТОРОЙ ПРОХОД НЕ ТЕРЯЕТ БЛОКИ ПЕРВОГО'
   check('с честной причиной', /значения в нём НЕ проверены/.test(broken.parse_error));
 }
 
+// ===================================================================== 46
+line('46. ССЫЛКА НА ЮНИТ: id разбирается кодом, справочник добирается');
+{
+  // ЖИВОЙ КЕЙС 2026-08-31. Заказчик прислал ссылку на юнит, бот пошёл искать
+  // uuid из неё среди значений mapped_management_unit_nm и
+  // lvl5_mapped_management_unit_rk, не нашёл — и написал заказчику, что юнит
+  // «не обнаружился ни по названию, ни по идентификатору», предложив самому
+  // сказать, где его искать. Ни в одном из этих полей его и не могло быть:
+  // в ссылке `id`, а в основных витринах только `rk`.
+  const MGMT = 'https://my.tbank.ru/structure/resource/units/' +
+    'e289067b-26b6-44f2-917e-668d1ea65cc5?searchEmployee=68058';
+  const PROD = 'https://my.tbank.ru/product-catalog/product/' +
+    'c5b3a0ac-a44b-4353-9f37-902ef0f5d4c6';
+  const run = (q) => runPlan(
+    JSON.stringify({ domains: [], articles: [], dd: [], no_question: false }),
+    REGISTRY, { question: q });
+
+  const m = run('нужна выгрузка по юниту ' + MGMT);
+  check('вид ссылки называет структуру, а не догадка',
+    m.unit_link_kind === 'management');
+  check('id из ссылки разобран',
+    m.unit_link_id === 'e289067b-26b6-44f2-917e-668d1ea65cc5');
+  check('хвост ?searchEmployee в id не попал',
+    !/searchEmployee/.test(m.unit_link_id));
+  check('рецепт перевода добран', m.files.includes('kb/recipes/unit-link.md'));
+  check('и справочник управленческой структуры',
+    m.files.includes('kb/tables/management-unit.md'));
+  check('справочник Каталога продуктов НЕ добран — структура другая',
+    !m.files.includes('kb/tables/functional-unit.md'));
+
+  const f = run('сколько людей на продукте ' + PROD);
+  check('продуктовая ссылка опознана', f.unit_link_kind === 'functional');
+  check('и добран её справочник',
+    f.files.includes('kb/tables/functional-unit.md') &&
+    !f.files.includes('kb/tables/management-unit.md'));
+
+  // Без ссылки признак молчит: строка в материалах, которая горит всегда,
+  // перестаёт читаться.
+  const none = run('сколько сотрудников в юните Human Capital');
+  check('без ссылки признака нет', none.unit_link_kind === '');
+  check('и справочники не добираются',
+    !none.files.some((p) => /unit-link|management-unit|functional-unit/.test(p)));
+
+  // Блок в материалах: автор должен узнать, что за uuid и где его искать.
+  const mat = runMaterials(m, [{ content: b64('# рецепт') }]);
+  check('автору сказано, что в обращении ссылка на юнит',
+    /В ОБРАЩЕНИИ ССЫЛКА НА ЮНИТ/.test(mat.materials));
+  check('и названо поле справочника, а не витрины',
+    /management_unit_id/.test(mat.materials));
+  check('и прямо сказано, что в основных витринах id нет',
+    /этого идентификатора НЕТ/.test(mat.materials));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

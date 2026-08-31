@@ -384,6 +384,13 @@ bot AS (
            -- число проверенных полей, и путать их в дашборде дорого.
            max_by(CAST(json_extract_scalar(payload, '$.check_fields') AS integer),
                   event_ts) AS check_fields,
+           -- Ссылка на юнит в обращении: '' / 'management' / 'functional'.
+           -- Отдельный класс обращений: в ссылке `id`, а в основных витринах
+           -- только `rk`, и между ними переход через справочник. Доля
+           -- показывает, насколько он частый; без неё «бот не понял ссылку»
+           -- и «в базе нет ответа» по логу неразличимы.
+           max_by(json_extract_scalar(payload, '$.unit_link'),
+                  event_ts) AS unit_link,
            -- ПОДМЕНА: в итоговом фильтре значение, которого заказчик
            -- не называл. Отдельно от check_exact: там «ответ был тот самый»,
            -- здесь «данные сказали, что такого значения нет, а в запрос всё
@@ -575,6 +582,7 @@ SELECT
     COALESCE(b.check_rows, 0)                               AS check_rows,
     COALESCE(b.check_exact, 0)                              AS check_exact,
     COALESCE(b.check_fields, 0)                             AS check_fields,
+    b.unit_link,
     -- Подмена значения: данные ответили «такого нет», а в фильтр уехало
     -- чужое. Считается отдельно от check_exact намеренно — см. блок bot.
     COALESCE(b.check_substituted, 0)                        AS check_substituted,

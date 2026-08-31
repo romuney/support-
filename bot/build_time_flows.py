@@ -742,6 +742,34 @@ const QUERY_PATHS = ['kb/process/sql-conventions.md'];
 // Ловится тестом 43, но написать его заново оказалось проще, чем не написать.
 const UNIT_RE = /юнит|подразделен|департамент|дирекци|\bunit\b|lvl\d/i;
 const isUnitQuestion = UNIT_RE.test(question0);
+
+// ССЫЛКА НА ЮНИТ — ОТДЕЛЬНЫЙ ПРИЗНАК, И ОН ТОЧНЫЙ.
+//
+// Заказчик часто присылает не название подразделения, а ссылку:
+//   my.tbank.ru/structure/resource/units/<uuid>   — управленческая структура
+//   my.tbank.ru/product-catalog/product/<uuid>    — Каталог продуктов
+// В ссылке стоит `id` юнита, а в основных витринах его НЕТ — там только `rk`.
+// Перевод делается через справочник (dds.management_unit / dds.functional_unit),
+// и без него ссылка бесполезна.
+//
+// Живой прогон 2026-08-31: бот искал uuid из ссылки среди значений
+// mapped_management_unit_nm и lvl5_mapped_management_unit_rk, не нашёл —
+// и написал заказчику, что юнит «не обнаружился ни по названию,
+// ни по идентификатору», предложив самому сказать, где его искать.
+// Ни в одном из этих полей его и не могло быть.
+//
+// Признак ТОЧНЫЙ, в отличие от UNIT_RE выше: это конкретный вид ссылки,
+// ложных срабатываний у него нет. Поэтому по нему добирается не только
+// рецепт, но и инвентарь обоих справочников — имена полей `*_unit_id`
+// и `*_unit_rk` автор иначе не увидит и подставит правдоподобные.
+const UNIT_LINK_RE =
+  /my\.tbank\.ru\/(structure\/resource\/units|product-catalog\/product)\/([0-9a-f-]{8,})/i;
+const unitLink = UNIT_LINK_RE.exec(question0);
+const isUnitLink = Boolean(unitLink);
+// Какая структура — видно по виду ссылки, угадывать не нужно.
+const unitLinkKind = !unitLink ? ''
+  : (/structure\/resource\/units/i.test(unitLink[1]) ? 'management' : 'functional');
+const unitLinkId = unitLink ? unitLink[2] : '';
 const UNIT_IDS = ['rc-find-unit-level'];
 
 const addedExport = [];
@@ -815,6 +843,21 @@ if (isQueryHelp || isExport) {
   for (const id of SYNONYM_IDS) {
     const pth = byId.get(id);
     if (pth && !seen.has(pth)) addedSynonyms.push(id);
+    add(pth);
+  }
+}
+
+// Ссылка на юнит: рецепт перевода плюс справочник ТОЙ структуры, которую
+// назвала сама ссылка. Второй справочник не добираем — его инвентарь только
+// путал бы автора, а какая структура нужна, из ссылки известно точно.
+const UNIT_LINK_IDS = ['rc-unit-link'];
+const addedUnitLink = [];
+if (isUnitLink) {
+  const ids = UNIT_LINK_IDS.concat(
+    unitLinkKind === 'management' ? ['t-management-unit'] : ['t-functional-unit']);
+  for (const id of ids) {
+    const pth = byId.get(id);
+    if (pth && !seen.has(pth)) addedUnitLink.push(id);
     add(pth);
   }
 }
@@ -1237,6 +1280,14 @@ return [{
     // запрос или собирается состав выгрузки: без него «покраска» и «HQ»
     // не переводятся в имена полей ничем.
     added_synonyms: addedSynonyms,
+    // Ссылка на юнит: что добрано и что из неё разобрано. Поля уезжают
+    // в материалы автору — иначе он видит ссылку и не знает, что с ней
+    // делать, — и в телеметрию: доля обращений со ссылкой на юнит это
+    // отдельный класс, и мерить его надо с первого дня.
+    added_unit_link: addedUnitLink,
+    unit_link_kind: unitLinkKind,
+    unit_link_id: unitLinkId,
+    unit_link: isUnitLink,
     added_unit: addedUnit,
     is_unit_question: isUnitQuestion,
     // Роутер не назвал ни домена, ни статьи — читалась витрина по умолчанию.
@@ -1687,6 +1738,37 @@ if (routes.length) {
   );
 }
 
+// ССЫЛКА НА ЮНИТ: id разобран кодом, и это надо СКАЗАТЬ автору.
+//
+// Иначе он видит в обращении ссылку и не понимает, что с ней делать: живой
+// прогон 2026-08-31 ушёл искать uuid среди значений полей подразделения,
+// не нашёл — и объявил заказчику, что юнит не обнаружился. Ни в названии,
+// ни в `*_rk` его и не могло быть: в ссылке стоит `id`, а в основных
+// витринах только `rk`, и между ними один переход через справочник.
+//
+// Разбор ссылки делает КОД, а не модель: вид ссылки однозначно называет
+// структуру, и угадывать здесь нечего. Автору остаётся написать запрос
+// по рецепту, который добран рядом.
+if (plan.unit_link_kind) {
+  const isMgmt = plan.unit_link_kind === 'management';
+  parts.push(
+    '=== В ОБРАЩЕНИИ ССЫЛКА НА ЮНИТ ===\n' +
+      `Структура: ${isMgmt ? 'УПРАВЛЕНЧЕСКАЯ' : 'КАТАЛОГ ПРОДУКТОВ (продуктовая, функциональная)'}. ` +
+      'Определена по виду ссылки, не по догадке.\n' +
+      `Идентификатор юнита из ссылки: ${plan.unit_link_id}\n` +
+      'Это значение поля ' +
+      (isMgmt ? '`management_unit_id` в `prod_v_dds.management_unit`'
+              : '`functional_unit_id` в `prod_v_dds.functional_unit`') +
+      '. В основных витринах этого идентификатора НЕТ — там только `*_rk`. ' +
+      'Искать его среди названий подразделений или среди `*_rk` бессмысленно: ' +
+      'это разные поля, и «не нашлось» там ничего не означает.\n' +
+      'Порядок действий — в статье рецепта про ссылку на юнит, она среди ' +
+      'материалов: сначала по справочнику получить `rk`, потом по `rk` идти ' +
+      'в основные витрины. Запрос первого шага напиши в ТЗ целиком, ' +
+      'подставив идентификатор выше.',
+  );
+}
+
 // Запрошенные, но не дошедшие до вызова вовсе (ветка оборвалась раньше).
 const ddMissing = planned
   .slice(ddResults.length)
@@ -1984,6 +2066,10 @@ return [{
     // а не норма, и доля таких путей показывает, держит ли роутер формат.
     articles_recovered: Array.isArray(plan.articles_recovered)
       ? plan.articles_recovered : [],
+    // Ссылка на юнит: признак и разобранный id проезжают до «Parse answer»
+    // и телеметрии. Разбор делает «Plan», здесь только транзит.
+    unit_link_kind: String(plan.unit_link_kind || ''),
+    unit_link_id: String(plan.unit_link_id || ''),
     articles_by_id: Array.isArray(plan.articles_by_id) ? plan.articles_by_id : [],
     dd_used: ddOk.length > 0,
     dd_objects: ddOk,
@@ -2503,6 +2589,10 @@ out.articles_recovered = Array.isArray(mat.articles_recovered)
   ? mat.articles_recovered : [];
 out.articles_by_id = Array.isArray(mat.articles_by_id)
   ? mat.articles_by_id.length : 0;
+// Ссылка на юнит в обращении: отдельный класс обращений со своим переходом
+// id → rk через справочник. Доля показывает, насколько он частый, а без неё
+// «бот не понял ссылку» и «в базе нет ответа» по логу неразличимы.
+out.unit_link = String(mat.unit_link_kind || '');
 
 // 4б. Инструменты, которых у КОЛЛЕГИ нет.
 //
@@ -4809,6 +4899,9 @@ return [{ json: {
     // По скольким «витрина.поле» поднимался словарь значений. Отдельно
     // от check_rows: строки — это размер словаря, а не число полей.
     check_fields: (Array.isArray(a.check_fields) ? a.check_fields : []).length,
+    // Ссылка на юнит: '' / 'management' / 'functional'. Отдельный класс
+    // обращений со своим переходом id → rk через справочник.
+    unit_link: a.unit_link || '',
     // ПОДМЕНА значения. Отдельно от check_exact: там «ответ был тот самый»,
     // здесь «данные сказали, что такого значения нет, а в фильтр всё равно
     // уехало чужое». Единственный случай, когда проверка значений работает
