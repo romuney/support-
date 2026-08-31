@@ -391,6 +391,11 @@ bot AS (
            -- и «в базе нет ответа» по логу неразличимы.
            max_by(json_extract_scalar(payload, '$.unit_link'),
                   event_ts) AS unit_link,
+           -- Реестр базы знаний не прочитан: поломка ДОСТУПА, а не пробел
+           -- базы. Отдельный класс, и он самый дорогой: без реестра бот
+           -- не отвечает ни на что, а по виду канала это «бот промолчал».
+           max_by(json_extract_scalar(payload, '$.registry_error'),
+                  event_ts) AS registry_error,
            -- ПОДМЕНА: в итоговом фильтре значение, которого заказчик
            -- не называл. Отдельно от check_exact: там «ответ был тот самый»,
            -- здесь «данные сказали, что такого значения нет, а в запрос всё
@@ -583,6 +588,7 @@ SELECT
     COALESCE(b.check_exact, 0)                              AS check_exact,
     COALESCE(b.check_fields, 0)                             AS check_fields,
     b.unit_link,
+    b.registry_error,
     -- Подмена значения: данные ответили «такого нет», а в фильтр уехало
     -- чужое. Считается отдельно от check_exact намеренно — см. блок bot.
     COALESCE(b.check_substituted, 0)                        AS check_substituted,
