@@ -686,6 +686,73 @@
       ],
       "id": "recon-shape-values",
       "name": "Shape values"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// Имена витрин берутся ИЗ РЕЕСТРА, а не из списка в сборщике: копия\n// разъехалась бы молча — то же правило, по которому состав полей\n// не копируется из каталога в статью.\nconst urns = [\"urn:dd:tables:greenplum:table:hrmart.mdm_employee_attendance\", \"urn:dd:tables:greenplum:table:dds.crm_user\", \"urn:dd:tables:greenplum:table:sdp_itsa_zup.disciplinary_sanction\", \"urn:dd:tables:greenplum:table:hrmart.legal_position_dismissal_reason\", \"urn:dd:tables:greenplum:table:hrmart.mdm_employee_education\", \"urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d\", \"urn:dd:tables:greenplum:table:chrono_peoplehub_masterid.individualchildren_public\", \"urn:dd:tables:greenplum:table:emart.mdm_employee_x_person_party\", \"urn:dd:tables:greenplum:table:dds_dic.employee_profession\", \"urn:dd:tables:greenplum:table:sse_crossdata.employee_residence\", \"urn:dd:tables:greenplum:table:dds.mdm_employee_x_profession\", \"urn:dd:tables:greenplum:table:emart.functional_role_d\", \"urn:dd:tables:dlh:table:dds.functional_unit\", \"urn:dd:tables:greenplum:table:emart.legal_position_d\", \"urn:dd:tables:greenplum:table:sse_crossdata.legal_position_attr_chng\", \"urn:dd:tables:dlh:table:dds.management_unit\", \"urn:dd:tables:greenplum:table:sse_crossdata.performance_metric_d\", \"urn:dd:tables:greenplum:table:sdp_edms_statement.statement_field\", \"urn:dd:tables:greenplum:table:hrmart.summary_evaluation\", \"urn:dd:tables:greenplum:table:hrmart.statement_vacation\"];\nreturn urns.map((urn) => {\n  // `schema.table` — хвост URN после последнего двоеточия. Ищем по ИМЕНИ\n  // таблицы: полное имя со схемой поиск не находит, а имя — находит.\n  const fqn = String(urn).split(':').pop();\n  const name = fqn.split('.').pop();\n  return { json: { urn, fqn, name } };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        1300
+      ],
+      "id": "recon-tables-to-resolve",
+      "name": "Tables to resolve"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.name, limit: 10, filters: { type: [\"TABLE\"] } }) }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        180,
+        1300
+      ],
+      "id": "recon-search-table",
+      "name": "Search table",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// Готовая колонка `dd_urn` для реестра плюс честный отчёт о том, что НЕ\n// нашлось. Пустой результат — это ответ: витрины в каталоге нет, и тогда\n// состав полей бот добирает из данных (`information_schema`), а описаний\n// у неё не будет вовсе. Молча выдать «не нашлось» за «URN верный» нельзя:\n// ровно так угаданный URN и прожил в реестре месяц.\nconst out = [];\nconst say = (s) => out.push(s);\n\nlet asked = [];\ntry { asked = $('Tables to resolve').all().map((i) => i.json); } catch (e) { asked = []; }\nlet res = [];\ntry { res = $('Search table').all().map((i) => i.json); } catch (e) { res = []; }\n\nconst rows = [];\nconst miss = [];\nconst same = [];\nasked.forEach((a, idx) => {\n  const r = res[idx];\n  const code = r && r.statusCode;\n  if (code !== undefined && code >= 400) {\n    miss.push(`${a.fqn} — HTTP ${code}`);\n    return;\n  }\n  const body = (r && (r.body ?? r)) || {};\n  const cards = Array.isArray(body.data) ? body.data\n              : Array.isArray(body) ? body : [];\n  // Совпадением считается ТОЧНОЕ имя таблицы в хвосте fqn или urn, а не\n  // первая строка выдачи: поиск ранжирует по релевантности и охотно отдаёт\n  // похожее. Неверный URN хуже отсутствующего — по нему бот молча\n  // не получит состав полей и будет извиняться на каждом ответе.\n  const hit = cards.find((c) => {\n    const f = String(c.fqn || '').toLowerCase();\n    const u = String(c.urn || '').toLowerCase();\n    return f.split('.').pop() === a.name || u.split(':').pop().split('.').pop() === a.name;\n  });\n  if (!hit) {\n    miss.push(`${a.fqn} — в каталоге не нашлось (${cards.length} чужих совпадений)`);\n    return;\n  }\n  const found = String(hit.urn || '');\n  if (found === a.urn) { same.push(a.fqn); return; }\n  rows.push({ fqn: a.fqn, was: a.urn, now: found });\n});\n\nsay('ФАЗА G. НАСТОЯЩИЕ URN ВИТРИН — ПОИСКОМ ПО ИМЕНИ');\nsay('');\nsay(`Спрошено витрин: ${asked.length}. Совпало с реестром: ${same.length}. ` +\n    `Надо ПРАВИТЬ: ${rows.length}. Не нашлось: ${miss.length}.`);\n\nif (rows.length) {\n  say('');\n  say('ЗАМЕНИТЬ В kb/index.md, колонка dd_urn:');\n  for (const r of rows) {\n    say('');\n    say(`  ${r.fqn}`);\n    say(`    было:  ${r.was}`);\n    say(`    стало: ${r.now}`);\n  }\n}\nif (miss.length) {\n  say('');\n  say('В КАТАЛОГЕ НЕ НАШЛОСЬ — и это тоже ответ:');\n  for (const m of miss) say('  — ' + m);\n  say('');\n  say('По таким витринам описаний полей не будет вовсе: их нет в каталоге.');\n  say('Состав полей бот добирает из данных (information_schema), а смысл');\n  say('поля остаётся за статьёй. Строку из реестра НЕ УДАЛЯТЬ: без dd_urn');\n  say('код не поймёт, что это витрина, — но и верить ему как URN нельзя.');\n}\nif (same.length) {\n  say('');\n  say(`Подтверждены как есть (${same.length}): ${same.join(', ')}`);\n}\n\nreturn [{ json: { report: out.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        1300
+      ],
+      "id": "recon-shape-urns",
+      "name": "Shape urns"
     }
   ],
   "connections": {
@@ -914,6 +981,39 @@
         [
           {
             "node": "Shape values",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape values": {
+      "main": [
+        [
+          {
+            "node": "Tables to resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tables to resolve": {
+      "main": [
+        [
+          {
+            "node": "Search table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search table": {
+      "main": [
+        [
+          {
+            "node": "Shape urns",
             "type": "main",
             "index": 0
           }

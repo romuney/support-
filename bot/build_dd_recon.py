@@ -1170,6 +1170,161 @@ return [{ json: { values_recon: out.join('\n') } }];
 
 nodes.append(code("Shape values", [1380, 620], SHAPE_VALUES_JS))
 
+
+# ---------------------------------------------------------------- ФАЗА G
+#
+# НАСТОЯЩИЕ URN ВИТРИН — ИЩУТСЯ ПО ИМЕНИ, А НЕ СОБИРАЮТСЯ ПО СХЕМЕ.
+#
+# В реестре двадцать витрин, и живым запросом подтверждена ОДНА —
+# `emart.mdm_employee_structure_d`. Остальные девятнадцать собраны по правилу
+# `urn:dd:<systemType>:<systemName>:<type>:<id>`: правило верное, а значения
+# в нём угаданы — и системой (`greenplum` против `dlh`), и тем, лежит ли
+# витрина в каталоге вообще.
+#
+# Промах здесь ТИХИЙ, и это выяснилось дорого. Живой прогон 2026-08-31:
+# по витрине детей каталог ответил 404, шейпер честно написал «ОШИБКИ DD:
+# HTTP 404 — URN неверный», ядро увидело НЕПУСТОЙ текст и записало объект
+# в «метаданные получены». В служебной строке джуну стояло
+# «метаданные: … individualchildren_public» — то есть по виду прогона всё
+# в порядке, — а автор писал «состав полей не получен, имена взяты из статьи»
+# и ставил среднюю уверенность. На КАЖДОМ вопросе про эту витрину.
+#
+# Ищется URN поиском по имени: `POST /search/query` с телом `{text: …}`
+# подтверждён живым прогоном 2026-08-27 («Активность в GitLab» первым же
+# результатом вернул нужный URN). Один запрос на витрину, двадцать запросов
+# на прогон — это работа на минуту, один раз, и каждая строка после неё
+# подтверждена, а не угадана.
+#
+# Три ноды вместо двадцати: список витрин разворачивается Split Out,
+# HTTP-нода выполняется по разу на элемент, шейпер собирает готовую колонку
+# `dd_urn` для вставки в реестр.
+TABLES_TO_RESOLVE_JS = r"""
+// Имена витрин берутся ИЗ РЕЕСТРА, а не из списка в сборщике: копия
+// разъехалась бы молча — то же правило, по которому состав полей
+// не копируется из каталога в статью.
+const urns = __TABLE_URNS__;
+return urns.map((urn) => {
+  // `schema.table` — хвост URN после последнего двоеточия. Ищем по ИМЕНИ
+  // таблицы: полное имя со схемой поиск не находит, а имя — находит.
+  const fqn = String(urn).split(':').pop();
+  const name = fqn.split('.').pop();
+  return { json: { urn, fqn, name } };
+});
+"""
+
+nodes.append(
+    node("Tables to resolve", "n8n-nodes-base.code", 2, [-40, 1300],
+         {"mode": "runOnceForAllItems",
+          "jsCode": TABLES_TO_RESOLVE_JS.replace(
+              "__TABLE_URNS__", json.dumps(TABLE_URNS, ensure_ascii=False))})
+)
+
+_search_table = node(
+    "Search table", "n8n-nodes-base.httpRequest", 4.4, [180, 1300],
+    {
+        "method": "POST",
+        "url": f"{BASE}/search/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": True,
+        "specifyBody": "json",
+        # Фильтр по типу сущности обязателен: без него в выдачу лезут колонки
+        # и ноутбуки с тем же словом в имени, и первая строка оказывается
+        # не витриной. Форма фильтра — из спецификации OpenAPI: словарь
+        # «ключ → МАССИВ строк», а не скаляр.
+        "jsonBody": '={{ JSON.stringify({ text: $json.name, limit: 10,'
+                    ' filters: { type: ["TABLE"] } }) }}',
+        "options": copy.deepcopy(DD_OPTS),
+    },
+    DP_CRED,
+)
+_search_table["onError"] = "continueRegularOutput"
+nodes.append(_search_table)
+
+SHAPE_URNS_JS = r"""
+// Готовая колонка `dd_urn` для реестра плюс честный отчёт о том, что НЕ
+// нашлось. Пустой результат — это ответ: витрины в каталоге нет, и тогда
+// состав полей бот добирает из данных (`information_schema`), а описаний
+// у неё не будет вовсе. Молча выдать «не нашлось» за «URN верный» нельзя:
+// ровно так угаданный URN и прожил в реестре месяц.
+const out = [];
+const say = (s) => out.push(s);
+
+let asked = [];
+try { asked = $('Tables to resolve').all().map((i) => i.json); } catch (e) { asked = []; }
+let res = [];
+try { res = $('Search table').all().map((i) => i.json); } catch (e) { res = []; }
+
+const rows = [];
+const miss = [];
+const same = [];
+asked.forEach((a, idx) => {
+  const r = res[idx];
+  const code = r && r.statusCode;
+  if (code !== undefined && code >= 400) {
+    miss.push(`${a.fqn} — HTTP ${code}`);
+    return;
+  }
+  const body = (r && (r.body ?? r)) || {};
+  const cards = Array.isArray(body.data) ? body.data
+              : Array.isArray(body) ? body : [];
+  // Совпадением считается ТОЧНОЕ имя таблицы в хвосте fqn или urn, а не
+  // первая строка выдачи: поиск ранжирует по релевантности и охотно отдаёт
+  // похожее. Неверный URN хуже отсутствующего — по нему бот молча
+  // не получит состав полей и будет извиняться на каждом ответе.
+  const hit = cards.find((c) => {
+    const f = String(c.fqn || '').toLowerCase();
+    const u = String(c.urn || '').toLowerCase();
+    return f.split('.').pop() === a.name || u.split(':').pop().split('.').pop() === a.name;
+  });
+  if (!hit) {
+    miss.push(`${a.fqn} — в каталоге не нашлось (${cards.length} чужих совпадений)`);
+    return;
+  }
+  const found = String(hit.urn || '');
+  if (found === a.urn) { same.push(a.fqn); return; }
+  rows.push({ fqn: a.fqn, was: a.urn, now: found });
+});
+
+say('ФАЗА G. НАСТОЯЩИЕ URN ВИТРИН — ПОИСКОМ ПО ИМЕНИ');
+say('');
+say(`Спрошено витрин: ${asked.length}. Совпало с реестром: ${same.length}. ` +
+    `Надо ПРАВИТЬ: ${rows.length}. Не нашлось: ${miss.length}.`);
+
+if (rows.length) {
+  say('');
+  say('ЗАМЕНИТЬ В kb/index.md, колонка dd_urn:');
+  for (const r of rows) {
+    say('');
+    say(`  ${r.fqn}`);
+    say(`    было:  ${r.was}`);
+    say(`    стало: ${r.now}`);
+  }
+}
+if (miss.length) {
+  say('');
+  say('В КАТАЛОГЕ НЕ НАШЛОСЬ — и это тоже ответ:');
+  for (const m of miss) say('  — ' + m);
+  say('');
+  say('По таким витринам описаний полей не будет вовсе: их нет в каталоге.');
+  say('Состав полей бот добирает из данных (information_schema), а смысл');
+  say('поля остаётся за статьёй. Строку из реестра НЕ УДАЛЯТЬ: без dd_urn');
+  say('код не поймёт, что это витрина, — но и верить ему как URN нельзя.');
+}
+if (same.length) {
+  say('');
+  say(`Подтверждены как есть (${same.length}): ${same.join(', ')}`);
+}
+
+return [{ json: { report: out.join('\n') } }];
+"""
+
+nodes.append(
+    node("Shape urns", "n8n-nodes-base.code", 2, [400, 1300],
+         {"mode": "runOnceForAllItems", "jsCode": SHAPE_URNS_JS})
+)
+
+
 CHAIN = (
     ["Run recon"]
     + [n for n, _ in PHASE_A]
@@ -1179,6 +1334,7 @@ CHAIN = (
     + ["Shape probes"]
     + [n for n, _ in PHASE_D]
     + ["Shape values"]
+    + ["Tables to resolve", "Search table", "Shape urns"]
 )
 conn = {
     a: {"main": [[{"node": b, "type": "main", "index": 0}]]}
@@ -1215,6 +1371,7 @@ print("Что читать, если всё-таки прогоняете:")
 print("  «Shape recon»  — где у отчёта владелец")
 print("  «Search probe» — форма тела и ответа POST /search/query")
 print("  «Shape probes» — связи таблицы, источники отчёта, форма поиска")
+print("  «Shape urns»   — НАСТОЯЩИЕ URN витрин, готовая колонка для реестра")
 print("  «Shape values» — видит ли Trino витрины, кардинальность поля")
 print("                   и чем отказ по недоступной таблице отличается")
 print("                   от пустого результата")

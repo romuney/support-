@@ -3055,6 +3055,57 @@ line('52. ИДЕНТИФИКАТОР БЕЗ ДЕФИСОВ — ТОЖЕ ИДЕН
     /НЕ предлагай заказчику/.test(block));
 }
 
+// ===================================================================== 53
+line('53. «КАТАЛОГ ОТВЕТИЛ» И «КАТАЛОГ ДАЛ СОСТАВ» — РАЗНЫЕ ВЕЩИ');
+{
+  const URN_KIDS = 'urn:dd:tables:greenplum:table:' +
+    'chrono_peoplehub_masterid.individualchildren_public';
+  const PLAN = {
+    files: [], domains: [], dd: [{ urn: URN_TABLE, hint: '' }, { urn: URN_KIDS, hint: '' }],
+    dd_count: 2, unit_link_kind: '', unit_link_id: '',
+  };
+  const mat = (unit) => new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') return { first: () => ({ json: PLAN }) };
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') return { all: () => [
+        { json: { dd_meta: 'ВСЕ ПОЛЯ ТАБЛИЦЫ:\n\nmdm_employee_rk, last_day_flg' } },
+        // Шейпер на неверном URN возвращает НЕПУСТОЙ текст — именно на этом
+        // объект и попадал в «метаданные получены».
+        { json: { dd_meta: 'ОШИБКИ DD: карточка объекта: HTTP 404 — URN неверный.' } },
+      ] };
+      if (n === 'Lookup result') {
+        if (unit === null) throw new Error('node not executed');
+        return { first: () => ({ json: unit }) };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  const m = mat(null);
+  check('витрина без состава полей НАЗВАНА',
+    m.dd_no_fields.length === 1 && m.dd_no_fields[0] === URN_KIDS);
+  check('а та, что состав дала, в этот список не попала',
+    !m.dd_no_fields.includes(URN_TABLE));
+
+  // Джун должен увидеть строку и понять, что чинить: не доступ и не пробел
+  // базы, а одну строку реестра.
+  const fin = js('Parse answer');
+  const parsed = new Function('$', '$json', fin)(
+    (n) => {
+      if (n === 'When called by adapter') return { first: () => ({ json: { question: 'q' } }) };
+      if (n === 'Plan') return { first: () => ({ json: {} }) };
+      if (n === 'Build materials') return { first: () => ({ json: m }) };
+      if (n === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+      throw new Error('node not executed: ' + n);
+    }, { output: 'ЧЕРНОВИК ОТВЕТА: текст\nУВЕРЕННОСТЬ: высокая' })[0].json;
+  check('признак доехал до разбора', parsed.dd_no_fields.length === 1);
+  check('и «Задача для базы» называет строку реестра, а не доступ',
+    parsed.kb_tasks.some((t) => /URN в реестре не отдал состав полей/.test(t)) &&
+    parsed.kb_tasks.some((t) => /kb\/index\.md/.test(t)));
+  check('и не выдаёт это за пробел базы',
+    !parsed.kb_tasks.some((t) => /URN в реестре не отдал[\s\S]*владелец не заполнил/.test(t)));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
