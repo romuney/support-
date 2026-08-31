@@ -2322,7 +2322,7 @@ line('43. ДВЕ ВИТРИНЫ: срез не уезжает к чужой та
     both.every((i) => i.check_sql.includes('AS tbl')));
 }
 
-// ===================================================================== 44
+// ===================================================================== 48
 line('44. ВЫДУМАННОЕ ИМЯ ПОЛЯ И ПОТЕРЯННЫЕ БЛОКИ ВТОРОГО ПРОХОДА');
 {
   const parseJs = js('Parse answer');
@@ -2615,6 +2615,223 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
   const mixed = run(MIXED, "where management_unit_id = 'e289067b-26b6-44f2-917e-668d1ea65cc5'");
   check('поле из соседнего блока не приписано чужой витрине',
     mixed[0].check_table === 'prod_v_dds.management_unit');
+}
+
+// ===================================================================== 48
+line('48. ССЫЛКА НА ЮНИТ: КЛЮЧ ДОБЫВАЕТ КОД, А НЕ ПЛЕЙСХОЛДЕР В ТЗ');
+{
+  const UUID = 'e289067b-26b6-44f2-917e-668d1ea65cc5';
+  const runUnitSql = (plan) =>
+    new Function('$', '$json', js('Build unit SQL'))(
+      (n) => {
+        if (n === 'Plan') return { first: () => ({ json: plan }) };
+        throw new Error('node not executed: ' + n);
+      }, {})[0].json;
+
+  const mgmt = runUnitSql({ unit_link_kind: 'management', unit_link_id: UUID });
+  check('запрос собран', mgmt.unit_needed === true && mgmt.unit_sql.length > 0);
+  check('справочник — управленческий',
+    /prod_v_dds\.management_unit/.test(mgmt.unit_sql));
+  check('идентификатор подставлен ДОСЛОВНО, а не кусками',
+    mgmt.unit_sql.includes("'" + UUID + "'"));
+  // Живой прогон 2026-08-31 разложил uuid на `%26b6%`, `%44f2%`, `%917e%`
+  // и просканировал весь справочник. Точный идентификатор ищется равенством.
+  check('LIKE по идентификатору не собирается', !/LIKE\s+'%/.test(mgmt.unit_sql));
+  check('фильтр версии на месте', /valid_to_dttm/.test(mgmt.unit_sql));
+  check('признак удаления на месте', /deleted_flg/.test(mgmt.unit_sql));
+  // Второй шаг рецепта — «на каком уровне лежит этот rk» — идёт тем же
+  // запросом: зависимость не повод ходить дважды.
+  check('второй шаг рецепта в том же запросе',
+    /management_unit_lvl_num/.test(mgmt.unit_sql) &&
+    /mdm_employee_structure_d/.test(mgmt.unit_sql));
+  // LEFT, а не INNER: пустой юнет иначе выглядел бы как ненайденный,
+  // и автор сказал бы заказчику неправду про его же ссылку.
+  check('джойн LEFT, пустой юнит не читается как ненайденный',
+    /LEFT JOIN/.test(mgmt.unit_sql));
+  check('срез витрины сотрудников в джойне',
+    /last_day_flg = 1/.test(mgmt.unit_sql) &&
+    /company_fire_flg = 0/.test(mgmt.unit_sql));
+  check('перенос строки настоящий, а не литерал \\n',
+    mgmt.unit_sql.includes('\n') && !mgmt.unit_sql.includes('\\n'));
+
+  const fn = runUnitSql({ unit_link_kind: 'functional', unit_link_id: UUID });
+  check('Каталог продуктов — свой справочник',
+    /prod_v_dds\.functional_unit/.test(fn.unit_sql));
+  check('и close_flg, без которого закрытые юниты попадут в выборку',
+    /close_flg/.test(fn.unit_sql));
+  check('мост в управленческую структуру взят из поля, а не по названию',
+    /management_unit_rk/.test(fn.unit_sql));
+
+  check('ссылки нет — запроса нет',
+    runUnitSql({}).unit_needed === false);
+
+  // --- разбор ответа: четыре исхода звучат по-разному, потому что чинятся
+  //     в разных местах.
+  const runUnitRes = (rows, plan = { unit_needed: true, unit_kind: 'management',
+                                     unit_id: UUID, unit_table: 'prod_v_dds.management_unit' }) =>
+    new Function('$', '$json', js('Unit result'))(
+      (n) => {
+        if (n === 'Build unit SQL') return { first: () => ({ json: plan }) };
+        if (n === 'Resolve unit') {
+          if (rows === null) throw new Error('node not executed');
+          return { all: () => rows.map((json) => ({ json })) };
+        }
+        throw new Error('node not executed: ' + n);
+      }, {})[0].json;
+
+  const found = runUnitRes([
+    { unit_rk: '10045', unit_nm: 'Human Capital', lvl_num: '4',
+      mapped_nm: 'Human Capital', emp_cnt: 312 },
+  ]);
+  check('ключ извлечён', found.unit_state === 'found' && found.unit_rk === '10045');
+  check('уровень извлечён', found.unit_levels.join(',') === '4');
+  check('численность посчитана', found.unit_emp_cnt === 312);
+
+  check('ноль строк — это НЕ НАЙДЕН, определённый факт',
+    runUnitRes([]).unit_state === 'not_found');
+  check('отказ запроса — отдельный исход',
+    runUnitRes([{ error: 'Table does not exist' }]).unit_state === 'failed');
+  check('невыполнившийся узел — третий исход',
+    runUnitRes(null).unit_state === 'never_ran');
+  check('ссылки не было — ветка молчит',
+    runUnitRes(null, { unit_needed: false }).unit_state === 'skip');
+
+  // --- материалы: автор получает ключ как ФАКТ, а не задание.
+  const runMat = (unit) => {
+    const $ = (name) => {
+      if (name === 'Plan') {
+        return { first: () => ({ json: {
+          files: [], domains: [], dd: [], dd_count: 0,
+          unit_link_kind: 'management', unit_link_id: UUID,
+        } }) };
+      }
+      if (name === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (name === 'Unit result') {
+        if (unit === null) throw new Error('node not executed');
+        return { first: () => ({ json: unit }) };
+      }
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', js('Build materials'))($, {})[0].json;
+  };
+
+  const mFound = runMat(found);
+  check('ключ уехал автору', mFound.materials.includes('10045'));
+  check('и название юнита тоже', mFound.materials.includes('Human Capital'));
+  check('уровень назван полем, а не числом',
+    /lvl4_mapped_management_unit_rk/.test(mFound.materials));
+  check('плейсхолдер запрещён прямым текстом',
+    /ПЛЕЙСХОЛДЕР/i.test(mFound.materials));
+  check('исход доехал до выхода', mFound.unit_state === 'found');
+
+  const mNone = runMat(runUnitRes([]));
+  check('ненайденный юнит назван определённо, а не «проверить не удалось»',
+    /НЕ НАЙДЕН/.test(mNone.materials));
+  check('и автору запрещено искать id среди названий',
+    /НЕ ищи этот идентификатор/.test(mNone.materials));
+
+  const mFail = runMat(runUnitRes([{ error: 'boom' }]));
+  check('отказ назван отказом, а не отсутствием юнита',
+    /ПОЛУЧИТЬ НЕ УДАЛОСЬ/.test(mFail.materials) && !/НЕ НАЙДЕН/.test(mFail.materials));
+
+  // --- проверка значений: разрешённый идентификатор второй раз не гоняем.
+  const META = '=== МЕТАДАННЫЕ КАТАЛОГА: ' +
+    'urn:dd:tables:dlh:table:dds.management_unit ===\n' +
+    'ПОЛЯ: management_unit_rk, management_unit_id, valid_to_dttm';
+  const $chk = (name) => ({ first: () => ({
+    json: name === 'Parse answer'
+      ? { draft: "where management_unit_id = '" + UUID + "'" }
+      : { materials: META, unit_link_id: UUID },
+  }) });
+  const chk = new Function('$', '$json', js('Build check SQL'))(
+    $chk, { draft: "where management_unit_id = '" + UUID + "'", check_values: '' })
+    .map((i) => i.json);
+  check('идентификатор юнита в проверку значений не идёт второй раз',
+    chk[0].check_sql === '' &&
+    chk[0].check_skipped.some((x) => /уже разрешён кодом/.test(x)));
+}
+
+// ===================================================================== 49
+line('49. ПЛЕЙСХОЛДЕР В ГОТОВОМ ЗАПРОСЕ НАЗЫВАЕТСЯ');
+{
+  const parseJs = js('Parse answer');
+  const runParse = (spec) => {
+    const $ = (name) => {
+      if (name === 'When called by adapter') return { first: () => ({ json: { question: 'q' } }) };
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      if (name === 'Build materials') {
+        return { first: () => ({ json: { materials: 'x', has_materials: true } }) };
+      }
+      if (name === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', parseJs)($, {
+      output: 'ЧЕРНОВИК ОТВЕТА: текст\nУВЕРЕННОСТЬ: высокая\n' +
+        'ТЗ ДЛЯ АНАЛИТИКА:\n' + spec,
+    })[0].json;
+  };
+
+  // Ровно то, что уехало заказчику 2026-08-31: запрос, который нельзя
+  // скопировать и запустить, а «шаг 1» выполнять ему нечем.
+  const BAD = '```sql\nselect * from prod_v_emart.mdm_employee_structure_d\n' +
+    "where lvl5_mapped_management_unit_rk = '<rk из шага 1>'\n```";
+  check('плейсхолдер найден', runParse(BAD).draft_placeholders.length === 1);
+  check('и назван дословно',
+    runParse(BAD).draft_placeholders[0] === '<rk из шага 1>');
+
+  const GOOD = '```sql\nselect * from prod_v_emart.mdm_employee_structure_d\n' +
+    "where lvl5_mapped_management_unit_rk = '10045'\n" +
+    '  and birthdate <= date \'2026-01-01\'\n' +
+    '  and status <> \'closed\'\n```';
+  // Ложная тревога здесь дороже промаха: строка, которая горит на верном
+  // запросе, обесценивает и себя, и соседние.
+  check('сравнения <= и <> тревогу не поднимают',
+    runParse(GOOD).draft_placeholders.length === 0);
+
+  // Плейсхолдер в ПРОЗЕ — это не запрос: рецепт сам велит подписывать
+  // фильтр названием подразделения в комментарии.
+  const PROSE = 'Гранулярность: одна строка = сотрудник.\n' +
+    'Подставьте <название подразделения> в комментарий.';
+  check('вне блока ```sql``` не проверяется',
+    runParse(PROSE).draft_placeholders.length === 0);
+}
+
+// ===================================================================== 50
+line('50. ГРАНУЛЯРНОСТЬ ВИТРИНЫ ДЕТЕЙ ПОДТВЕРЖДЕНА, А НЕ «УТОЧНИТЬ»');
+{
+  const kbDir = REGISTRY_AT.replace(/index\.md$/, '');
+  const kids = fs.readFileSync(kbDir + 'tables/employee-children.md', 'utf8');
+
+  // Бот честно писал заказчику «гранулярность и первичный ключ не
+  // подтверждены» — и был прав: в статье так и стояло. Владелец подтвердил
+  // 2026-08-31, и пока статья говорит «уточнить», бот будет повторять это
+  // в каждом ответе про детей.
+  const gran = (kids.match(/## Гранулярность строки[\s\S]*?(?=\n## )/) || [''])[0];
+  const pk = (kids.match(/## Первичный ключ[\s\S]*?(?=\n## )/) || [''])[0];
+  check('гранулярность больше не «не подтверждено»',
+    gran.length > 0 && !/не подтверждено/i.test(gran));
+  check('первичный ключ больше не «не подтверждено»',
+    pk.length > 0 && !/не подтверждено/i.test(pk));
+  check('гранулярность названа: одна строка = один ребёнок',
+    /одна строка = один ребёнок/i.test(gran));
+  check('первичный ключ назван', /`id`/.test(pk));
+
+  // Главное следствие, а не педантизм: слева «сотрудник», справа «ребёнок»,
+  // и джойн выравнивает их в пользу правой стороны. count(*) после такого
+  // джойна считает детей и называет это сотрудниками — ошибка не падает
+  // и выглядит правдоподобно.
+  check('размножение строк при джойне названо',
+    /размножа/i.test(kids) || /замнож/i.test(kids));
+  check('и назван способ считать сотрудников',
+    /count\(distinct/i.test(kids));
+  check('агрегат ДО джойна показан примером',
+    /GROUP BY individualid/i.test(kids));
+
+  // Политика: запрета на выгрузку нет, есть согласование. Прежняя редакция
+  // запрещала «в любом виде, включая агрегаты» — и противоречила разделу
+  // «Персональные данные» той же статьи, где агрегат назван типовым.
+  check('агрегаты не запрещены — это типовой сценарий',
+    !/включая агрегаты/i.test(kids));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

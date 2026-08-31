@@ -1606,6 +1606,238 @@ core_nodes += [
     ),
 ]
 
+# ------------------------------------------ 1.35 разрешение ссылки на юнит
+#
+# ФЛОУ САМ ХОДИТ ЗА КЛЮЧОМ ЮНИТА, А НЕ ОПИСЫВАЕТ, КАК ЭТО СДЕЛАТЬ.
+#
+# Живой прогон 2026-08-31: ссылка разобрана, структура определена, рецепт
+# доехал до автора — и в ТЗ уехало «шаг 1: select management_unit_rk …»,
+# а шаги 2 и 3 остались с плейсхолдером `'<rk из шага 1>'`. Заказчик
+# получил не запрос, а инструкцию, как его написать: скопировать и запустить
+# нельзя, а перевод с языка заказчика на язык витрин бот УЖЕ сделал —
+# и потерял его на последнем шаге.
+#
+# Причина конструктивная, и она не в промпте: у автора нет и не может быть
+# доступа к данным. Он не может выполнить шаг 1 и потому обязан оставить
+# плейсхолдер — сколько его об этом ни просить. А у КОДА доступ есть: та же
+# нода Trino, которой проверяются значения, стоит в этом же флоу.
+#
+# Поэтому разрешение переехало в код, ровно как мастера домена, согласование
+# ИБ и решение «проверять ли значения»: код знает вид ссылки (он же её
+# и разобрал), знает справочник и имена полей — они КОНСТАНТЫ РЕЦЕПТА,
+# а не инвентарь, — и ходит за ключом ДО автора. Автор получает готовый
+# `rk`, название юнита и уровень как ФАКТ и пишет финальный запрос
+# с подставленными значениями.
+#
+# Побочно это чинит второй отказ того же прогона: uuid уходил в проверку
+# значений и не проходил отбор «нет в инвентаре», потому что URN справочника
+# в реестре собран по схеме и каталогом не подтверждён. Теперь инвентарь
+# для этого шага не нужен вовсе — имена полей берутся из рецепта, и промах
+# URN не может тихо выключить поиск.
+UNIT_SQL_JS = r"""
+// Запрос собирает КОД: справочник, имена полей, фильтр версии и срез —
+// константы рецепта `rc-unit-link`, а не догадка модели. Модели тут нечего
+// выбирать: вид ссылки однозначно называет структуру, а структура —
+// справочник.
+const plan = $('Plan').first().json ?? {};
+const kind = String(plan.unit_link_kind || '');
+const id = String(plan.unit_link_id || '');
+
+if (!kind || !id) {
+  return [{ json: { unit_needed: false, unit_sql: '', unit_kind: '', unit_id: '' } }];
+}
+
+const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+// Фильтр версии и признаки удаления — через CAST в varchar: тип у флагов
+// разный от витрины к витрине (`deleted_flg = 0` в одной, `= false`
+// в другой), а отказ запроса здесь стоит дороже лишнего приведения —
+// он превращает разрешённую ссылку в «проверить не удалось».
+const alive = [
+  "CAST(valid_to_dttm AS varchar) LIKE '5999%'",
+  "CAST(deleted_flg AS varchar) IN ('0', 'false')",
+];
+
+let sql = '';
+if (kind === 'management') {
+  // ДВА ШАГА РЕЦЕПТА В ОДНОМ ЗАПРОСЕ. Шаг 1 — `id` → `rk` по справочнику,
+  // шаг 2 — «на каком уровне лежит этот `rk`» по витрине сотрудников.
+  // Второй шаг зависит от результата первого, но это не повод ходить
+  // дважды: подзапрос делает ту же зависимость внутри одного обращения.
+  //
+  // LEFT JOIN, а не INNER: юнит может существовать в справочнике и не иметь
+  // ни одного активного сотрудника. При INNER такой юнит вернул бы ноль
+  // строк — то есть выглядел бы как «идентификатор не найден», и автор
+  // сказал бы заказчику неправду про его же ссылку.
+  sql =
+    'WITH u AS (\n' +
+    '  SELECT CAST(management_unit_rk AS varchar) AS rk,\n' +
+    '         CAST(management_unit_nm AS varchar) AS nm\n' +
+    '  FROM prod_v_dds.management_unit\n' +
+    '  WHERE CAST(management_unit_id AS varchar) = ' + q(id) + '\n' +
+    '    AND ' + alive.join('\n    AND ') + '\n' +
+    ')\n' +
+    'SELECT u.rk AS unit_rk,\n' +
+    '       u.nm AS unit_nm,\n' +
+    '       CAST(e.management_unit_lvl_num AS varchar) AS lvl_num,\n' +
+    '       CAST(e.mapped_management_unit_nm AS varchar) AS mapped_nm,\n' +
+    '       count(e.mdm_employee_rk) AS emp_cnt\n' +
+    'FROM u\n' +
+    'LEFT JOIN prod_v_emart.mdm_employee_structure_d e\n' +
+    '  ON CAST(e.mapped_management_unit_rk AS varchar) = u.rk\n' +
+    ' AND e.last_day_flg = 1\n' +
+    ' AND e.active_employee_flg = 1\n' +
+    ' AND e.company_fire_flg = 0\n' +
+    'GROUP BY u.rk, u.nm, e.management_unit_lvl_num, e.mapped_management_unit_nm\n' +
+    'ORDER BY emp_cnt DESC\n' +
+    'LIMIT 10';
+} else {
+  // Каталог продуктов: шага «найти уровень» здесь нет — с `functional_unit_rk`
+  // идут в `t-functional-role`, где уровень не при чём. Зато берём
+  // `management_unit_rk`: это единственный явный мост между структурами,
+  // и достраивать его по названиям рецепт прямо запрещает.
+  sql =
+    'SELECT CAST(functional_unit_rk AS varchar) AS unit_rk,\n' +
+    '       CAST(functional_unit_nm AS varchar) AS unit_nm,\n' +
+    '       CAST(management_unit_rk AS varchar) AS mgmt_rk\n' +
+    'FROM prod_v_dds.functional_unit\n' +
+    'WHERE CAST(functional_unit_id AS varchar) = ' + q(id) + '\n' +
+    "  AND CAST(close_flg AS varchar) IN ('0', 'false')\n" +
+    '  AND ' + alive.join('\n  AND ') + '\n' +
+    'LIMIT 5';
+}
+
+return [{ json: {
+  unit_needed: true,
+  unit_sql: sql,
+  unit_kind: kind,
+  unit_id: id,
+  unit_table: kind === 'management' ? 'prod_v_dds.management_unit'
+                                    : 'prod_v_dds.functional_unit',
+} }];
+"""
+
+# Разбор ответа справочника. Исходы РАЗНЫЕ и звучат по-разному, потому что
+# чинятся в разных местах — тот же принцип, что у пяти исходов проверки
+# значений:
+#   нашлось          → у автора есть rk, уровень и название: подставляй;
+#   ноль строк       → это ОТВЕТ, а не отказ: такого id в справочнике нет
+#                      (закрыт, удалён, ссылка из чужой структуры);
+#   отказ запроса    → поломка бота, утверждать про юнит нельзя ничего;
+#   узел не выполнен → ветка оборвалась раньше, чинить проводку в n8n.
+UNIT_RESULT_JS = r"""
+const plan = $('Build unit SQL').first().json ?? {};
+if (!plan.unit_needed) {
+  return [{ json: { unit_state: 'skip' } }];
+}
+
+// «Узел не выполнялся» отличается от «выполнился и вернул ноль строк»
+// ТОЛЬКО броском $(): при alwaysOutputData ноль строк приезжает пустым
+// элементом, а список элементов может оказаться и пустым. Считать пустой
+// список за «не выполнялся» значит превратить определённое «такого юнита
+// в справочнике нет» в размытое «проверить не удалось» — то есть ровно
+// в тот диагноз, ради разведения которого ветка и написана.
+let items = null;
+try { items = $('Resolve unit').all().map((i) => i.json); } catch (e) { items = null; }
+
+let rows = [];
+let failed = '';
+for (const it of (items || [])) {
+  if (!it || typeof it !== 'object') continue;
+  if (Object.keys(it).length === 0) continue;        // пустой ответ = строк нет
+  if (it.error || it.message) { failed = String(it.error || it.message); continue; }
+  const list = Array.isArray(it.data) ? it.data : [it];
+  for (const r of list) if (r && r.unit_rk !== undefined && r.unit_rk !== null) rows.push(r);
+}
+
+if (items === null) {
+  return [{ json: { unit_state: 'never_ran', unit_kind: plan.unit_kind,
+                    unit_id: plan.unit_id, unit_table: plan.unit_table } }];
+}
+if (failed) {
+  return [{ json: { unit_state: 'failed', unit_error: failed,
+                    unit_kind: plan.unit_kind, unit_id: plan.unit_id,
+                    unit_table: plan.unit_table } }];
+}
+if (!rows.length) {
+  return [{ json: { unit_state: 'not_found', unit_kind: plan.unit_kind,
+                    unit_id: plan.unit_id, unit_table: plan.unit_table } }];
+}
+
+// Ключ один — строки различаются уровнем и названием среза. Берём ключ
+// из первой строки: подзапрос справочника отфильтрован по версии, и разные
+// `rk` здесь означали бы, что фильтр версии не сработал; тогда об этом
+// надо сказать, а не выбирать молча.
+const keys = [...new Set(rows.map((r) => String(r.unit_rk)))];
+const levels = [...new Set(rows.map((r) => String(r.lvl_num || ''))
+                              .filter((v) => v && v !== 'null'))];
+const total = rows.reduce((a, r) => a + (Number(r.emp_cnt) || 0), 0);
+
+return [{ json: {
+  unit_state: 'found',
+  unit_kind: plan.unit_kind,
+  unit_id: plan.unit_id,
+  unit_table: plan.unit_table,
+  unit_rk: keys[0],
+  unit_rk_many: keys.length > 1 ? keys : [],
+  unit_nm: String(rows[0].unit_nm || ''),
+  unit_mgmt_rk: String(rows[0].mgmt_rk || ''),
+  unit_levels: levels,
+  unit_emp_cnt: total,
+  unit_rows: rows.slice(0, 10),
+} }];
+"""
+
+core_nodes += [
+    node(
+        "Build unit SQL",
+        "n8n-nodes-base.code",
+        2,
+        [1500, 560],
+        {"mode": "runOnceForAllItems", "jsCode": UNIT_SQL_JS},
+    ),
+    node(
+        "Need unit",
+        "n8n-nodes-base.if",
+        2.2,
+        [1720, 560],
+        {
+            "conditions": {
+                "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
+                "conditions": [
+                    {
+                        "id": "has-unit",
+                        "leftValue": "={{ $json.unit_needed }}",
+                        "rightValue": True,
+                        "operator": {"type": "boolean", "operation": "true", "singleValue": True},
+                    }
+                ],
+                "combinator": "and",
+            },
+            "looseTypeValidation": True,
+            "options": {},
+        },
+    ),
+    node(
+        "Resolve unit",
+        "n8n-nodes-base.noOp",
+        1,
+        [1940, 460],
+        {},
+    ),
+    node(
+        "Unit result",
+        "n8n-nodes-base.code",
+        2,
+        [2160, 560],
+        {"mode": "runOnceForAllItems", "jsCode": UNIT_RESULT_JS},
+    ),
+]
+
+# Нода Trino подставляется ниже, там же где «Check values»: её тип,
+# credential и имена полей берутся из собранного «Telemetry Flush», и вторая
+# копия описания разъехалась бы молча.
+UNIT_TRINO_NODE = "Resolve unit"
+
 # --------------------------------------------------- 1.4 сборка материалов
 #
 # Единственное место, где текст статей и метаданные DD склеиваются в то, что
@@ -1794,24 +2026,110 @@ if (routes.length) {
 // Разбор ссылки делает КОД, а не модель: вид ссылки однозначно называет
 // структуру, и угадывать здесь нечего. Автору остаётся написать запрос
 // по рецепту, который добран рядом.
+let unit = {};
+try { unit = $('Unit result').first().json ?? {}; } catch (e) { unit = {}; }
+const unitState = String(unit.unit_state || '');
+
 if (plan.unit_link_kind) {
   const isMgmt = plan.unit_link_kind === 'management';
-  parts.push(
-    '=== В ОБРАЩЕНИИ ССЫЛКА НА ЮНИТ ===\n' +
-      `Структура: ${isMgmt ? 'УПРАВЛЕНЧЕСКАЯ' : 'КАТАЛОГ ПРОДУКТОВ (продуктовая, функциональная)'}. ` +
-      'Определена по виду ссылки, не по догадке.\n' +
-      `Идентификатор юнита из ссылки: ${plan.unit_link_id}\n` +
-      'Это значение поля ' +
-      (isMgmt ? '`management_unit_id` в `prod_v_dds.management_unit`'
-              : '`functional_unit_id` в `prod_v_dds.functional_unit`') +
-      '. В основных витринах этого идентификатора НЕТ — там только `*_rk`. ' +
-      'Искать его среди названий подразделений или среди `*_rk` бессмысленно: ' +
-      'это разные поля, и «не нашлось» там ничего не означает.\n' +
-      'Порядок действий — в статье рецепта про ссылку на юнит, она среди ' +
-      'материалов: сначала по справочнику получить `rk`, потом по `rk` идти ' +
-      'в основные витрины. Запрос первого шага напиши в ТЗ целиком, ' +
-      'подставив идентификатор выше.',
-  );
+  const head =
+    `Структура: ${isMgmt ? 'УПРАВЛЕНЧЕСКАЯ' : 'КАТАЛОГ ПРОДУКТОВ (продуктовая, функциональная)'}. ` +
+    'Определена по виду ссылки, не по догадке.\n' +
+    `Идентификатор юнита из ссылки: ${plan.unit_link_id}\n`;
+
+  // КЛЮЧ УЖЕ ПОЛУЧЕН — И ЭТО ФАКТ, А НЕ ЗАДАНИЕ АВТОРУ.
+  //
+  // Раньше здесь стояло «запрос первого шага напиши в ТЗ» — и заказчик
+  // получал инструкцию вместо запроса: шаги 2 и 3 уезжали с плейсхолдером
+  // `'<rk из шага 1>'`. Иначе и быть не могло: у автора нет доступа
+  // к данным, выполнить первый шаг он не может физически.
+  //
+  // Теперь первый шаг выполнил код, и автору остаётся ровно то, что он
+  // умеет, — написать финальный запрос с подставленными значениями.
+  if (unitState === 'found') {
+    const lvls = Array.isArray(unit.unit_levels) ? unit.unit_levels : [];
+    const lines = [
+      head,
+      `КЛЮЧ ЮНИТА (rk): ${unit.unit_rk}`,
+      unit.unit_nm ? `НАЗВАНИЕ В СПРАВОЧНИКЕ: ${unit.unit_nm}` : '',
+      isMgmt && lvls.length
+        ? `УРОВЕНЬ УПРАВЛЕНЧЕСКОЙ СТРУКТУРЫ: ${lvls.join(', ')} — ` +
+          `значит фильтр ставится по полю ` +
+          lvls.map((n) => '`lvl' + n + '_mapped_management_unit_rk`').join(' или ') +
+          ` со значением '${unit.unit_rk}'.`
+        : '',
+      isMgmt && !lvls.length
+        ? 'УРОВЕНЬ НЕ ОПРЕДЕЛЁН: юнит есть в справочнике, но в витрине ' +
+          'сотрудников по этому ключу нет ни одной активной строки. ' +
+          'Скажи это заказчику прямо — возможно, юнит пустой или ссылка ' +
+          'на подразделение, где сотрудников не числится, — и не подбирай ' +
+          'другой юнит вместо этого.'
+        : '',
+      !isMgmt && unit.unit_mgmt_rk
+        ? `КЛЮЧ В УПРАВЛЕНЧЕСКОЙ СТРУКТУРЕ: ${unit.unit_mgmt_rk} — ` +
+          'это единственный явный мост между структурами, достраивать ' +
+          'соответствие по названиям нельзя.'
+        : '',
+      unit.unit_emp_cnt
+        ? `Активных сотрудников по этому ключу: ${unit.unit_emp_cnt} — ` +
+          'число для сверки, а не ответ на вопрос.'
+        : '',
+      (Array.isArray(unit.unit_rk_many) && unit.unit_rk_many.length)
+        ? 'ВНИМАНИЕ: справочник вернул НЕСКОЛЬКО ключей на один ' +
+          `идентификатор (${unit.unit_rk_many.join(', ')}). Так быть не должно ` +
+          'при фильтре версии — назови это заказчику и не выбирай ключ молча.'
+        : '',
+      'ЭТО УЖЕ ПРОВЕРЕНО В ДАННЫХ. Ключ и уровень подставляй в запрос ' +
+        'ДОСЛОВНО. ПЛЕЙСХОЛДЕРОВ ВРОДЕ `<rk из шага 1>` В ОТВЕТЕ БЫТЬ ' +
+        'НЕ ДОЛЖНО: запрос обязан запускаться копированием. Первый шаг ' +
+        'рецепта уже выполнен — переписывать его в ТЗ не нужно, ' +
+        'достаточно одной строки, откуда взялся ключ.',
+    ].filter(Boolean);
+    parts.push('=== ССЫЛКА НА ЮНИТ РАЗОБРАНА, КЛЮЧ ПОЛУЧЕН ===\n' + lines.join('\n'));
+  } else if (unitState === 'not_found') {
+    // НОЛЬ СТРОК ЗДЕСЬ — ОТВЕТ, А НЕ ОТКАЗ ПРОВЕРКИ. Слитые в один диагноз,
+    // они превращают твёрдое «такого юнита в справочнике нет» в размытое
+    // «проверить не удалось», а это разные сообщения заказчику.
+    parts.push(
+      '=== ССЫЛКА НА ЮНИТ: ИДЕНТИФИКАТОР НЕ НАЙДЕН ===\n' + head +
+        `Справочник ${unit.unit_table} по этому идентификатору не вернул ` +
+        'ни одной актуальной строки. Это ОПРЕДЕЛЁННЫЙ ФАКТ, а не сбой: ' +
+        'юнит закрыт, удалён, либо ссылка не из этой структуры.\n' +
+        'Так и скажи заказчику — «по этой ссылке юнит в справочнике ' +
+        'не нашёлся» — и попроси прислать название подразделения или ' +
+        'другую ссылку. НЕ ищи этот идентификатор среди названий ' +
+        'подразделений и среди `*_rk`: его там нет по устройству витрин, ' +
+        'и «не нашлось» там ничего не значит. НЕ подбирай похожий юнит.',
+    );
+  } else if (unitState === 'failed' || unitState === 'never_ran') {
+    parts.push(
+      '=== ССЫЛКА НА ЮНИТ: КЛЮЧ ПОЛУЧИТЬ НЕ УДАЛОСЬ ===\n' + head +
+        (unitState === 'failed'
+          ? 'Запрос к справочнику отказал: ' + String(unit.unit_error || '') + '.'
+          : 'Узел разрешения ссылки не выполнялся — это поломка бота.') +
+        '\nЗначит ключа у нас НЕТ. Не выдумывай его и не подставляй ' +
+        'плейсхолдер в запрос как будто он известен: скажи, что ключ ' +
+        'юнита по ссылке получить не удалось, и попроси название ' +
+        'подразделения. Порядок действий — в статье рецепта про ссылку ' +
+        'на юнит, она среди материалов.',
+    );
+  } else {
+    // Ветка не отработала вовсе (ссылка разобрана, а узлы до сборки
+    // не дошли) — старое поведение как запасное: рецепт есть, автор
+    // пишет запрос первого шага сам.
+    parts.push(
+      '=== В ОБРАЩЕНИИ ССЫЛКА НА ЮНИТ ===\n' + head +
+        'Это значение поля ' +
+        (isMgmt ? '`management_unit_id` в `prod_v_dds.management_unit`'
+                : '`functional_unit_id` в `prod_v_dds.functional_unit`') +
+        '. В основных витринах этого идентификатора НЕТ — там только `*_rk`. ' +
+        'Искать его среди названий подразделений или среди `*_rk` ' +
+        'бессмысленно: это разные поля.\n' +
+        'Порядок действий — в статье рецепта про ссылку на юнит, она среди ' +
+        'материалов: сначала по справочнику получить `rk`, потом по `rk` ' +
+        'идти в основные витрины.',
+    );
+  }
 }
 
 // Запрошенные, но не дошедшие до вызова вовсе (ветка оборвалась раньше).
@@ -2123,6 +2441,13 @@ return [{
     // Ссылка на юнит: признак и разобранный id проезжают до «Parse answer»
     // и телеметрии. Разбор делает «Plan», здесь только транзит.
     unit_link_kind: String(plan.unit_link_kind || ''),
+    // Исход разрешения ссылки: «нашёлся», «нет такого», «отказ», «не
+    // выполнялся». Слитые в один диагноз, они отправляют чинить не то —
+    // ровно как ddFailed и ddMissing до 2026-08-27.
+    unit_state: unitState,
+    unit_rk: String(unit.unit_rk || ''),
+    unit_nm: String(unit.unit_nm || ''),
+    unit_levels: Array.isArray(unit.unit_levels) ? unit.unit_levels : [],
     unit_link_id: String(plan.unit_link_id || ''),
     articles_by_id: Array.isArray(plan.articles_by_id) ? plan.articles_by_id : [],
     // Отказ чтения реестра: проезжает до «Parse answer», уверенности
@@ -2651,6 +2976,29 @@ out.articles_by_id = Array.isArray(mat.articles_by_id)
 // id → rk через справочник. Доля показывает, насколько он частый, а без неё
 // «бот не понял ссылку» и «в базе нет ответа» по логу неразличимы.
 out.unit_link = String(mat.unit_link_kind || '');
+// Исход разрешения. Доля `not_found` — метрика того, насколько живые ссылки
+// вообще резолвятся; доля `failed` — метрика доступности справочника.
+out.unit_state = String(mat.unit_state || '');
+out.unit_rk = String(mat.unit_rk || '');
+
+// ПЛЕЙСХОЛДЕР В ГОТОВОМ ЗАПРОСЕ — ЭТО НЕ ЗАПРОС.
+//
+// ТЗ с 2026-08-31 — готовый SQL, который заказчик копирует и запускает.
+// Строка `lvl5_mapped_management_unit_rk = '<rk из шага 1>'` выглядит как
+// запрос и запросом не является: копирование даёт синтаксическую ошибку,
+// а «шаг 1» заказчику выполнять нечем — ради этого бот и звали.
+//
+// Проверка узкая намеренно: ищется угловая скобка с содержимым, а не любое
+// «уточните». Сравнения `<=` и `<>` под неё не подходят, а свободный текст
+// вне блока запроса не проверяется вовсе — плейсхолдер в прозе («<название
+// подразделения>» в комментарии к фильтру) рецепт как раз и предписывает.
+const sqlOnly = String(out.tech_spec || '')
+  .split('```')
+  .filter((_, i) => i % 2 === 1)
+  .join('\n');
+const holes = [...new Set((sqlOnly.match(/<[^<>\n]{2,60}>/g) || [])
+  .filter((h) => !/^<=|^<>/.test(h)))];
+out.draft_placeholders = holes.slice(0, 5);
 // Реестр не прочитан — отвечать было не по чему вовсе. Это ПОЛОМКА
 // ДОСТУПА, а не пробел базы: уверенность падает до «нет ответа», потому что
 // средняя читалась бы как рабочий черновик.
@@ -3392,8 +3740,19 @@ const matNorm = String(mat.materials || '')
 const documented = (f, v) =>
   matNorm.includes(String(f).toLowerCase() + '=' + String(v).toLowerCase());
 
+// Идентификатор юнита из ссылки код УЖЕ разрешил своим запросом, до автора.
+// Проверять его второй раз значит платить сканом справочника за ответ,
+// который лежит в материалах, — и, хуже, получить «не подтверждено» на том,
+// что подтверждено: у справочника юнитов свой срез, а общий отбор пар про
+// него не знает.
+const unitId = String(mat.unit_link_id || '').toLowerCase();
+
 for (const p of pairs) {
   if (use.length >= MAX_PAIRS) { skipped.push(`${p.field} (потолок ${MAX_PAIRS} пар)`); continue; }
+  if (unitId && String(p.value).toLowerCase() === unitId) {
+    skipped.push(`${p.field} (идентификатор юнита уже разрешён кодом)`);
+    continue;
+  }
   if (documented(p.field, p.value)) {
     skipped.push(`${p.field} (константа из статьи, проверять нечего)`);
     continue;
@@ -4121,6 +4480,30 @@ check_values = {
 check_result = node("Check result", "n8n-nodes-base.code", 2, [2500, 220],
                     {"jsCode": CHECK_RESULT_JS})
 
+# Нода «Resolve unit» собрана выше заглушкой noOp, потому что описание Trino
+# (_TRINO) читается из собранного «Telemetry Flush» ниже по файлу. Здесь она
+# заменяется на настоящую — ОДНИМ описанием на две ноды, а не второй копией:
+# аккаунт и имена полей CUSTOM.trino подтверждены живым прогоном 2026-08-17,
+# и разъехаться им нечем только так.
+#
+# alwaysOutputData по той же причине, что у «Check values»: ноль строк —
+# нормальный и осмысленный исход («такого id в справочнике нет»), а n8n
+# на пустом выходе останавливает выполнение. Без флага ненайденный юнит
+# убивал бы весь конвейер ДО автора, и в канале это выглядело бы как
+# «бот промолчал».
+for _n in core_nodes:
+    if _n["name"] == UNIT_TRINO_NODE:
+        _n["parameters"] = {"query": "={{ $json.unit_sql }}",
+                            **copy.deepcopy(_TRINO["options"])}
+        _n["type"] = _TRINO["type"]
+        _n["typeVersion"] = _TRINO["typeVersion"]
+        _n["credentials"] = copy.deepcopy(_TRINO["credentials"])
+        _n["alwaysOutputData"] = True
+        _n["onError"] = "continueRegularOutput"
+        break
+else:
+    raise SystemExit(f"нет ноды {UNIT_TRINO_NODE} в ядре — проверь сборку")
+
 # Гейт доспроса: пар не нашлось, а автор сам написал, что значение
 # не проверено. Признак считает «Build check SQL» — там же, где разбор
 # промахнулся, и по тем же данным.
@@ -4228,10 +4611,22 @@ core_conn["Collect articles"] = {
 core_conn["Need DD"] = {
     "main": [
         [{"node": "Split DD", "type": "main", "index": 0}],
+        [{"node": "Build unit SQL", "type": "main", "index": 0}],
+    ]
+}
+core_conn.update(chain("Split DD", "Call DD Lookup", "Build unit SQL"))
+
+# Разрешение ссылки на юнит стоит ДО автора и в той же цепочке, а не веером:
+# автору нужен готовый `rk`, а не инструкция, как его получить. Ветки IF
+# сходятся на «Build materials» — сходящиеся ветви нормальны, веер запрещён.
+core_conn["Need unit"] = {
+    "main": [
+        [{"node": "Resolve unit", "type": "main", "index": 0}],
         [{"node": "Build materials", "type": "main", "index": 0}],
     ]
 }
-core_conn.update(chain("Split DD", "Call DD Lookup", "Build materials"))
+core_conn.update(chain("Build unit SQL", "Need unit"))
+core_conn.update(chain("Resolve unit", "Unit result", "Build materials"))
 
 core_conn.update(chain("Build materials", "Author", "Parse answer"))
 
@@ -5064,6 +5459,14 @@ return [{ json: {
     // что бот вообще может сделать.
     experts_invented: (Array.isArray(a.experts_invented) ? a.experts_invented : []).length,
     draft_own_tools: (Array.isArray(a.draft_own_tools) ? a.draft_own_tools : []).length,
+    // Разрешение ссылки на юнит: доля `not_found` показывает, насколько
+    // живые ссылки резолвятся, доля `failed` — доступность справочника.
+    // Без разреза «бот не понял ссылку» и «такого юнита нет» неразличимы.
+    unit_state: String(a.unit_state || ''),
+    // Плейсхолдер в готовом запросе: ТЗ, которое нельзя запустить
+    // копированием. Доля показывает, держится ли правило.
+    draft_placeholders:
+      (Array.isArray(a.draft_placeholders) ? a.draft_placeholders : []).length,
     // Запрос по сотрудникам без фильтра активности. Метрика того, насколько
     // умолчание держится: статью код добирает на каждом запросе, и если доля
     // не падает, значит одной статьи мало и правило надо усиливать иначе.
@@ -5394,6 +5797,32 @@ if (Array.isArray(a.draft_company_filter) && a.draft_company_filter.length) {
     '. Т-Банк — это вся витрина, а не значение поля: фильтр вернёт ноль ' +
     'строк. Если речь про Т-Банк как ЮРЛИЦО — это юридическая структура, ' +
     'см. рецепт выбора структуры.');
+}
+
+// Ссылка на юнит: код сходил в справочник ЗА автора. Печатается только
+// когда ссылка была — строка, которая горит всегда, перестаёт читаться.
+if (a.unit_state === 'found') {
+  parts.push('🔗 **Юнит по ссылке разрешён:** ключ `' + a.unit_rk +
+    '`' + (a.unit_nm ? ' («' + a.unit_nm + '»)' : '') +
+    '. Первый шаг рецепта выполнил код, а не автор — ключ в запросе ' +
+    'подтверждён справочником.');
+} else if (a.unit_state === 'not_found') {
+  parts.push('🔗 **Юнит по ссылке НЕ НАЙДЕН в справочнике.** Это ответ, ' +
+    'а не сбой: юнит закрыт, удалён или ссылка из другой структуры. ' +
+    'В черновике должно стоять именно это, а не «уточните, где искать».');
+} else if (a.unit_state === 'failed' || a.unit_state === 'never_ran') {
+  parts.push('🚩 **Ключ юнита по ссылке получить не удалось** (' +
+    (a.unit_state === 'failed' ? 'запрос к справочнику отказал'
+                               : 'узел «Resolve unit» не выполнялся') +
+    '). Это поломка бота: проверьте ветку разрешения ссылки в «Support ' +
+    'Bot Core» и доступ аккаунта Trino к `prod_v_dds`.');
+}
+
+if (Array.isArray(a.draft_placeholders) && a.draft_placeholders.length) {
+  parts.push('🚩 **В запросе остались плейсхолдеры:** ' +
+    a.draft_placeholders.map((h) => '`' + h + '`').join(', ') +
+    '. ТЗ — это готовый SQL, который заказчик копирует и запускает; ' +
+    'с плейсхолдером он не запустится, а подставить их заказчику нечем.');
 }
 
 if (Array.isArray(a.draft_own_tools) && a.draft_own_tools.length) {
