@@ -2586,9 +2586,50 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
   const xprof = fs.readFileSync(kbDir + 'tables/mdm-employee-x-profession.md', 'utf8');
   check('дыра в статье dds-таблицы закрыта',
     /valid_to_dttm = '5999-01-01'/.test(xprof));
-  // Инвентарь главнее правила слоя: состав полей живёт в каталоге.
-  check('правило слоя не перебивает инвентарь',
-    /!t\.fields\.size/.test(js('Build check SQL')));
+  // ИНВЕНТАРЬ — ЭТО СПИСОК, А НЕ ТЕКСТ БЛОКА.
+  //
+  // Живой прогон 2026-08-31: у колонки витрины сотрудников в комментарии
+  // владельца упомянут `valid_to_dttm`, поля выскребались регуляркой по всей
+  // прозе блока — и в запрос к `emart` уехал фильтр версии:
+  // «Column 'valid_to_dttm' cannot be resolved». Проверяется ПРОГОНОМ,
+  // а не поиском подстроки в коде: подстрока поведения не гарантирует.
+  const PROSE = [
+    '=== МЕТАДАННЫЕ КАТАЛОГА: ' +
+      'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ===',
+    'ВСЕ ПОЛЯ ТАБЛИЦЫ:',
+    '',
+    'mdm_employee_rk, last_day_flg, active_employee_flg, company_fire_flg, ' +
+      'lvl13_mapped_management_unit_rk',
+    '',
+    'ПОДРОБНО ПО ПОЛЯМ (1):',
+    '',
+    '— lvl13_mapped_management_unit_rk (text)',
+    '  описание: ключ юнита 13 уровня',
+    '  комментарий из DD: собирается из справочника по актуальной версии ' +
+      'valid_to_dttm, удалённые версии помечены deleted_flg',
+  ].join('\n');
+  const prose = run(PROSE, "where lvl13_mapped_management_unit_rk = 'abc'");
+  check('поле из ОПИСАНИЯ не становится полем витрины',
+    !/valid_to_dttm/.test(prose[0].check_sql));
+  check('и флаг удаления из описания тоже',
+    !/deleted_flg/.test(prose[0].check_sql));
+  check('а свой срез при этом на месте',
+    /last_day_flg = 1/.test(prose[0].check_sql) &&
+    /company_fire_flg = 0/.test(prose[0].check_sql));
+  check('поле из перечня разобрано, проверка не выключилась',
+    /GROUP BY lvl13_mapped_management_unit_rk/.test(prose[0].check_sql));
+
+  // Правило слоя — страховка на случай, когда список полей витрины `dds`
+  // не разобрался или неполон: версионность там свойство СХЕМЫ, а не
+  // отдельной таблицы, и молча собрать словарь по всем версиям хуже,
+  // чем громко упасть на несуществующей колонке.
+  const DDS_THIN = [
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:dlh:table:dds.management_unit ===',
+    'ПОЛЯ: management_unit_rk, management_unit_id',
+  ].join('\n');
+  const thin = run(DDS_THIN, "where management_unit_id = 'e289067b-26b6-44f2-917e-668d1ea65cc5'");
+  check('на слое dds фильтр версии ставится и без него в перечне',
+    /valid_to_dttm/.test(thin[0].check_sql));
 
   // СРЕЗ СВЕРЯЕТСЯ СО СТАТЬЯМИ. Единственная копия условия живёт в коде,
   // и разъехаться с базой она может молча — как однажды разъехалась формула

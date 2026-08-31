@@ -3620,11 +3620,64 @@ const tables = [];
     const at = meta.indexOf('\n=== ', from);
     return at === -1 ? meta.length : at;
   };
+  // СОСТАВ ПОЛЕЙ — ЭТО СПИСОК, А НЕ ТЕКСТ БЛОКА.
+  //
+  // Раньше поля выскребались регуляркой по ВСЕЙ прозе блока, и любое слово
+  // из описания становилось «полем этой витрины». Живой прогон 2026-08-31:
+  // у колонки `lvl13_mapped_management_unit_rk` в комментарии владельца
+  // упомянут `valid_to_dttm` — и `whereFor` добавил витрине сотрудников
+  // фильтр версии, которого у неё нет и быть не может:
+  //
+  //     line 7:12: Column 'valid_to_dttm' cannot be resolved
+  //
+  // Тот же класс, что граница блока, которую чинили абзацем выше, только
+  // на уровень глубже: там витрине приписывался текст СОСЕДНЕГО блока,
+  // здесь — текст её собственных описаний. Проза про поле полем не является.
+  //
+  // Шейпер DD печатает состав в двух разборных формах, и читаем мы ровно их:
+  //   — строка-перечень «a, b, c» после заголовка «ВСЕ ПОЛЯ ТАБЛИЦЫ»;
+  //   — маркер подробностей «— имя_поля (тип) [PK]».
+  // Всё остальное — описания, комментарии, заметки о доступе — проза,
+  // и в инвентарь она не попадает.
+  const fieldsOf = (body) => {
+    const set = new Set();
+    for (const raw of body.split('\n')) {
+      const line = raw.trim();
+      if (!line) continue;
+      // «— имя (тип) [ключи]» и «— имя: описание получить не удалось»
+      const bullet = line.match(/^[\u2014\u2013-]\s*([a-z][a-z0-9_]{2,})\b/);
+      if (bullet) { set.add(bullet[1]); continue; }
+      // Перечень через запятую: КАЖДЫЙ элемент обязан быть идентификатором,
+      // иначе это обычное предложение с запятыми. Ярлык перед списком
+      // («ПОЛЯ:», «ПОДОШЛИ ПОЛЯ:») срезается — шейпер печатает перечень
+      // и голой строкой, и с подписью, а гнаться за формой заголовка значит
+      // проиграть на следующей правке шейпера.
+      const list = line.replace(/^[^:]{0,60}:\s*/, '');
+      if (list.includes(',')) {
+        const parts = list.split(',').map((x) => x.trim());
+        if (parts.length >= 2 && parts.every((x) => /^[a-z][a-z0-9_]{2,}$/.test(x))) {
+          for (const x of parts) set.add(x);
+        }
+      }
+    }
+    return set;
+  };
   for (let i = 0; i < marks.length; i++) {
     const body = meta.slice(marks[i].end, nextBlock(marks[i].end));
     const name = (marks[i].urn.match(/table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
     if (!name) continue;   // отчёты и ноутбуки таблицами не являются
-    tables.push({ name, fields: new Set(body.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []) });
+    const fields = fieldsOf(body);
+    // Запасной путь ВНУТРИ блока: формат перечня изменился и не разобралось
+    // ни одного поля. Молча оставить пустой набор нельзя — тогда каждая пара
+    // отсеется с причиной «нет в инвентаре», то есть проверка выключится
+    // целиком, а выглядеть будет как нормальная работа. Берём прозу, как
+    // раньше, но помечаем: по такому набору фильтры не ставятся.
+    if (fields.size) tables.push({ name, fields, fromProse: false });
+    else tables.push({
+      name,
+      fields: new Set(body.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []),
+      fromProse: true,
+    });
   }
 }
 // Запасной путь: формат блоков изменился и ни одной витрины не разобралось.
@@ -3682,15 +3735,21 @@ const isDdsLayer = (name) => /^dds(_dic)?\./i.test(String(name || ''));
 const whereFor = (t) => {
   const hasSlice = t.fields.has('last_day_flg');
   const hasActive = t.fields.has('active_employee_flg') && t.fields.has('company_fire_flg');
-  const hasVersion = t.fields.has('valid_to_dttm') ||
-    (isDdsLayer(t.name) && !t.fields.size);
+  // Фильтр версии ставится только по РАЗОБРАННОМУ списку полей: из прозы
+  // `valid_to_dttm` прилетал описанием чужого поля и ронял запрос целиком.
+  // Если список не разобрался, остаётся правило слоя — оно про имя схемы,
+  // а не про текст блока, и соврать не может.
+  const hasVersion = (t.fields.has('valid_to_dttm') && !t.fromProse) ||
+    isDdsLayer(t.name);
   const where = [
     hasSlice ? 'last_day_flg = 1' : '',
     hasActive ? 'active_employee_flg = 1 AND company_fire_flg = 0' : '',
     hasVersion ? "CAST(valid_to_dttm AS varchar) LIKE '5999%'" : '',
   ].filter(Boolean);
   for (const f of DELETED_FLAGS) {
-    if (t.fields.has(f)) where.push(`CAST(${f} AS varchar) IN ('0', 'false')`);
+    if (t.fields.has(f) && !t.fromProse) {
+      where.push(`CAST(${f} AS varchar) IN ('0', 'false')`);
+    }
   }
   return { hasSlice, hasActive, hasVersion, where };
 };
