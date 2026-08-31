@@ -1606,7 +1606,38 @@ core_nodes += [
     ),
 ]
 
-# ------------------------------------------ 1.35 разрешение ссылки на юнит
+FIELDS_JS = r"""
+// СОСТАВ ПОЛЕЙ ВИТРИНЫ — ЭТО СПИСОК, А НЕ ТЕКСТ БЛОКА.
+//
+// Разбор общий для «Build lookups» и «Build check SQL»: обе ноды отвечают
+// на один вопрос — какие поля у витрины есть на самом деле, — и вторая копия
+// разъехалась бы молча.
+//
+// Шейпер DD печатает состав в двух разборных формах: строка-перечень
+// «a, b, c» (с ярлыком «ПОЛЯ:» или без) и маркер подробностей
+// «— имя_поля (тип) [PK]». Всё остальное — описания и комментарии
+// владельца — проза, и в инвентарь она не идёт: живой прогон 2026-08-31
+// приписал витрине сотрудников `valid_to_dttm`, упомянутый в ОПИСАНИИ
+// соседнего поля, и запрос упал на несуществующей колонке.
+function fieldsOf(body) {
+  const set = new Set();
+  for (const raw of String(body || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const bullet = line.match(/^[—–-]\s*([a-z][a-z0-9_]{2,})\b/);
+    if (bullet) { set.add(bullet[1]); continue; }
+    const list = line.replace(/^[^:]{0,60}:\s*/, '');
+    if (!list.includes(',')) continue;
+    const parts = list.split(',').map((x) => x.trim());
+    if (parts.length >= 2 && parts.every((x) => /^[a-z][a-z0-9_]{2,}$/.test(x))) {
+      for (const x of parts) set.add(x);
+    }
+  }
+  return set;
+}
+"""
+
+# ---------------------------- 1.35 запросы, которые делаются ДО автора
 #
 # ФЛОУ САМ ХОДИТ ЗА КЛЮЧОМ ЮНИТА, А НЕ ОПИСЫВАЕТ, КАК ЭТО СДЕЛАТЬ.
 #
@@ -1634,18 +1665,20 @@ core_nodes += [
 # в реестре собран по схеме и каталогом не подтверждён. Теперь инвентарь
 # для этого шага не нужен вовсе — имена полей берутся из рецепта, и промах
 # URN не может тихо выключить поиск.
-UNIT_SQL_JS = r"""
-// Запрос собирает КОД: справочник, имена полей, фильтр версии и срез —
-// константы рецепта `rc-unit-link`, а не догадка модели. Модели тут нечего
-// выбирать: вид ссылки однозначно называет структуру, а структура —
-// справочник.
+LOOKUPS_JS = FIELDS_JS + r"""
+// ЗАПРОСЫ, КОТОРЫЕ НАДО СДЕЛАТЬ ДО АВТОРА. Их два вида, и оба про одно:
+// у кода есть доступ к данным, а у автора нет, и всё, что можно узнать
+// точно, он обязан получить фактом, а не заданием.
+//
+//   unit    — ссылка на юнит: `id` → `rk` → уровень, по рецепту;
+//   columns — состав полей витрины, про которую каталог промолчал.
+//
+// Собираются одним списком, потому что уезжают в одну и ту же ноду Trino:
+// она выполняется по разу на элемент, а разбор ответов разводится по `kind`.
 const plan = $('Plan').first().json ?? {};
 const kind = String(plan.unit_link_kind || '');
 const id = String(plan.unit_link_id || '');
-
-if (!kind || !id) {
-  return [{ json: { unit_needed: false, unit_sql: '', unit_kind: '', unit_id: '' } }];
-}
+const jobs = [];
 
 const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 // Фильтр версии и признаки удаления — через CAST в varchar: тип у флагов
@@ -1658,7 +1691,7 @@ const alive = [
 ];
 
 let sql = '';
-if (kind === 'management') {
+if (kind && id && kind === 'management') {
   // ДВА ШАГА РЕЦЕПТА В ОДНОМ ЗАПРОСЕ. Шаг 1 — `id` → `rk` по справочнику,
   // шаг 2 — «на каком уровне лежит этот `rk`» по витрине сотрудников.
   // Второй шаг зависит от результата первого, но это не повод ходить
@@ -1706,14 +1739,63 @@ if (kind === 'management') {
     'LIMIT 5';
 }
 
-return [{ json: {
-  unit_needed: true,
-  unit_sql: sql,
-  unit_kind: kind,
-  unit_id: id,
-  unit_table: kind === 'management' ? 'prod_v_dds.management_unit'
-                                    : 'prod_v_dds.functional_unit',
-} }];
+if (kind && id) {
+  jobs.push({
+    lookup_kind: 'unit',
+    lookup_sql: sql,
+    unit_kind: kind,
+    unit_id: id,
+    unit_table: kind === 'management' ? 'prod_v_dds.management_unit'
+                                      : 'prod_v_dds.functional_unit',
+  });
+}
+
+// СОСТАВ ПОЛЕЙ ИЗ ДАННЫХ, КОГДА КАТАЛОГ ПРОМОЛЧАЛ.
+//
+// Правило «имена полей берём в каталоге, а не дублируем в git» остаётся
+// в силе: список в статье устаревает молча. Но у каталога есть ТРЕТИЙ исход
+// помимо «ответил» и «не ответил» — он ответил, а состава полей не дал.
+// Так бывает, когда URN в реестре собран по схеме и не подтверждён, или
+// когда витрины в каталоге нет вовсе: она приехала из внешней системы.
+//
+// Живой прогон 2026-08-31: витрина детей `individualchildren_public` стояла
+// в служебной строке «метаданные: …», то есть выглядела полученной, а автор
+// писал «состав полей не получен, имена взяты из статьи и не подтверждены»
+// и ставил среднюю уверенность. И так на КАЖДОМ вопросе про детей — сигнал,
+// который горит всегда, перестают читать.
+//
+// Имена при этом лежат в самих данных и стоят один дешёвый запрос.
+// Источник по смыслу тот же, что каталог: не статья, а витрина.
+const planned = Array.isArray(plan.dd) ? plan.dd : [];
+let ddResults = [];
+try { ddResults = $('Call DD Lookup').all().map((i) => i.json); } catch (e) { ddResults = []; }
+const seen = new Set();
+planned.forEach((obj, idx) => {
+  const m = String(obj?.urn || '').match(/table:([a-z0-9_]+)\.([a-z0-9_]+)/i);
+  if (!m) return;                                  // отчёты таблицами не являются
+  const schema = m[1].toLowerCase();
+  const name = m[2].toLowerCase();
+  const full = schema + '.' + name;
+  if (seen.has(full)) return;
+  // Каталог дал состав — спрашивать данные незачем.
+  if (fieldsOf(String(ddResults[idx]?.dd_meta ?? '')).size) return;
+  seen.add(full);
+  jobs.push({
+    lookup_kind: 'columns',
+    lookup_table: full,
+    lookup_urn: String(obj.urn || ''),
+    lookup_sql:
+      'SELECT ' + q(full) + ' AS tbl, column_name, data_type\n' +
+      'FROM information_schema.columns\n' +
+      'WHERE table_schema = ' + q('prod_v_' + schema) + '\n' +
+      '  AND table_name = ' + q(name) + '\n' +
+      'ORDER BY ordinal_position\n' +
+      'LIMIT 1000',
+  });
+});
+
+if (!jobs.length) return [{ json: { lookup_needed: false } }];
+return jobs.map((j) => ({ json: { lookup_needed: true, ...j } }));
 """
 
 # Разбор ответа справочника. Исходы РАЗНЫЕ и звучат по-разному, потому что
@@ -1725,10 +1807,12 @@ return [{ json: {
 #   отказ запроса    → поломка бота, утверждать про юнит нельзя ничего;
 #   узел не выполнен → ветка оборвалась раньше, чинить проводку в n8n.
 UNIT_RESULT_JS = r"""
-const plan = $('Build unit SQL').first().json ?? {};
-if (!plan.unit_needed) {
-  return [{ json: { unit_state: 'skip' } }];
-}
+// Нода Trino выполнилась по разу на элемент, и элементы у нас двух видов.
+// n8n сохраняет соответствие «вход i → выход i», поэтому вид запроса
+// берётся из плана по индексу — тем же приёмом, что порядок колонок
+// в DD Lookup.
+let jobs = [];
+try { jobs = $('Build lookups').all().map((i) => i.json); } catch (e) { jobs = []; }
 
 // «Узел не выполнялся» отличается от «выполнился и вернул ноль строк»
 // ТОЛЬКО броском $(): при alwaysOutputData ноль строк приезжает пустым
@@ -1737,11 +1821,38 @@ if (!plan.unit_needed) {
 // в справочнике нет» в размытое «проверить не удалось» — то есть ровно
 // в тот диагноз, ради разведения которого ветка и написана.
 let items = null;
-try { items = $('Resolve unit').all().map((i) => i.json); } catch (e) { items = null; }
+try { items = $('Run lookups').all().map((i) => i.json); } catch (e) { items = null; }
+
+// СОСТАВ ПОЛЕЙ, ДОБРАННЫЙ ИЗ ДАННЫХ. Ключ — «схема.таблица» как в реестре.
+// Пустой ответ — тоже ответ: витрины с таким именем в Trino нет, и это
+// говорит про URN в реестре, а не про доступ.
+const columns = {};
+const colFailed = {};
+jobs.forEach((j, idx) => {
+  if (j.lookup_kind !== 'columns') return;
+  const it = items ? items[idx] : null;
+  if (!it || typeof it !== 'object') {
+    colFailed[j.lookup_table] = 'узел не выполнялся'; return;
+  }
+  if (it.error || it.message) {
+    colFailed[j.lookup_table] = String(it.error || it.message); return;
+  }
+  const list = Array.isArray(it.data) ? it.data : [it];
+  const names = list.map((r) => String(r?.column_name || '')).filter(Boolean);
+  if (names.length) columns[j.lookup_table] = names;
+  else colFailed[j.lookup_table] = 'в Trino витрины с таким именем нет';
+});
+
+const wanted = jobs.find((j) => j.lookup_kind === 'unit') || null;
+if (!wanted) {
+  return [{ json: { unit_state: 'skip', columns, columns_failed: colFailed } }];
+}
+const unitItems = items === null ? null : [items[jobs.indexOf(wanted)]];
 
 let rows = [];
+const plan = wanted;
 let failed = '';
-for (const it of (items || [])) {
+for (const it of (unitItems || [])) {
   if (!it || typeof it !== 'object') continue;
   if (Object.keys(it).length === 0) continue;        // пустой ответ = строк нет
   if (it.error || it.message) { failed = String(it.error || it.message); continue; }
@@ -1750,16 +1861,19 @@ for (const it of (items || [])) {
 }
 
 if (items === null) {
-  return [{ json: { unit_state: 'never_ran', unit_kind: plan.unit_kind,
+  return [{ json: { unit_state: 'never_ran', columns, columns_failed: colFailed,
+                    unit_kind: plan.unit_kind,
                     unit_id: plan.unit_id, unit_table: plan.unit_table } }];
 }
 if (failed) {
   return [{ json: { unit_state: 'failed', unit_error: failed,
+                    columns, columns_failed: colFailed,
                     unit_kind: plan.unit_kind, unit_id: plan.unit_id,
                     unit_table: plan.unit_table } }];
 }
 if (!rows.length) {
-  return [{ json: { unit_state: 'not_found', unit_kind: plan.unit_kind,
+  return [{ json: { unit_state: 'not_found', columns, columns_failed: colFailed,
+                    unit_kind: plan.unit_kind,
                     unit_id: plan.unit_id, unit_table: plan.unit_table } }];
 }
 
@@ -1774,6 +1888,8 @@ const total = rows.reduce((a, r) => a + (Number(r.emp_cnt) || 0), 0);
 
 return [{ json: {
   unit_state: 'found',
+  columns,
+  columns_failed: colFailed,
   unit_kind: plan.unit_kind,
   unit_id: plan.unit_id,
   unit_table: plan.unit_table,
@@ -1789,14 +1905,14 @@ return [{ json: {
 
 core_nodes += [
     node(
-        "Build unit SQL",
+        "Build lookups",
         "n8n-nodes-base.code",
         2,
         [1500, 560],
-        {"mode": "runOnceForAllItems", "jsCode": UNIT_SQL_JS},
+        {"mode": "runOnceForAllItems", "jsCode": LOOKUPS_JS},
     ),
     node(
-        "Need unit",
+        "Need lookup",
         "n8n-nodes-base.if",
         2.2,
         [1720, 560],
@@ -1805,8 +1921,8 @@ core_nodes += [
                 "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
                 "conditions": [
                     {
-                        "id": "has-unit",
-                        "leftValue": "={{ $json.unit_needed }}",
+                        "id": "has-lookup",
+                        "leftValue": "={{ $json.lookup_needed }}",
                         "rightValue": True,
                         "operator": {"type": "boolean", "operation": "true", "singleValue": True},
                     }
@@ -1818,14 +1934,14 @@ core_nodes += [
         },
     ),
     node(
-        "Resolve unit",
+        "Run lookups",
         "n8n-nodes-base.noOp",
         1,
         [1940, 460],
         {},
     ),
     node(
-        "Unit result",
+        "Lookup result",
         "n8n-nodes-base.code",
         2,
         [2160, 560],
@@ -1836,7 +1952,7 @@ core_nodes += [
 # Нода Trino подставляется ниже, там же где «Check values»: её тип,
 # credential и имена полей берутся из собранного «Telemetry Flush», и вторая
 # копия описания разъехалась бы молча.
-UNIT_TRINO_NODE = "Resolve unit"
+UNIT_TRINO_NODE = "Run lookups"
 
 # --------------------------------------------------- 1.4 сборка материалов
 #
@@ -2027,7 +2143,7 @@ if (routes.length) {
 // структуру, и угадывать здесь нечего. Автору остаётся написать запрос
 // по рецепту, который добран рядом.
 let unit = {};
-try { unit = $('Unit result').first().json ?? {}; } catch (e) { unit = {}; }
+try { unit = $('Lookup result').first().json ?? {}; } catch (e) { unit = {}; }
 const unitState = String(unit.unit_state || '');
 
 if (plan.unit_link_kind) {
@@ -2166,6 +2282,43 @@ const reportSeen =
 // «статью не удалось прочитать»: это разные вещи, и вторую нельзя записывать
 // в пробелы владельца. Ровно то же правило, что и для описаний полей в DD.
 const notes = [];
+
+// СОСТАВ ПОЛЕЙ, ДОБРАННЫЙ ИЗ ДАННЫХ.
+//
+// У каталога есть третий исход помимо «ответил» и «не ответил»: он ОТВЕТИЛ,
+// а состава полей не дал — URN в реестре собран по схеме и не подтверждён,
+// либо витрины в каталоге нет вовсе, она приехала из внешней системы.
+// По виду прогона это неотличимо от нормы: объект стоит в служебной строке
+// «метаданные: …», и только автор пишет, что имена не подтверждены. И так
+// на КАЖДОМ вопросе про эту витрину — сигнал, который горит всегда,
+// перестают читать.
+//
+// Отдельным блоком, а не подмешиванием в блок каталога: автор должен видеть,
+// откуда состав. У данных нет описаний и комментариев владельца, и судить
+// по ним о СМЫСЛЕ поля нельзя — только о том, есть оно или нет.
+const dataCols = (unit && unit.columns) || {};
+const dataColsFailed = (unit && unit.columns_failed) || {};
+for (const [tbl, names] of Object.entries(dataCols)) {
+  parts.push(
+    `=== СОСТАВ ПОЛЕЙ ИЗ ДАННЫХ: ${tbl} ===\n` +
+      'Каталог состава этой витрины не дал, поэтому имена полей взяты ' +
+      'из самой витрины. Это ФАКТ, а не догадка: писать «состав полей ' +
+      'не подтверждён» про неё больше нельзя, и уверенность из-за неё ' +
+      'снижать не за что.\n\n' +
+      names.join(', ') + '\n\n' +
+      'Описаний и комментариев владельца здесь нет и быть не может: ' +
+      'данные их не хранят. Смысл поля бери из статьи, имя — отсюда. ' +
+      'Поля, которого в этом перечне нет, в витрине нет.',
+  );
+}
+for (const [tbl, why] of Object.entries(dataColsFailed)) {
+  notes.push(
+    `Состав полей витрины ${tbl} не дали ни каталог, ни данные (${why}). ` +
+      'Имена полей из статьи не подтверждены: не утверждай ни что поле ' +
+      'есть, ни что его нет, — а если запрос на нём строится, скажи, что ' +
+      'имена надо сверить перед запуском.',
+  );
+}
 // Два разных диагноза и две разные формулировки автору. Путь ИЗ реестра,
 // который не читается, — расхождение базы, и его надо назвать. Путь, которого
 // в реестре нет вовсе, роутер придумал: базе тут править нечего, и говорить
@@ -2275,7 +2428,14 @@ if (addedFallback.length) {
 // утверждать ни что поле есть, ни что его нет, — и молчать об этом тоже
 // нельзя: молчание неотличимо от «состав полей я видел».
 const tablesRead = Array.isArray(plan.tables_read) ? plan.tables_read : [];
-const tablesNoMeta = tablesRead.filter((t) => t && t.urn && !ddOk.includes(t.urn));
+// Витрина, чей состав добран из данных, инвентарём НЕ обделена: имена
+// полей у автора есть, и требовать от него оговорок «состав не получен»
+// значит заставлять его извиняться за то, чего не случилось.
+const colsKnown = new Set(Object.keys(dataCols));
+const tblOf = (urn) => (String(urn || '')
+  .match(/table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
+const tablesNoMeta = tablesRead.filter(
+  (t) => t && t.urn && !ddOk.includes(t.urn) && !colsKnown.has(tblOf(t.urn)));
 if (tablesNoMeta.length) {
   notes.push(
     'Статьи прочитаны, а СОСТАВ ПОЛЕЙ не получен по витринам: ' +
@@ -2445,6 +2605,11 @@ return [{
     // выполнялся». Слитые в один диагноз, они отправляют чинить не то —
     // ровно как ddFailed и ddMissing до 2026-08-27.
     unit_state: unitState,
+    // Витрины, чей состав полей добран из данных, и те, по которым его
+    // не дали ни каталог, ни данные. Второе — настоящий пробел, первое
+    // пробелом БЫТЬ ПЕРЕСТАЛО, и понижать уверенность за него нельзя.
+    cols_from_data: Object.keys(dataCols),
+    cols_unknown: Object.keys(dataColsFailed),
     unit_rk: String(unit.unit_rk || ''),
     unit_nm: String(unit.unit_nm || ''),
     unit_levels: Array.isArray(unit.unit_levels) ? unit.unit_levels : [],
@@ -3483,7 +3648,7 @@ function valueNeedles(raw) {
 # Второй проход — ПРАВКА, а не новый ответ: ему не нужны материалы целиком,
 # только вопрос, свой черновик и то, что вернули данные. Полный второй вызов
 # автора стоил бы ещё ~18k токенов, правка стоит ~5k.
-CHECK_SQL_JS = NEEDLES_JS + DRAFT_PAIRS_JS + r"""
+CHECK_SQL_JS = FIELDS_JS + NEEDLES_JS + DRAFT_PAIRS_JS + r"""
 // Пар «поле = значение» на проверку. Запрос идёт ПО ЗАПРОСУ НА ПОЛЕ,
 // и GROUP BY в нём и так проходит по всему срезу — восьмая пара стоит
 // одного HTTP-вызова к Trino, а не восьмикратного скана. Потолок в 4
@@ -3639,29 +3804,6 @@ const tables = [];
   //   — маркер подробностей «— имя_поля (тип) [PK]».
   // Всё остальное — описания, комментарии, заметки о доступе — проза,
   // и в инвентарь она не попадает.
-  const fieldsOf = (body) => {
-    const set = new Set();
-    for (const raw of body.split('\n')) {
-      const line = raw.trim();
-      if (!line) continue;
-      // «— имя (тип) [ключи]» и «— имя: описание получить не удалось»
-      const bullet = line.match(/^[\u2014\u2013-]\s*([a-z][a-z0-9_]{2,})\b/);
-      if (bullet) { set.add(bullet[1]); continue; }
-      // Перечень через запятую: КАЖДЫЙ элемент обязан быть идентификатором,
-      // иначе это обычное предложение с запятыми. Ярлык перед списком
-      // («ПОЛЯ:», «ПОДОШЛИ ПОЛЯ:») срезается — шейпер печатает перечень
-      // и голой строкой, и с подписью, а гнаться за формой заголовка значит
-      // проиграть на следующей правке шейпера.
-      const list = line.replace(/^[^:]{0,60}:\s*/, '');
-      if (list.includes(',')) {
-        const parts = list.split(',').map((x) => x.trim());
-        if (parts.length >= 2 && parts.every((x) => /^[a-z][a-z0-9_]{2,}$/.test(x))) {
-          for (const x of parts) set.add(x);
-        }
-      }
-    }
-    return set;
-  };
   for (let i = 0; i < marks.length; i++) {
     const body = meta.slice(marks[i].end, nextBlock(marks[i].end));
     const name = (marks[i].urn.match(/table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
@@ -3804,11 +3946,15 @@ const documented = (f, v) =>
 // который лежит в материалах, — и, хуже, получить «не подтверждено» на том,
 // что подтверждено: у справочника юнитов свой срез, а общий отбор пар про
 // него не знает.
-const unitId = String(mat.unit_link_id || '').toLowerCase();
+// Сравнение НОРМАЛИЗОВАННОЕ: в ссылке идентификатор бывает с дефисами,
+// а в витрине тот же ключ лежит без них. Побуквенное сравнение промахнулось
+// бы, и разрешённый кодом идентификатор поехал бы в проверку второй раз.
+const idNorm = (v) => String(v || '').toLowerCase().replace(/-/g, '');
+const unitId = idNorm(mat.unit_link_id);
 
 for (const p of pairs) {
   if (use.length >= MAX_PAIRS) { skipped.push(`${p.field} (потолок ${MAX_PAIRS} пар)`); continue; }
-  if (unitId && String(p.value).toLowerCase() === unitId) {
+  if (unitId && idNorm(p.value) === unitId) {
     skipped.push(`${p.field} (идентификатор юнита уже разрешён кодом)`);
     continue;
   }
@@ -3879,7 +4025,15 @@ return use.map((p) => {
   // Поэтому для точного идентификатора запрос становится ТОЧЕЧНЫМ:
   // фильтр вместо группировки по всей таблице, ноль строк читается
   // однозначно как «такого идентификатора в справочнике нет».
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  // ИДЕНТИФИКАТОР БЫВАЕТ И БЕЗ ДЕФИСОВ, И ЭТО НЕ КРАЕВОЙ СЛУЧАЙ.
+  //
+  // Живой прогон 2026-08-31: ключ юнита в `mdm_employee_structure_d` — это
+  // 32 hex-символа БЕЗ дефисов (`7232d11411120c5914cabb21956a9e61`), и ссылка
+  // заказчика несёт его же. Регулярка требовала дефисов, значение
+  // идентификатором не опозналось — и вместо точечного запроса собрался
+  // СЛОВАРЬ с `LIKE '%<весь хеш>%'` и сортировкой по частоте. Заказчику
+  // потом уехал список чужих хешей «если нужны они, скажите, добавлю».
+  const isUuid = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$/i
     .test(p.value);
   const words = isUuid ? [p.value.toLowerCase()] : valueNeedles(p.value);
   const expr = words.map((w) => `lower(${v}) LIKE ${q('%' + w + '%')}`).join(' OR ') || 'false';
@@ -3935,7 +4089,7 @@ CHECK_RESULT_JS = r"""
 // иначе, чем у словаря значений. Регулярка та же, что в «Build check SQL», —
 // вторая копия здесь неизбежна (узлы не делят область видимости), поэтому
 // тест в группе 47 держит их совпадение.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
 // Сборщиков ДВА: обычный и после доспроса. Читаем тот, что отработал —
 // иначе отсев и причина приедут от первого, то есть от прохода, который
 // как раз ничего не нашёл.
@@ -3972,6 +4126,16 @@ for (const r of rows) {
   if (!byField.has(key)) byField.set(key, { exact: [], hit: [], rest: [], field: f });
   const g = byField.get(key);
   (isYes(r.exact_hit) ? g.exact : isYes(r.matched) ? g.hit : g.rest).push(r);
+}
+
+// Поля, по которым спрашивали ТОЧНЫЙ ИДЕНТИФИКАТОР, а не написание слова.
+// Считается по самим парам, а не по флагу первого элемента: пары идут
+// к разным полям, и одна из них вполне бывает обычным словом заказчика.
+const idFields = new Set();
+for (const pr of (plan.check_pairs || [])) {
+  if (UUID_RE.test(String(pr.value || ''))) {
+    idFields.add(pr.table ? `${pr.table}.${pr.field}` : String(pr.field));
+  }
 }
 
 function mergeByField(pick) {
@@ -4012,6 +4176,38 @@ if (failed) {
     out.push('Запрос выполнился, но строк не вернул. Про наличие значений');
     out.push('ничего не утверждай — скажи, что проверить не удалось.');
   }
+} else if (idFields.size && idFields.size === byField.size) {
+  // ТОЧЕЧНЫЙ ПОИСК ПО ИДЕНТИФИКАТОРУ: ВЫБИРАТЬ НЕ ИЗ ЧЕГО.
+  //
+  // Словарь значений отвечает на вопрос «как ЗАПИСАНО слово заказчика»,
+  // и перечень там осмыслен: «Продуктовый аналитик» против «Продуктовый
+  // аналитик (DA)» — заказчик может выбрать. У идентификатора вопрос другой,
+  // «есть ли такая строка», и перечень тут не помощь, а вред: хеши между
+  // собой неразличимы, выбрать из них нельзя ни автору, ни заказчику.
+  //
+  // Живой прогон 2026-08-31 показал цену буквально: идентификатор
+  // не опознался, собрался словарь, и заказчику уехало «в поле есть также
+  // 6693daa4…, 86004218…, ccb02408… — если нужны они, скажите, добавлю
+  // в фильтр». Предложить человеку выбрать ЧУЖОЙ юнит по хешу — хуже,
+  // чем не проверять вовсе.
+  for (const [f, g] of byField) {
+    out.push('');
+    out.push(`— ${f}:`);
+    if (g.exact.length) {
+      out.push('  ИДЕНТИФИКАТОР ПОДТВЕРЖДЁН ДАННЫМИ. Ставь в фильтр');
+      out.push('  именно это значение:');
+      for (const r of g.exact) out.push(`    «${r.val}» — ${r.cnt} строк`);
+    } else {
+      out.push('  такой строки в актуальном срезе нет.');
+    }
+  }
+  out.push('');
+  out.push('ЭТО ПОИСК ПО ТОЧНОМУ ИДЕНТИФИКАТОРУ, А НЕ ПОДБОР НАПИСАНИЯ.');
+  out.push('Других значений этого поля ты НЕ ВИДЕЛ и перечислять их');
+  out.push('не можешь. НЕ предлагай заказчику «в поле есть также …»');
+  out.push('со списком идентификаторов: выбрать из хешей нельзя, а любой');
+  out.push('чужой ключ — чужое подразделение. Подтвердилось — ставь молча;');
+  out.push('не подтвердилось — скажи прямо и спроси НАЗВАНИЕ подразделения.');
 } else {
   for (const [f, g] of byField) {
     out.push('');
@@ -4093,6 +4289,10 @@ return [{ json: {
   check_rows: rows.length,
   check_failed: failed,
   check_fields: [...byField.keys()],
+  // Значения, подтверждённые ДОСЛОВНО. «Final answer» отличает по ним ключ,
+  // который дали данные, от ключа неизвестного происхождения.
+  check_exact_values: [...byField.values()]
+    .flatMap((g) => g.exact.map((r) => String(r.val))),
   // Значения, которые НЕ совпали со словами заказчика, — по полям.
   // Нужны «Final answer», чтобы поймать подмену: значение из этого списка,
   // оказавшееся в итоговом фильтре, заказчик не называл ни разу.
@@ -4246,6 +4446,8 @@ try {
   // Список проверенных «витрина.поле»: нужен джуну, чтобы строка про словарь
   // значений называла, ПО ЧЕМУ он поднят. Число без этого не читается.
   out.check_fields = Array.isArray(res.check_fields) ? res.check_fields : [];
+  out.check_exact_values = Array.isArray(res.check_exact_values)
+    ? res.check_exact_values : [];
   checkRest = res.check_rest || {};
 } catch (e) {
   out.check_rows = 0; out.check_failed = ''; out.check_exact = 0; out.check_fields = [];
@@ -4282,6 +4484,43 @@ try {
     }
   }
   out.check_substituted = subs;
+}
+
+// ЧУЖОЙ ИДЕНТИФИКАТОР В ОТВЕТЕ.
+//
+// Живой прогон 2026-08-31: ключ юнита пришёл БЕЗ дефисов, идентификатором
+// не опознался, вместо точечного запроса собрался словарь по всему полю —
+// и автор предложил заказчику девять чужих хешей: «в поле есть также
+// 6693daa4…, 86004218… — если нужны они, скажите, добавлю в фильтр».
+// Выбрать из хешей нельзя ни автору, ни заказчику, а каждый из них —
+// чужое подразделение.
+//
+// Проверка узкая и без ложных тревог по построению: считаются только
+// идентификаторы, которых заказчик не называл и данные не подтверждали.
+// Свой ключ из ссылки, разрешённый кодом ключ юнита и подтверждённые
+// значения исключены.
+{
+  const own = new Set();
+  const add = (v) => {
+    const k = String(v || '').toLowerCase().replace(/-/g, '');
+    if (k) own.add(k);
+  };
+  try {
+    const m = $('Build materials').first().json;
+    add(m.unit_link_id);
+    add(m.unit_rk);
+  } catch (e) { /* ветки юнита в прогоне не было */ }
+  for (const v of (out.check_exact_values || [])) add(v);
+  const q = String(first.question || '').toLowerCase().replace(/-/g, '');
+  const fin = String(out.draft || '') + '\n' + String(out.tech_spec || '');
+  const seen = new Set();
+  for (const m of (fin.match(/[0-9a-f-]{16,}/gi) || [])) {
+    const k = m.toLowerCase().replace(/-/g, '');
+    if (!/^[0-9a-f]{16,}$/.test(k)) continue;   // это не хеш, а что-то иное
+    if (own.has(k) || q.includes(k) || seen.has(k)) continue;
+    seen.add(k);
+  }
+  out.draft_foreign_ids = [...seen].slice(0, 5);
 }
 
 // ПОНИЖЕНИЕ, КОГДА ЗНАЧЕНИЕ В ЧЕРНОВИКЕ ОСТАЛОСЬ НЕПОДТВЕРЖДЁННЫМ.
@@ -4552,7 +4791,7 @@ check_result = node("Check result", "n8n-nodes-base.code", 2, [2500, 220],
 # «бот промолчал».
 for _n in core_nodes:
     if _n["name"] == UNIT_TRINO_NODE:
-        _n["parameters"] = {"query": "={{ $json.unit_sql }}",
+        _n["parameters"] = {"query": "={{ $json.lookup_sql }}",
                             **copy.deepcopy(_TRINO["options"])}
         _n["type"] = _TRINO["type"]
         _n["typeVersion"] = _TRINO["typeVersion"]
@@ -4670,22 +4909,22 @@ core_conn["Collect articles"] = {
 core_conn["Need DD"] = {
     "main": [
         [{"node": "Split DD", "type": "main", "index": 0}],
-        [{"node": "Build unit SQL", "type": "main", "index": 0}],
+        [{"node": "Build lookups", "type": "main", "index": 0}],
     ]
 }
-core_conn.update(chain("Split DD", "Call DD Lookup", "Build unit SQL"))
+core_conn.update(chain("Split DD", "Call DD Lookup", "Build lookups"))
 
 # Разрешение ссылки на юнит стоит ДО автора и в той же цепочке, а не веером:
 # автору нужен готовый `rk`, а не инструкция, как его получить. Ветки IF
 # сходятся на «Build materials» — сходящиеся ветви нормальны, веер запрещён.
-core_conn["Need unit"] = {
+core_conn["Need lookup"] = {
     "main": [
-        [{"node": "Resolve unit", "type": "main", "index": 0}],
+        [{"node": "Run lookups", "type": "main", "index": 0}],
         [{"node": "Build materials", "type": "main", "index": 0}],
     ]
 }
-core_conn.update(chain("Build unit SQL", "Need unit"))
-core_conn.update(chain("Resolve unit", "Unit result", "Build materials"))
+core_conn.update(chain("Build lookups", "Need lookup"))
+core_conn.update(chain("Run lookups", "Lookup result", "Build materials"))
 
 core_conn.update(chain("Build materials", "Author", "Parse answer"))
 
@@ -5526,6 +5765,10 @@ return [{ json: {
     // копированием. Доля показывает, держится ли правило.
     draft_placeholders:
       (Array.isArray(a.draft_placeholders) ? a.draft_placeholders : []).length,
+    // Чужой ключ в ответе: заказчик его не называл, данные не подтверждали.
+    // Доля показывает, держится ли запрет предлагать выбор из хешей.
+    draft_foreign_ids:
+      (Array.isArray(a.draft_foreign_ids) ? a.draft_foreign_ids : []).length,
     // Запрос по сотрудникам без фильтра активности. Метрика того, насколько
     // умолчание держится: статью код добирает на каждом запросе, и если доля
     // не падает, значит одной статьи мало и правило надо усиливать иначе.
@@ -5875,6 +6118,14 @@ if (a.unit_state === 'found') {
                                : 'узел «Resolve unit» не выполнялся') +
     '). Это поломка бота: проверьте ветку разрешения ссылки в «Support ' +
     'Bot Core» и доступ аккаунта Trino к `prod_v_dds`.');
+}
+
+if (Array.isArray(a.draft_foreign_ids) && a.draft_foreign_ids.length) {
+  parts.push('🚩 **В ответе идентификаторы, которых заказчик не называл:** ' +
+    a.draft_foreign_ids.map((x) => '`' + x + '`').join(', ') +
+    '. Данные их не подтверждали, и каждый — чужое подразделение. ' +
+    'Выбрать из хешей человек не может: либо ключ подтверждён и стоит ' +
+    'в фильтре молча, либо его нет и надо спросить НАЗВАНИЕ.');
 }
 
 if (Array.isArray(a.draft_placeholders) && a.draft_placeholders.length) {

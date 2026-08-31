@@ -2797,31 +2797,31 @@ line('58. РАЗРЕШЕНИЕ ССЫЛКИ НА ЮНИТ СТОИТ ДО АВТ
   // Порядок здесь и есть смысл правки: автор не может выполнить запрос,
   // и если разрешение стоит ПОСЛЕ него, ему остаётся только плейсхолдер.
   check('ветка DD ведёт в сборщик запроса по юниту',
-    out('Call DD Lookup')[0].includes('Build unit SQL') &&
-    out('Need DD')[1].includes('Build unit SQL'));
+    out('Call DD Lookup')[0].includes('Build lookups') &&
+    out('Need DD')[1].includes('Build lookups'));
   check('гейт разводит на справочник и мимо него',
-    out('Need unit')[0].includes('Resolve unit') &&
-    out('Need unit')[1].includes('Build materials'));
+    out('Need lookup')[0].includes('Run lookups') &&
+    out('Need lookup')[1].includes('Build materials'));
   check('обе ветви сходятся на сборке материалов',
-    out('Unit result')[0].includes('Build materials'));
+    out('Lookup result')[0].includes('Build materials'));
   check('и всё это ДО автора, а не после',
     out('Build materials')[0].includes('Author'));
 
   // Веер запрещён: узел за развилкой выполнится по разу на каждую дошедшую
   // ветвь, и два выполнения «Build materials» дали бы два вызова автора.
-  for (const n of ['Build unit SQL', 'Resolve unit', 'Unit result']) {
+  for (const n of ['Build lookups', 'Run lookups', 'Lookup result']) {
     check(`${n} не ветвится на два узла`,
       (conn[n]?.main || []).every((b) => b.length <= 1));
   }
 
-  const ru = byName('Resolve unit');
+  const ru = byName('Run lookups');
   const cv = byName('Check values');
   check('справочник спрашивается той же нодой Trino, что и значения',
     ru.type === cv.type && ru.typeVersion === cv.typeVersion);
   check('и тем же credential — вторая копия разъехалась бы молча',
     JSON.stringify(ru.credentials) === JSON.stringify(cv.credentials));
   check('запрос берётся из сборщика, а не пишется в ноде',
-    ru.parameters.query === '={{ $json.unit_sql }}');
+    ru.parameters.query === '={{ $json.lookup_sql }}');
   // Ноль строк — осмысленный исход («такого id в справочнике нет»), а n8n
   // на пустом выходе останавливает выполнение. Без флага ненайденный юнит
   // убивал бы конвейер ДО автора, и в канале это «бот промолчал».

@@ -2662,58 +2662,73 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
 line('48. ССЫЛКА НА ЮНИТ: КЛЮЧ ДОБЫВАЕТ КОД, А НЕ ПЛЕЙСХОЛДЕР В ТЗ');
 {
   const UUID = 'e289067b-26b6-44f2-917e-668d1ea65cc5';
-  const runUnitSql = (plan) =>
-    new Function('$', '$json', js('Build unit SQL'))(
+  // Сборщик возвращает СПИСОК запросов: разрешение ссылки и добор состава
+  // полей у витрин, про которые каталог промолчал. Здесь берём тот, что
+  // про юнит.
+  const runLookups = (plan, dd = null) =>
+    new Function('$', '$json', js('Build lookups'))(
       (n) => {
         if (n === 'Plan') return { first: () => ({ json: plan }) };
+        if (n === 'Call DD Lookup') {
+          if (dd === null) throw new Error('node not executed');
+          return { all: () => dd.map((json) => ({ json })) };
+        }
         throw new Error('node not executed: ' + n);
-      }, {})[0].json;
+      }, {}).map((i) => i.json);
+  const runUnitSql = (plan) => {
+    const all = runLookups(plan);
+    const u = all.find((j) => j.lookup_kind === 'unit');
+    return u || { lookup_needed: false, lookup_sql: '' };
+  };
 
   const mgmt = runUnitSql({ unit_link_kind: 'management', unit_link_id: UUID });
-  check('запрос собран', mgmt.unit_needed === true && mgmt.unit_sql.length > 0);
+  check('запрос собран', mgmt.lookup_needed === true && mgmt.lookup_sql.length > 0);
   check('справочник — управленческий',
-    /prod_v_dds\.management_unit/.test(mgmt.unit_sql));
+    /prod_v_dds\.management_unit/.test(mgmt.lookup_sql));
   check('идентификатор подставлен ДОСЛОВНО, а не кусками',
-    mgmt.unit_sql.includes("'" + UUID + "'"));
+    mgmt.lookup_sql.includes("'" + UUID + "'"));
   // Живой прогон 2026-08-31 разложил uuid на `%26b6%`, `%44f2%`, `%917e%`
   // и просканировал весь справочник. Точный идентификатор ищется равенством.
-  check('LIKE по идентификатору не собирается', !/LIKE\s+'%/.test(mgmt.unit_sql));
-  check('фильтр версии на месте', /valid_to_dttm/.test(mgmt.unit_sql));
-  check('признак удаления на месте', /deleted_flg/.test(mgmt.unit_sql));
+  check('LIKE по идентификатору не собирается', !/LIKE\s+'%/.test(mgmt.lookup_sql));
+  check('фильтр версии на месте', /valid_to_dttm/.test(mgmt.lookup_sql));
+  check('признак удаления на месте', /deleted_flg/.test(mgmt.lookup_sql));
   // Второй шаг рецепта — «на каком уровне лежит этот rk» — идёт тем же
   // запросом: зависимость не повод ходить дважды.
   check('второй шаг рецепта в том же запросе',
-    /management_unit_lvl_num/.test(mgmt.unit_sql) &&
-    /mdm_employee_structure_d/.test(mgmt.unit_sql));
+    /management_unit_lvl_num/.test(mgmt.lookup_sql) &&
+    /mdm_employee_structure_d/.test(mgmt.lookup_sql));
   // LEFT, а не INNER: пустой юнет иначе выглядел бы как ненайденный,
   // и автор сказал бы заказчику неправду про его же ссылку.
   check('джойн LEFT, пустой юнит не читается как ненайденный',
-    /LEFT JOIN/.test(mgmt.unit_sql));
+    /LEFT JOIN/.test(mgmt.lookup_sql));
   check('срез витрины сотрудников в джойне',
-    /last_day_flg = 1/.test(mgmt.unit_sql) &&
-    /company_fire_flg = 0/.test(mgmt.unit_sql));
+    /last_day_flg = 1/.test(mgmt.lookup_sql) &&
+    /company_fire_flg = 0/.test(mgmt.lookup_sql));
   check('перенос строки настоящий, а не литерал \\n',
-    mgmt.unit_sql.includes('\n') && !mgmt.unit_sql.includes('\\n'));
+    mgmt.lookup_sql.includes('\n') && !mgmt.lookup_sql.includes('\\n'));
 
   const fn = runUnitSql({ unit_link_kind: 'functional', unit_link_id: UUID });
   check('Каталог продуктов — свой справочник',
-    /prod_v_dds\.functional_unit/.test(fn.unit_sql));
+    /prod_v_dds\.functional_unit/.test(fn.lookup_sql));
   check('и close_flg, без которого закрытые юниты попадут в выборку',
-    /close_flg/.test(fn.unit_sql));
+    /close_flg/.test(fn.lookup_sql));
   check('мост в управленческую структуру взят из поля, а не по названию',
-    /management_unit_rk/.test(fn.unit_sql));
+    /management_unit_rk/.test(fn.lookup_sql));
 
   check('ссылки нет — запроса нет',
-    runUnitSql({}).unit_needed === false);
+    runUnitSql({}).lookup_needed === false);
 
   // --- разбор ответа: четыре исхода звучат по-разному, потому что чинятся
   //     в разных местах.
-  const runUnitRes = (rows, plan = { unit_needed: true, unit_kind: 'management',
-                                     unit_id: UUID, unit_table: 'prod_v_dds.management_unit' }) =>
-    new Function('$', '$json', js('Unit result'))(
+  const UNIT_JOB = { lookup_kind: 'unit', unit_kind: 'management',
+                    unit_id: UUID, unit_table: 'prod_v_dds.management_unit' };
+  // jobs — список запросов, которые сборщик отправил в Trino; rows — то,
+  // что нода вернула по каждому из них (null = нода не выполнялась).
+  const runUnitRes = (rows, jobs = [UNIT_JOB]) =>
+    new Function('$', '$json', js('Lookup result'))(
       (n) => {
-        if (n === 'Build unit SQL') return { first: () => ({ json: plan }) };
-        if (n === 'Resolve unit') {
+        if (n === 'Build lookups') return { all: () => jobs.map((json) => ({ json })) };
+        if (n === 'Run lookups') {
           if (rows === null) throw new Error('node not executed');
           return { all: () => rows.map((json) => ({ json })) };
         }
@@ -2735,7 +2750,7 @@ line('48. ССЫЛКА НА ЮНИТ: КЛЮЧ ДОБЫВАЕТ КОД, А НЕ 
   check('невыполнившийся узел — третий исход',
     runUnitRes(null).unit_state === 'never_ran');
   check('ссылки не было — ветка молчит',
-    runUnitRes(null, { unit_needed: false }).unit_state === 'skip');
+    runUnitRes(null, []).unit_state === 'skip');
 
   // --- материалы: автор получает ключ как ФАКТ, а не задание.
   const runMat = (unit) => {
@@ -2747,7 +2762,7 @@ line('48. ССЫЛКА НА ЮНИТ: КЛЮЧ ДОБЫВАЕТ КОД, А НЕ 
         } }) };
       }
       if (name === 'When called by adapter') return { first: () => ({ json: {} }) };
-      if (name === 'Unit result') {
+      if (name === 'Lookup result') {
         if (unit === null) throw new Error('node not executed');
         return { first: () => ({ json: unit }) };
       }
@@ -2873,6 +2888,158 @@ line('50. ГРАНУЛЯРНОСТЬ ВИТРИНЫ ДЕТЕЙ ПОДТВЕРЖ�
   // «Персональные данные» той же статьи, где агрегат назван типовым.
   check('агрегаты не запрещены — это типовой сценарий',
     !/включая агрегаты/i.test(kids));
+}
+
+// ===================================================================== 51
+line('51. СОСТАВ ПОЛЕЙ ИЗ ДАННЫХ, КОГДА КАТАЛОГ ПРОМОЛЧАЛ');
+{
+  const URN_KIDS = 'urn:dd:tables:greenplum:table:' +
+    'chrono_peoplehub_masterid.individualchildren_public';
+  const PLAN = {
+    files: [], domains: [], dd: [{ urn: URN_TABLE, hint: '' }, { urn: URN_KIDS, hint: '' }],
+    dd_count: 2, unit_link_kind: '', unit_link_id: '',
+  };
+  const jobs = new Function('$', '$json', js('Build lookups'))(
+    (n) => {
+      if (n === 'Plan') return { first: () => ({ json: PLAN }) };
+      if (n === 'Call DD Lookup') return { all: () => [
+        // Каталог по витрине сотрудников состав дал…
+        { json: { dd_meta: 'ВСЕ ПОЛЯ ТАБЛИЦЫ:\n\nmdm_employee_rk, last_day_flg' } },
+        // …а по витрине детей ответил, но состава не дал.
+        { json: { dd_meta: 'Каталог ответил 404: объект не найден.' } },
+      ] };
+      throw new Error('node not executed: ' + n);
+    }, {}).map((i) => i.json);
+
+  const cols = jobs.filter((j) => j.lookup_kind === 'columns');
+  check('состав спрашивается ровно у той витрины, про которую каталог промолчал',
+    cols.length === 1 && cols[0].lookup_table ===
+      'chrono_peoplehub_masterid.individualchildren_public');
+  check('и не спрашивается у той, про которую он ответил',
+    !cols.some((c) => /mdm_employee_structure_d/.test(c.lookup_table)));
+  check('запрос идёт в information_schema, а не в саму витрину',
+    /information_schema\.columns/.test(cols[0].lookup_sql) &&
+    !/select \*/i.test(cols[0].lookup_sql));
+  check('схема с префиксом prod_v_, иначе запрос не пойдёт',
+    /prod_v_chrono_peoplehub_masterid/.test(cols[0].lookup_sql));
+  check('перенос строки настоящий, а не литерал \\n',
+    cols[0].lookup_sql.includes('\n') && !cols[0].lookup_sql.includes('\\n'));
+
+  // Разбор ответа: имена полей и три исхода отказа.
+  const res = (rows) => new Function('$', '$json', js('Lookup result'))(
+    (n) => {
+      if (n === 'Build lookups') return { all: () => jobs.map((json) => ({ json })) };
+      if (n === 'Run lookups') {
+        if (rows === null) throw new Error('node not executed');
+        return { all: () => rows.map((json) => ({ json })) };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  const got = res([
+    { data: [{ column_name: 'id' }, { column_name: 'individualid' },
+             { column_name: 'birthdate' }, { column_name: 'isdeleted' }] },
+  ]);
+  const kidsCols = got.columns['chrono_peoplehub_masterid.individualchildren_public'];
+  check('имена полей разобраны', Array.isArray(kidsCols) && kidsCols.length === 4);
+  check('и порядок колонок сохранён', kidsCols[0] === 'id' && kidsCols[1] === 'individualid');
+
+  // Пустой ответ — это НЕ отказ доступа: витрины с таким именем в Trino нет,
+  // и чинить надо URN в реестре, а не права.
+  check('пустой ответ назван своим диагнозом',
+    /витрины с таким именем нет/.test(
+      res([{}]).columns_failed['chrono_peoplehub_masterid.individualchildren_public']));
+  check('отказ запроса — другой диагноз',
+    /boom/.test(res([{ error: 'boom' }])
+      .columns_failed['chrono_peoplehub_masterid.individualchildren_public']));
+
+  // Материалы: состав печатается как ФАКТ, и оговорка «не подтверждено»
+  // из них уходит — иначе она горит на каждом вопросе про эту витрину.
+  const mat = (unit) => new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') {
+        return { first: () => ({ json: { ...PLAN,
+          tables_read: [{ urn: URN_KIDS, title: 'Данные о детях' }] } }) };
+      }
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') return { all: () => [{ json: { dd_meta: 'ПОЛЯ: a, b' } }] };
+      if (n === 'Lookup result') return { first: () => ({ json: unit }) };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  const m = mat(got);
+  check('состав из данных уехал автору',
+    /СОСТАВ ПОЛЕЙ ИЗ ДАННЫХ/.test(m.materials) && /individualid/.test(m.materials));
+  check('и прямо сказано, что это факт, а не догадка',
+    /не подтверждён.{0,40}больше нельзя/s.test(m.materials));
+  check('вечная оговорка «состав полей не получен» снята',
+    !/СОСТАВ ПОЛЕЙ не получен по витринам[^.]*individualchildren/.test(m.materials));
+  check('исход доехал до выхода',
+    m.cols_from_data.includes('chrono_peoplehub_masterid.individualchildren_public'));
+
+  // А когда состава не дали ни каталог, ни данные — оговорка обязана остаться.
+  const mBad = mat(res([{}]));
+  check('без состава оговорка остаётся',
+    /не дали ни каталог, ни данные/.test(mBad.materials));
+  check('и это названо пробелом на выходе',
+    mBad.cols_unknown.length === 1 && mBad.cols_from_data.length === 0);
+}
+
+// ===================================================================== 52
+line('52. ИДЕНТИФИКАТОР БЕЗ ДЕФИСОВ — ТОЖЕ ИДЕНТИФИКАТОР');
+{
+  // Живой прогон 2026-08-31: ключ юнита в витрине — 32 hex БЕЗ дефисов,
+  // регулярка требовала дефисов, и вместо точечного запроса собрался
+  // словарь с LIKE по всему полю. Заказчику уехал список чужих хешей.
+  const HEX = '7232d11411120c5914cabb21956a9e61';
+  const META = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d\n' +
+    'ПОЛЯ: last_day_flg, active_employee_flg, company_fire_flg, ' +
+    'lvl13_mapped_management_unit_rk';
+  const runCheck = (draft, extra = {}) => {
+    const $ = (n) => ({ first: () => ({
+      json: n === 'Parse answer' ? { draft } : { materials: META, ...extra },
+    }) });
+    return new Function('$', '$json', js('Build check SQL'))($, { draft, check_values: '' })
+      .map((i) => i.json);
+  };
+
+  const r = runCheck(`where lvl13_mapped_management_unit_rk = '${HEX}'`);
+  check('идентификатор без дефисов опознан', r[0].check_exact_lookup === true);
+  check('подстрочного поиска нет', !/LIKE/.test(r[0].check_sql));
+  check('и словарь по всему полю не поднимается',
+    !/GROUP BY[\s\S]*ORDER BY exact_hit/.test(r[0].check_sql));
+
+  // Свой ключ, уже разрешённый кодом, второй раз не проверяется — даже если
+  // в ссылке он с дефисами, а в черновике без них.
+  const dashed = HEX.replace(
+    /^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5');
+  const skipped = runCheck(`where lvl13_mapped_management_unit_rk = '${HEX}'`,
+    { unit_link_id: dashed });
+  check('разрешённый ключ не идёт в проверку второй раз',
+    skipped[0].check_sql === '' &&
+    skipped[0].check_skipped.some((x) => /уже разрешён кодом/.test(x)));
+
+  // По идентификатору перечень значений автору не показывается вовсе:
+  // выбрать из хешей нельзя, а любой чужой — чужое подразделение.
+  const resJs = js('Check result');
+  const runRes = (rows) => new Function('$', '$json', resJs)(
+    (n) => {
+      if (n === 'Retry check SQL') throw new Error('node not executed');
+      if (n === 'Build check SQL') return { first: () => ({ json: r[0] }) };
+      if (n === 'Check values') return { all: () => rows.map((json) => ({ json })) };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  const block = runRes([
+    { fld: 'lvl13_mapped_management_unit_rk', tbl: 'emart.mdm_employee_structure_d',
+      val: HEX, cnt: 45295, exact_hit: true, matched: true },
+    { fld: 'lvl13_mapped_management_unit_rk', tbl: 'emart.mdm_employee_structure_d',
+      val: '6693daa41585dcd9b2712c2a72d66531', cnt: 15141, exact_hit: false, matched: false },
+  ]).check_block;
+  check('подтверждённый ключ назван', block.includes(HEX));
+  check('чужие ключи автору НЕ показаны', !block.includes('6693daa4'));
+  check('и предлагать выбор из хешей прямо запрещено',
+    /НЕ предлагай заказчику/.test(block));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
