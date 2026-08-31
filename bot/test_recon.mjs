@@ -335,6 +335,66 @@ line('8. ФАЗА G: URN ИЗ РЕЕСТРА ПОБЕЖДАЕТ РАНГ ВЫД�
   check('отказ запроса — не «не нашлось»', /HTTP 500/.test(bad));
 }
 
+// ====================================================================== 9
+line('9. ФАЗА H: ДВЕ РЕГИСТРАЦИИ РЯДОМ, СРАВНЕНИЕ И ЕСТЬ ОТВЕТ');
+{
+  const shape = js('Shape probe table');
+  // Ответы каталога по обеим системам. null = узел не выполнялся.
+  const run = (byNode) => new Function('$', '$json', shape)(
+    (n) => {
+      if (!(n in byNode)) throw new Error('node not executed: ' + n);
+      const v = byNode[n];
+      if (v === null) throw new Error('node not executed: ' + n);
+      return { first: () => ({ json: v }) };
+    }, {})[0].json.report;
+
+  const OK = (b) => ({ statusCode: 200, body: b });
+  const cols = (n) => OK({ totalCount: n,
+    data: Array.from({ length: n }, (_, i) => ({ entity: { fqn: 'x.y.c' + i } })) });
+
+  // Колонки есть у одной регистрации и нет у другой — значит в реестре
+  // записана не та, и чинится строка kb/index.md.
+  const oneSided = run({
+    'H greenplum related': OK({ notes: {}, terms: {} }),
+    'H greenplum columns': { statusCode: 404 },
+    'H greenplum summary': OK({ data: 'дети' }),
+    'H dlh related': OK({ columns: {}, notes: {} }),
+    'H dlh columns': cols(12),
+    'H dlh summary': OK({ data: 'дети' }),
+  });
+  check('видно, что у greenplum ключа columns НЕТ',
+    /--- greenplum ---[\s\S]*есть ли «columns»: НЕТ/.test(oneSided));
+  check('и что у dlh он ЕСТЬ',
+    /--- dlh ---[\s\S]*есть ли «columns»: ДА/.test(oneSided));
+  check('число колонок названо', /totalCount: 12/.test(oneSided));
+  check('и отказ по ключу назван кодом, а не «колонок нет»',
+    /\/related\/columns → HTTP 404/.test(oneSided));
+
+  // Сущность есть, связей нет вовсе — единственный случай, когда описаний
+  // полей действительно не будет.
+  const noRel = run({
+    'H greenplum related': OK({}),
+    'H greenplum columns': OK({ totalCount: 0, data: [] }),
+    'H greenplum summary': OK({ data: 'дети' }),
+    'H dlh related': { statusCode: 404 },
+    'H dlh columns': { statusCode: 404 },
+    'H dlh summary': { statusCode: 404 },
+  });
+  check('пустой /related назван пустым, а не отказом',
+    /\/related        → ключи: \(пусто\)/.test(noRel));
+  check('несуществующая регистрация названа кодом',
+    /--- dlh ---[\s\S]*\/related        → HTTP 404/.test(noRel));
+  check('и в отчёте написано, как это читать', /ЧИТАТЬ ТАК:/.test(noRel));
+
+  // Невыполнившийся узел не должен ронять шейпер: прогон бывает частичным.
+  const partial = run({
+    'H greenplum related': null, 'H greenplum columns': null,
+    'H greenplum summary': null, 'H dlh related': null,
+    'H dlh columns': null, 'H dlh summary': null,
+  });
+  check('невыполнившиеся узлы шейпер переживает', /ФАЗА H/.test(partial));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

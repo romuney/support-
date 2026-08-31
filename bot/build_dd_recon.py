@@ -1355,6 +1355,130 @@ nodes.append(
 )
 
 
+
+# ---------------------------------------------------------------- ФАЗА H
+#
+# ПОЧЕМУ ПО ВЕРНОМУ URN НЕ ПРИХОДИТ СОСТАВ ПОЛЕЙ.
+#
+# Витрина детей описана в каталоге, URN в реестре подтверждён фазой G,
+# колонки и описания у неё быть должны — а `DD Lookup` состава не даёт,
+# и автор пишет «имена взяты из статьи, не подтверждены».
+#
+# Причин может быть несколько, и по ответу бота они неразличимы:
+#   — ключ связи `columns` у этой системы называется иначе либо отсутствует;
+#   — одна таблица зарегистрирована в каталоге ДВАЖДЫ (фаза G показала
+#     кандидатов `greenplum` и `dlh` на одну витрину), и колонки висят
+#     на другой регистрации;
+#   — запрос отдаёт 200 и пустой список.
+#
+# Гадать здесь больше нельзя: два предыдущих диагноза («URN угаданный»,
+# «колонок не заведено») оказались неверными, и оба выглядели убедительно.
+# Фаза спрашивает каталог напрямую, по обеим регистрациям сразу.
+PROBE_FQN = os.environ.get("PROBE_FQN",
+                           "chrono_peoplehub_masterid.individualchildren_public")
+PROBE_URNS = [
+    f"urn:dd:tables:greenplum:table:{PROBE_FQN}",
+    f"urn:dd:tables:dlh:table:{PROBE_FQN}",
+]
+PHASE_H = []
+for _i, _u in enumerate(PROBE_URNS):
+    _sys = _u.split(":")[3]
+    _enc = f"encodeURIComponent('{_u}')"
+    PHASE_H += [
+        # Какие ключи связей есть У ЭТОЙ сущности. Ключ `columns` угадывать
+        # нельзя — правило проекта: сначала /related, потом рабочий запрос.
+        (f"H {_sys} related", f"={{{{ '{BASE}/entity/' + {_enc} + '/related' }}}}", ()),
+        # И сразу рабочий запрос тем ключом, которым ходит DD Lookup.
+        (f"H {_sys} columns",
+         f"={{{{ '{BASE}/entity/' + {_enc} + '/related/columns' }}}}",
+         (("limit", "500"),)),
+        # Есть ли сама сущность и что она про себя говорит.
+        (f"H {_sys} summary", f"={{{{ '{BASE}/entity/' + {_enc} + '/summary' }}}}", ()),
+    ]
+for _i, (_nm, _url, _q) in enumerate(PHASE_H):
+    nodes.append(get(_nm, _url, [-40 + _i * 190, 1560], _q))
+
+SHAPE_PROBE_TABLE_JS = r"""
+// Ответ на один вопрос: КАКАЯ регистрация витрины отдаёт состав полей.
+// Печатается по обеим, рядом, — сравнение и есть ответ; по одной выдаче
+// отличить «ключа нет» от «колонок нет» невозможно.
+const out = [];
+const say = (s) => out.push(s);
+const FQN = '__PROBE_FQN__';
+
+function res(name) {
+  try { return $(name).first().json; } catch (e) { return null; }
+}
+function code(r) { return r && r.statusCode; }
+function body(r) { return (r && (r.body ?? r)) || {}; }
+
+say('ФАЗА H. ПОЧЕМУ ПО ВЕРНОМУ URN НЕТ СОСТАВА ПОЛЕЙ');
+say('');
+say('Витрина: ' + FQN);
+
+for (const sys of ['greenplum', 'dlh']) {
+  say('');
+  say('--- ' + sys + ' ---');
+
+  const sum = res('H ' + sys + ' summary');
+  const cSum = code(sum);
+  say(`  /summary        → HTTP ${cSum === undefined ? '—' : cSum}` +
+      (cSum && cSum < 400
+        ? '  ' + JSON.stringify(body(sum)).slice(0, 160)
+        : ''));
+
+  const rel = res('H ' + sys + ' related');
+  const cRel = code(rel);
+  if (cRel !== undefined && cRel >= 400) {
+    say(`  /related        → HTTP ${cRel} — сущности нет либо нет доступа`);
+  } else {
+    const b = body(rel);
+    // Ответ /related — словарь «ключ связи → описание». Печатаем сами ключи:
+    // именно их подбор и был источником ошибок («notes» вместо связи
+    // с REPORT), и угадывать их правило проекта запрещает.
+    const keys = b && typeof b === 'object' && !Array.isArray(b)
+      ? Object.keys(b) : [];
+    say(`  /related        → ключи: ${keys.length ? keys.join(', ') : '(пусто)'}`);
+    say(`    есть ли «columns»: ${keys.includes('columns') ? 'ДА' : 'НЕТ'}`);
+  }
+
+  const col = res('H ' + sys + ' columns');
+  const cCol = code(col);
+  if (cCol !== undefined && cCol >= 400) {
+    say(`  /related/columns → HTTP ${cCol} — этим ключом колонки не берутся`);
+  } else {
+    const b = body(col);
+    const data = Array.isArray(b.data) ? b.data : [];
+    say(`  /related/columns → totalCount: ${b.totalCount ?? '—'}, ` +
+        `в ответе: ${data.length}`);
+    if (data.length) {
+      const first = data[0] && (data[0].entity || data[0]);
+      say('    первая колонка: ' + String(first && first.fqn || '(без fqn)'));
+    }
+  }
+}
+
+say('');
+say('ЧИТАТЬ ТАК:');
+say('  колонки пришли по одной системе и не пришли по другой → в реестре');
+say('    записана НЕ ТА регистрация, править строку kb/index.md;');
+say('  ключа «columns» нет ни у одной, а другие ключи есть → у этой системы');
+say('    состав полей берётся другим ключом, править DD Lookup;');
+say('  /related пустой, а /summary отвечает → сущность есть, связей нет:');
+say('    колонки в каталог не заведены, и это единственный случай, когда');
+say('    описаний полей действительно не будет.');
+
+return [{ json: { report: out.join('\n') } }];
+"""
+
+nodes.append(
+    node("Shape probe table", "n8n-nodes-base.code", 2,
+         [-40 + len(PHASE_H) * 190, 1560],
+         {"mode": "runOnceForAllItems",
+          "jsCode": SHAPE_PROBE_TABLE_JS.replace("__PROBE_FQN__", PROBE_FQN)})
+)
+
+
 CHAIN = (
     ["Run recon"]
     + [n for n, _ in PHASE_A]
@@ -1365,6 +1489,8 @@ CHAIN = (
     + [n for n, _ in PHASE_D]
     + ["Shape values"]
     + ["Tables to resolve", "Search table", "Shape urns"]
+    + [n for n, _, _ in PHASE_H]
+    + ["Shape probe table"]
 )
 conn = {
     a: {"main": [[{"node": b, "type": "main", "index": 0}]]}
@@ -1402,6 +1528,7 @@ print("  «Shape recon»  — где у отчёта владелец")
 print("  «Search probe» — форма тела и ответа POST /search/query")
 print("  «Shape probes» — связи таблицы, источники отчёта, форма поиска")
 print("  «Shape urns»   — НАСТОЯЩИЕ URN витрин, готовая колонка для реестра")
+print("  «Shape probe table» — почему по верному URN нет состава полей")
 print("  «Shape values» — видит ли Trino витрины, кардинальность поля")
 print("                   и чем отказ по недоступной таблице отличается")
 print("                   от пустого результата")

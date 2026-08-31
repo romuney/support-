@@ -753,6 +753,248 @@
       ],
       "id": "recon-shape-urns",
       "name": "Shape urns"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:table:chrono_peoplehub_masterid.individualchildren_public') + '/related' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -40,
+        1560
+      ],
+      "id": "recon-h-greenplum-related",
+      "name": "H greenplum related",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:table:chrono_peoplehub_masterid.individualchildren_public') + '/related/columns' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "500"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        150,
+        1560
+      ],
+      "id": "recon-h-greenplum-columns",
+      "name": "H greenplum columns",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:table:chrono_peoplehub_masterid.individualchildren_public') + '/summary' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        340,
+        1560
+      ],
+      "id": "recon-h-greenplum-summary",
+      "name": "H greenplum summary",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:dlh:table:chrono_peoplehub_masterid.individualchildren_public') + '/related' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        530,
+        1560
+      ],
+      "id": "recon-h-dlh-related",
+      "name": "H dlh related",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:dlh:table:chrono_peoplehub_masterid.individualchildren_public') + '/related/columns' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "500"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        1560
+      ],
+      "id": "recon-h-dlh-columns",
+      "name": "H dlh columns",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:dlh:table:chrono_peoplehub_masterid.individualchildren_public') + '/summary' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        910,
+        1560
+      ],
+      "id": "recon-h-dlh-summary",
+      "name": "H dlh summary",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// Ответ на один вопрос: КАКАЯ регистрация витрины отдаёт состав полей.\n// Печатается по обеим, рядом, — сравнение и есть ответ; по одной выдаче\n// отличить «ключа нет» от «колонок нет» невозможно.\nconst out = [];\nconst say = (s) => out.push(s);\nconst FQN = 'chrono_peoplehub_masterid.individualchildren_public';\n\nfunction res(name) {\n  try { return $(name).first().json; } catch (e) { return null; }\n}\nfunction code(r) { return r && r.statusCode; }\nfunction body(r) { return (r && (r.body ?? r)) || {}; }\n\nsay('ФАЗА H. ПОЧЕМУ ПО ВЕРНОМУ URN НЕТ СОСТАВА ПОЛЕЙ');\nsay('');\nsay('Витрина: ' + FQN);\n\nfor (const sys of ['greenplum', 'dlh']) {\n  say('');\n  say('--- ' + sys + ' ---');\n\n  const sum = res('H ' + sys + ' summary');\n  const cSum = code(sum);\n  say(`  /summary        → HTTP ${cSum === undefined ? '—' : cSum}` +\n      (cSum && cSum < 400\n        ? '  ' + JSON.stringify(body(sum)).slice(0, 160)\n        : ''));\n\n  const rel = res('H ' + sys + ' related');\n  const cRel = code(rel);\n  if (cRel !== undefined && cRel >= 400) {\n    say(`  /related        → HTTP ${cRel} — сущности нет либо нет доступа`);\n  } else {\n    const b = body(rel);\n    // Ответ /related — словарь «ключ связи → описание». Печатаем сами ключи:\n    // именно их подбор и был источником ошибок («notes» вместо связи\n    // с REPORT), и угадывать их правило проекта запрещает.\n    const keys = b && typeof b === 'object' && !Array.isArray(b)\n      ? Object.keys(b) : [];\n    say(`  /related        → ключи: ${keys.length ? keys.join(', ') : '(пусто)'}`);\n    say(`    есть ли «columns»: ${keys.includes('columns') ? 'ДА' : 'НЕТ'}`);\n  }\n\n  const col = res('H ' + sys + ' columns');\n  const cCol = code(col);\n  if (cCol !== undefined && cCol >= 400) {\n    say(`  /related/columns → HTTP ${cCol} — этим ключом колонки не берутся`);\n  } else {\n    const b = body(col);\n    const data = Array.isArray(b.data) ? b.data : [];\n    say(`  /related/columns → totalCount: ${b.totalCount ?? '—'}, ` +\n        `в ответе: ${data.length}`);\n    if (data.length) {\n      const first = data[0] && (data[0].entity || data[0]);\n      say('    первая колонка: ' + String(first && first.fqn || '(без fqn)'));\n    }\n  }\n}\n\nsay('');\nsay('ЧИТАТЬ ТАК:');\nsay('  колонки пришли по одной системе и не пришли по другой → в реестре');\nsay('    записана НЕ ТА регистрация, править строку kb/index.md;');\nsay('  ключа «columns» нет ни у одной, а другие ключи есть → у этой системы');\nsay('    состав полей берётся другим ключом, править DD Lookup;');\nsay('  /related пустой, а /summary отвечает → сущность есть, связей нет:');\nsay('    колонки в каталог не заведены, и это единственный случай, когда');\nsay('    описаний полей действительно не будет.');\n\nreturn [{ json: { report: out.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        1560
+      ],
+      "id": "recon-shape-probe-table",
+      "name": "Shape probe table"
     }
   ],
   "connections": {
@@ -1014,6 +1256,83 @@
         [
           {
             "node": "Shape urns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape urns": {
+      "main": [
+        [
+          {
+            "node": "H greenplum related",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "H greenplum related": {
+      "main": [
+        [
+          {
+            "node": "H greenplum columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "H greenplum columns": {
+      "main": [
+        [
+          {
+            "node": "H greenplum summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "H greenplum summary": {
+      "main": [
+        [
+          {
+            "node": "H dlh related",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "H dlh related": {
+      "main": [
+        [
+          {
+            "node": "H dlh columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "H dlh columns": {
+      "main": [
+        [
+          {
+            "node": "H dlh summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "H dlh summary": {
+      "main": [
+        [
+          {
+            "node": "Shape probe table",
             "type": "main",
             "index": 0
           }
