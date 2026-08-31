@@ -1,0 +1,228 @@
+Один из частых кейсов: когда пользователи присылают в канал ссылку на юнит, в ссылке содержится айдишник, его нужно распарсить. Но в наших витринах нет айди юнита, в наших витринах есть РК юнитов. Поэтому нужно добавить флоу: если мы получаем ссылку на юнит, то нужно идти в другие таблички, находить РК-шник юнита, а потом уже по этому РК-шнику юнита определять в наших основных витринах.
+
+
+Пример по Управленческой структуре. https://my.tbank.ru/structure/resource/units/e289067b-26b6-44f2-917e-668d1ea65cc5?searchEmployee=68058
+
+e289067b-26b6-44f2-917e-668d1ea65cc5 - это ID юнита
+
+urn:dd:tables:dlh:table:dds.management_unit
+
+dds.management_unit
+Wiki
+
+
+Юнит (единица) структуры управления группой компаний Тинькофф
+DLH
+
+
+dds.management_unit
+
+Edited 3 days ago
+
+lm_table
+
+Structure
+
+Physics
+
+Relations
+
+Lineage & Usage
+Attributes
+
+Data product	
+Управленческая структура
+
+Owner	
+HC Data
+
+Table structure
+
+11
+Keys	Sensitivity	Name	Description	Jira	Source	Comment	Type
+PK
+
+management_unit_rk
+Постоянный ключ юнита структуры управления
+
+varchar
+
+management_unit_id
+Внутренний идентификатор юнита структуры управления
+
+varchar
+
+FK
+
+parent_management_unit_rk
+Постоянный ключ родительского юнита структуры управления
+
+varchar
+
+management_unit_nm
+Название юнита структуры управления
+
+varchar
+
+management_unit_desc
+Текстовое описание юнита структуры управления
+
+varchar
+
+learning_group_flg
+Флаг учебной группы
+
+integer
+
+FK
+
+head_management_position_rk
+Постоянный ключ позиции руководителя юнита в структуре управления
+
+varchar
+
+deleted_flg
+Флаг удаления записи из СИ
+
+integer
+
+PK
+
+valid_from_dttm
+Дата/время начала действия версии
+
+timestamp(6)
+
+valid_to_dttm
+Дата/время окончания действия версии
+
+timestamp(6)
+
+processed_dttm
+Дата/время обработки записи ETL-процессом
+
+timestamp(6)
+
+
+Далее будет пример по продуктовой структуре, либо «Каталог продуктов», это называют. Ещё иногда могут назвать функциональной структурой.
+
+https://my.tbank.ru/product-catalog/product/c5b3a0ac-a44b-4353-9f37-902ef0f5d4c6
+
+c5b3a0ac-a44b-4353-9f37-902ef0f5d4c6 - это ID юнита 
+
+urn:dd:tables:dlh:table:dds.functional_unit
+
+dds.functional_unit
+Wiki
+
+
+Атрибуты юнитов Каталога Продуктов (КП)
+DLH
+
+
+dds.functional_unit
+
+Edited 3 days ago
+
+lm_table
+
+Structure
+
+Physics
+
+Relations
+
+Lineage & Usage
+Attributes
+
+Data product	
+Каталог продуктов
+
+Owner	
+HC Data
+
+Table structure
+
+14
+Keys	Sensitivity	Name	Description	Jira	Source	Comment	Type
+PK
+
+functional_unit_rk
+Постоянный ключ юнита КП
+
+varchar
+
+functional_unit_id
+Внутренний идентификатор юнита КП
+
+varchar
+
+FK
+
+parent_functional_unit_rk
+Постоянный ключ родительского юнита КП
+
+varchar
+
+functional_unit_nm
+Название юнита КП
+
+varchar
+
+functional_unit_desc
+Текстовое описание юнита КП
+
+varchar
+
+functional_unit_type_cd
+Код типа юнита КП
+
+varchar
+
+head_functional_role_rk
+Постоянный ключ роли руководителя в КП
+
+varchar
+
+close_flg
+Флаг статуса закрытого юнита
+
+integer
+
+management_unit_rk
+Постоянный ключ юнита управленческой структуры
+
+varchar
+
+abm_applicable_flg
+Флаг принадлежности юнита к расчету P&L
+
+integer
+
+deleted_flg
+Флаг удаления записи из СИ
+
+integer
+
+PK
+
+valid_from_dttm
+Дата/время начала действия версии
+
+timestamp(6)
+
+valid_to_dttm
+Дата/время окончания действия версии
+
+timestamp(6)
+
+processed_dttm
+Дата/время обработки записи ETL-процессом
+
+timestamp(6)
+
+
+Все эти витрины с версионностью. Для актуальной записи нужно использовать valid2DTM = 59990101, и флаг закрытого статуса закрытой юнита тоже ноль.
+
+В целом посмотри по описанию уже использование DDS-слоя. Синхронизируйся, там есть примеры select у нас в базе знаний.
+
