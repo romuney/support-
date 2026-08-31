@@ -2050,6 +2050,12 @@ const ddFailed = [];
 // витрины в каталоге нет вовсе. Отдельный список, потому что чинится
 // в другом месте — строкой реестра, а не доступом.
 const ddNoFields = [];
+// Из них: каталог ОТКАЗАЛ (404/401 — неверный URN либо доступ) и каталог
+// ОТВЕТИЛ, но колонок у объекта нет (витрина в инвентарь DD не заведена).
+// Первое чинится строкой реестра, второе не чинится вовсе — и слитые
+// в один диагноз они отправляют чинить не то.
+const ddBadUrn = [];
+const ddNoColumns = [];
 ddResults.forEach((res, idx) => {
   // Порядок сохраняется Split Out, поэтому объект берём из плана по индексу.
   const urn = planned[idx]?.urn ?? '(объект ' + (idx + 1) + ')';
@@ -2070,7 +2076,21 @@ ddResults.forEach((res, idx) => {
     // `urn:dd:<systemType>:<systemName>:<type>:<id>`, правило верное,
     // а значения в нём угаданы. Поэтому промах обязан быть НАЗВАН строкой,
     // а не прятаться за словом «метаданные».
-    if (!fieldsOf(meta).size) ddNoFields.push(urn);
+    //
+    // ПРИЧИН ДВЕ, И ЧИНЯТСЯ ОНИ В РАЗНЫХ МЕСТАХ.
+    //
+    // Прогон фазы G 2026-08-31 это и показал: URN витрины детей оказался
+    // ВЕРНЫМ — поиск по имени нашёл ровно его. Значит каталог объект знает,
+    // а колонок у него нет: витрина внешняя, в инвентарь DD не заведена.
+    // Правя из-за этого строку реестра, джун чинил бы то, что не сломано.
+    //
+    // Шейпер `DD Lookup` эти случаи уже различает — «ОШИБКИ DD: HTTP …»
+    // против «ПОЛЯ ИЗ DD: 0», — надо было просто прочитать.
+    if (!fieldsOf(meta).size) {
+      ddNoFields.push(urn);
+      if (/ОШИБКИ DD/.test(meta)) ddBadUrn.push(urn);
+      else ddNoColumns.push(urn);
+    }
     // Каждый блок подписан своим URN. Два инвентаря без подписи — приглашение
     // приписать поле не той витрине, а это ровно та тихая ошибка, от которой
     // защищает разделение «инвентарь из DD, смысл из статьи».
@@ -2637,6 +2657,8 @@ return [{
     // витрины в каталоге нет. Отдельно от dd_failed — чинится строкой
     // реестра, а не доступом.
     dd_no_fields: ddNoFields,
+    dd_bad_urn: ddBadUrn,
+    dd_no_columns: ddNoColumns,
     unit_rk: String(unit.unit_rk || ''),
     unit_nm: String(unit.unit_nm || ''),
     unit_levels: Array.isArray(unit.unit_levels) ? unit.unit_levels : [],
@@ -3174,6 +3196,7 @@ out.unit_state = String(mat.unit_state || '');
 // URN в реестре не отвечает составом полей. Не пробел базы и не отказ
 // доступа — неверная строка реестра, и чинится она за минуту.
 out.dd_no_fields = Array.isArray(mat.dd_no_fields) ? mat.dd_no_fields : [];
+out.dd_bad_urn = Array.isArray(mat.dd_bad_urn) ? mat.dd_bad_urn : [];
 out.cols_from_data = Array.isArray(mat.cols_from_data) ? mat.cols_from_data : [];
 out.unit_rk = String(mat.unit_rk || '');
 
@@ -3592,16 +3615,26 @@ if (Array.isArray(mat.articles_invented) && mat.articles_invented.length) {
     ' — это промах роутера, а не пробел базы; править нечего, ' +
     'но если такая статья нужна — её и правда нет');
 }
-if (Array.isArray(mat.dd_no_fields) && mat.dd_no_fields.length) {
-  const got = Array.isArray(mat.cols_from_data) ? mat.cols_from_data : [];
-  tasks.push('URN в реестре не отдал состав полей: ' +
-    mat.dd_no_fields.join(', ') +
-    ' — каталог ответил, но полей не дал. Значит URN собран по схеме ' +
-    'и не подтверждён, либо витрины в каталоге нет вовсе. Настоящий URN ' +
-    'ищется поиском по имени витрины (фаза G в «DD Recon»), и правится ' +
-    'одна строка kb/index.md' +
-    (got.length ? '. Состав полей при этом добран из данных, ответ по нему '
-                  + 'полный — не хватает только описаний полей' : ''));
+const gotCols = Array.isArray(mat.cols_from_data) ? mat.cols_from_data : [];
+const colsTail = gotCols.length
+  ? '. Состав полей при этом добран из данных, ответ по нему полный — ' +
+    'не хватает только описаний полей'
+  : '';
+if (Array.isArray(mat.dd_bad_urn) && mat.dd_bad_urn.length) {
+  tasks.push('КАТАЛОГ ОТКАЗАЛ по объектам: ' +
+    mat.dd_bad_urn.map(shortUrn).join(', ') +
+    ' — 404 значит неверный URN в реестре, 401 значит истёкший Service ' +
+    'Account. Настоящий URN ищется поиском по имени витрины (фаза G ' +
+    'в «DD Recon»), и правится одна строка kb/index.md' + colsTail);
+}
+if (Array.isArray(mat.dd_no_columns) && mat.dd_no_columns.length) {
+  // Не задача для базы вовсе: URN верный, объект в каталоге есть, а колонок
+  // у него не заведено. Править нечего — но джун должен понимать, почему
+  // описаний полей не будет, и не идти проверять реестр.
+  tasks.push('ОПИСАНИЙ ПОЛЕЙ НЕ БУДЕТ по витринам: ' +
+    mat.dd_no_columns.map(shortUrn).join(', ') +
+    ' — каталог объект знает, а колонок у него не заведено (витрина ' +
+    'внешняя). Это НЕ ошибка реестра и не чинится правкой URN' + colsTail);
 }
 if (mat.registry_error) {
   // Не задача для базы, а поломка доступа — но читает этот блок тот же
@@ -5828,6 +5861,10 @@ return [{ json: {
     // сколько из них реально мешает, и по каким чинить в первую очередь.
     dd_no_fields:
       (Array.isArray(a.dd_no_fields) ? a.dd_no_fields : []).length,
+    // Из них — отказы каталога (404/401). Вторая половина, «колонок
+    // не заведено», не чинится вовсе, и складывать их значит мерить
+    // работу, которой нет.
+    dd_bad_urn: (Array.isArray(a.dd_bad_urn) ? a.dd_bad_urn : []).length,
     // Запрос по сотрудникам без фильтра активности. Метрика того, насколько
     // умолчание держится: статью код добирает на каждом запросе, и если доля
     // не падает, значит одной статьи мало и правило надо усиливать иначе.
@@ -6181,13 +6218,17 @@ if (a.unit_state === 'found') {
 
 if (Array.isArray(a.dd_no_fields) && a.dd_no_fields.length) {
   const got = Array.isArray(a.cols_from_data) ? a.cols_from_data : [];
+  const bad = Array.isArray(a.dd_bad_urn) ? a.dd_bad_urn : [];
+  const tail = got.length
+    ? ' Имена полей добраны из данных, так что ответ полный; не хватает ' +
+      'только описаний из каталога.'
+    : ' Состава полей у бота нет вовсе.';
   parts.push('🗂 **Каталог не дал состав полей:** ' + a.dd_no_fields.join(', ') +
-    '. URN в реестре собран по схеме и не подтверждён — это строка ' +
-    '`kb/index.md`, а не отказ доступа' +
-    (got.length
-      ? '. Имена полей добраны из данных, так что ответ полный; ' +
-        'не хватает только описаний из каталога.'
-      : '. Состава полей у бота нет вовсе.'));
+    '.' + (bad.length
+      ? ' Каталог ОТКАЗАЛ — это неверный URN в `kb/index.md` либо истёкший ' +
+        'Service Account.'
+      : ' Каталог объект знает, а колонок у него не заведено — витрина ' +
+        'внешняя, править в реестре нечего.') + tail);
 }
 
 if (Array.isArray(a.draft_foreign_ids) && a.draft_foreign_ids.length) {

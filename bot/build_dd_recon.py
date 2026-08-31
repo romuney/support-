@@ -1268,22 +1268,46 @@ asked.forEach((a, idx) => {
   const body = (r && (r.body ?? r)) || {};
   const cards = Array.isArray(body.data) ? body.data
               : Array.isArray(body) ? body : [];
-  // Совпадением считается ТОЧНОЕ имя таблицы в хвосте fqn или urn, а не
-  // первая строка выдачи: поиск ранжирует по релевантности и охотно отдаёт
-  // похожее. Неверный URN хуже отсутствующего — по нему бот молча
-  // не получит состав полей и будет извиняться на каждом ответе.
-  const hit = cards.find((c) => {
+
+  // ОДНА ТАБЛИЦА БЫВАЕТ В КАТАЛОГЕ ДВАЖДЫ — под разными системами.
+  //
+  // Первый прогон фазы 2026-08-31 предложил заменить URN
+  // `emart.mdm_employee_structure_d` с `greenplum` на `dlh` — а это ровно
+  // тот единственный URN, который подтверждён живым запросом и с которого
+  // приезжают 267 колонок. Значит в выдаче лежали ОБА, а `find()` брал
+  // первый по релевантности.
+  //
+  // Цена такой «правки» — заменить работающий URN на неподтверждённый,
+  // то есть ровно то, от чего фаза и заведена. Поэтому: если среди
+  // кандидатов есть URN ИЗ РЕЕСТРА — он и подтверждён, ранг ничего
+  // не решает. Выбирать между несколькими код не имеет права: несколько
+  // кандидатов печатаются списком с их системами, и решает человек.
+  const cand = cards.filter((c) => {
     const f = String(c.fqn || '').toLowerCase();
     const u = String(c.urn || '').toLowerCase();
-    return f.split('.').pop() === a.name || u.split(':').pop().split('.').pop() === a.name;
+    return f === a.fqn.toLowerCase() ||
+           u.split(':').pop().toLowerCase() === a.fqn.toLowerCase();
   });
-  if (!hit) {
-    miss.push(`${a.fqn} — в каталоге не нашлось (${cards.length} чужих совпадений)`);
+  if (!cand.length) {
+    // Точного совпадения по `схема.таблица` нет. Смотрим, есть ли хотя бы
+    // по имени таблицы: это другой диагноз — схема в каталоге записана
+    // иначе, чем в Trino, и человеку надо это увидеть, а не «не нашлось».
+    const byName = cards.filter((c) => {
+      const f = String(c.fqn || '').toLowerCase();
+      return f.split('.').pop() === a.name;
+    });
+    miss.push(byName.length
+      ? `${a.fqn} — точного совпадения нет, но по имени таблицы есть: ` +
+        byName.slice(0, 5).map((c) => `${c.urn}`).join(', ')
+      : `${a.fqn} — в каталоге не нашлось (${cards.length} чужих совпадений)`);
     return;
   }
-  const found = String(hit.urn || '');
-  if (found === a.urn) { same.push(a.fqn); return; }
-  rows.push({ fqn: a.fqn, was: a.urn, now: found });
+  if (cand.some((c) => String(c.urn || '') === a.urn)) { same.push(a.fqn); return; }
+  rows.push({
+    fqn: a.fqn,
+    was: a.urn,
+    now: cand.map((c) => String(c.urn || '')),
+  });
 });
 
 say('ФАЗА G. НАСТОЯЩИЕ URN ВИТРИН — ПОИСКОМ ПО ИМЕНИ');
@@ -1293,12 +1317,18 @@ say(`Спрошено витрин: ${asked.length}. Совпало с реес�
 
 if (rows.length) {
   say('');
-  say('ЗАМЕНИТЬ В kb/index.md, колонка dd_urn:');
+  say('URN ИЗ РЕЕСТРА В ВЫДАЧЕ НЕ НАШЁЛСЯ. Кандидаты — ниже; если их');
+  say('несколько, выбирает ЧЕЛОВЕК: код не имеет права заменять URN,');
+  say('который может оказаться рабочим, на URN, который никто не проверял.');
   for (const r of rows) {
     say('');
     say(`  ${r.fqn}`);
-    say(`    было:  ${r.was}`);
-    say(`    стало: ${r.now}`);
+    say(`    в реестре: ${r.was}`);
+    for (const u of r.now) say(`    кандидат:  ${u}`);
+    if (r.now.length > 1) {
+      say('    ↑ несколько систем на одну таблицу — проверить, какая отдаёт');
+      say('      состав полей, и только потом править реестр');
+    }
   }
 }
 if (miss.length) {

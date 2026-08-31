@@ -279,6 +279,62 @@ line('4. КАЖДАЯ Code-нода флоу парсится как JavaScript'
 }
 
 console.log(`\n${'='.repeat(70)}`);
+// ====================================================================== 8
+line('8. ФАЗА G: URN ИЗ РЕЕСТРА ПОБЕЖДАЕТ РАНГ ВЫДАЧИ');
+{
+  const shape = js('Shape urns');
+  const run = (asked, res) => new Function('$', '$json', shape)(
+    (n) => {
+      if (n === 'Tables to resolve') return { all: () => asked.map((json) => ({ json })) };
+      if (n === 'Search table') return { all: () => res.map((json) => ({ json })) };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json.report;
+
+  const ASK = { urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
+                fqn: 'emart.mdm_employee_structure_d', name: 'mdm_employee_structure_d' };
+
+  // Одна таблица лежит в каталоге под ДВУМЯ системами, и поиск ранжирует
+  // dlh выше. Первый прогон 2026-08-31 на этом предложил заменить
+  // единственный подтверждённый URN, с которого приезжают 267 колонок.
+  const both = run([ASK], [{ body: { data: [
+    { urn: 'urn:dd:tables:dlh:table:emart.mdm_employee_structure_d',
+      fqn: 'emart.mdm_employee_structure_d' },
+    { urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
+      fqn: 'emart.mdm_employee_structure_d' },
+  ] } }]);
+  check('URN из реестра признан подтверждённым, а не заменён',
+    /Подтверждены как есть \(1\)/.test(both) &&
+    !/в реестре: urn:dd:tables:greenplum/.test(both));
+
+  // А когда в реестре записан URN, которого в выдаче нет вовсе, — кандидаты
+  // печатаются ВСЕ, и выбирает человек: код не имеет права заменять URN,
+  // который может оказаться рабочим, на непроверенный.
+  const other = run([ASK], [{ body: { data: [
+    { urn: 'urn:dd:tables:dlh:table:emart.mdm_employee_structure_d',
+      fqn: 'emart.mdm_employee_structure_d' },
+    { urn: 'urn:dd:tables:iceberg:table:emart.mdm_employee_structure_d',
+      fqn: 'emart.mdm_employee_structure_d' },
+  ] } }]);
+  check('оба кандидата названы', /tables:dlh/.test(other) && /tables:iceberg/.test(other));
+  check('и сказано, что выбирает человек', /выбирает ЧЕЛОВЕК/.test(other));
+  check('подтверждённым это не считается', !/Подтверждены как есть/.test(other));
+
+  // Совпадение по имени таблицы, но НЕ по схеме — отдельный диагноз:
+  // схема в каталоге записана иначе, чем в Trino.
+  const bySchema = run([ASK], [{ body: { data: [
+    { urn: 'urn:dd:tables:dlh:table:hrmart.mdm_employee_structure_d',
+      fqn: 'hrmart.mdm_employee_structure_d' },
+  ] } }]);
+  check('чужая схема не выдаётся за совпадение',
+    /точного совпадения нет, но по имени таблицы есть/.test(bySchema));
+
+  const none = run([ASK], [{ body: { data: [] } }]);
+  check('пустая выдача названа своим диагнозом',
+    /в каталоге не нашлось/.test(none));
+  const bad = run([ASK], [{ statusCode: 500 }]);
+  check('отказ запроса — не «не нашлось»', /HTTP 500/.test(bad));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

@@ -3081,6 +3081,25 @@ line('53. «КАТАЛОГ ОТВЕТИЛ» И «КАТАЛОГ ДАЛ СОСТ�
       throw new Error('node not executed: ' + n);
     }, {})[0].json;
 
+  const mat0 = (kidsMeta) => new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') return { first: () => ({ json: PLAN }) };
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') return { all: () => [
+        { json: { dd_meta: 'ВСЕ ПОЛЯ ТАБЛИЦЫ:\n\nmdm_employee_rk, last_day_flg' } },
+        { json: { dd_meta: kidsMeta } },
+      ] };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  const parse = (m) => new Function('$', '$json', js('Parse answer'))(
+    (n) => {
+      if (n === 'When called by adapter') return { first: () => ({ json: { question: 'q' } }) };
+      if (n === 'Plan') return { first: () => ({ json: {} }) };
+      if (n === 'Build materials') return { first: () => ({ json: m }) };
+      if (n === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+      throw new Error('node not executed: ' + n);
+    }, { output: 'ЧЕРНОВИК ОТВЕТА: текст\nУВЕРЕННОСТЬ: высокая' })[0].json;
+
   const m = mat(null);
   check('витрина без состава полей НАЗВАНА',
     m.dd_no_fields.length === 1 && m.dd_no_fields[0] === URN_KIDS);
@@ -3089,21 +3108,25 @@ line('53. «КАТАЛОГ ОТВЕТИЛ» И «КАТАЛОГ ДАЛ СОСТ�
 
   // Джун должен увидеть строку и понять, что чинить: не доступ и не пробел
   // базы, а одну строку реестра.
-  const fin = js('Parse answer');
-  const parsed = new Function('$', '$json', fin)(
-    (n) => {
-      if (n === 'When called by adapter') return { first: () => ({ json: { question: 'q' } }) };
-      if (n === 'Plan') return { first: () => ({ json: {} }) };
-      if (n === 'Build materials') return { first: () => ({ json: m }) };
-      if (n === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
-      throw new Error('node not executed: ' + n);
-    }, { output: 'ЧЕРНОВИК ОТВЕТА: текст\nУВЕРЕННОСТЬ: высокая' })[0].json;
+  const parsed = parse(m);
   check('признак доехал до разбора', parsed.dd_no_fields.length === 1);
-  check('и «Задача для базы» называет строку реестра, а не доступ',
-    parsed.kb_tasks.some((t) => /URN в реестре не отдал состав полей/.test(t)) &&
+
+  // ПРИЧИН ДВЕ, И ЧИНЯТСЯ ОНИ В РАЗНЫХ МЕСТАХ. Прогон фазы G 2026-08-31
+  // показал, что URN витрины детей ВЕРНЫЙ: каталог объект знает, а колонок
+  // у него не заведено. Валя это в один диагноз, джуна отправляли править
+  // строку реестра, которая не сломана.
+  check('отказ каталога назван отказом', parsed.dd_bad_urn.length === 1);
+  check('и «Задача для базы» говорит про URN и Service Account',
+    parsed.kb_tasks.some((t) => /КАТАЛОГ ОТКАЗАЛ/.test(t)) &&
     parsed.kb_tasks.some((t) => /kb\/index\.md/.test(t)));
-  check('и не выдаёт это за пробел базы',
-    !parsed.kb_tasks.some((t) => /URN в реестре не отдал[\s\S]*владелец не заполнил/.test(t)));
+
+  const mZero = mat0('ПОЛЯ ИЗ DD: 0\nDD не вернул ни одного поля.');
+  const pZero = parse(mZero);
+  check('«колонок не заведено» — это НЕ отказ каталога',
+    pZero.dd_no_fields.length === 1 && pZero.dd_bad_urn.length === 0);
+  check('и джуна не отправляют править верный URN',
+    pZero.kb_tasks.some((t) => /не чинится правкой URN/.test(t)) &&
+    !pZero.kb_tasks.some((t) => /КАТАЛОГ ОТКАЗАЛ/.test(t)));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
