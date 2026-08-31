@@ -690,6 +690,16 @@ cd bot && python3 build_dd_flow.py && python3 build_time_flows.py
 `POST /search/query` эти URN руками не добыть — поэтому `dd_search` идёт
 раньше наполнения `kb/reports/`.
 
+**Три витрины заведены 2026-08-31** по описанию владельца: поля заявлений
+сотрудников (`sdp_edms_statement.statement_field`), подневные метрики
+активности (`sse_crossdata.performance_metric_d`) и трансферы по юридической
+структуре (`sse_crossdata.legal_position_attr_chng`). Две вещи в них записаны
+как НЕподтверждённые и проверяются перед первым использованием: условие
+джойна метрик активности (из формулировки владельца не видно, какое поле
+на какой стороне) и направление сравнения `business_dt <= change_dt`
+у трансферов. Обе ошибки не падают, а меняют смысл выборки, — поэтому
+названы в статьях прямо, а не оставлены на догадку.
+
 В решениях всплыли четыре таблицы, которых нет в реестре:
 `management_position_d`, `head_experience_and_scope_of_control`,
 `summary_evaluation`, `mdm_employee_office_utilization`. Для агента их
