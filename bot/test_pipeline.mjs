@@ -3186,6 +3186,69 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
 
   check('ядро разобрало инвентарь, а не объявило его пустым',
     m.dd_no_fields.length === 0);
+
+  // СОСТАВ ЕДЕТ ДАННЫМИ, И ЭТО ОСНОВНОЙ ПУТЬ. Текст `dd_meta` пишется для
+  // модели, его формат меняется свободно, и выковыривать из него список
+  // регуляркой значит держать контракт, который разъезжается молча:
+  // 2026-08-31 каталог отдал 25 полей, а разбор увидел ноль, и двое суток
+  // отказ выглядел молчанием каталога.
+  const shaped = new Function('$', '$json', ddJs('Shape table meta'))(
+    (n) => {
+      if (n === 'When called by agent') return { first: () => ({ json: { urn: URN_KIDS, search: '' } }) };
+      if (n === 'dd_entity_card') {
+        return { first: () => ({ json: { statusCode: 200, body: { data: 'Данные о детях' } } }) };
+      }
+      if (n === 'dd_entity_attrs') return { first: () => ({ json: { statusCode: 200, body: {} } }) };
+      if (n === 'dd_columns') return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      if (n === 'Pick columns') {
+        return { first: () => ({ json: { targets: [], mode: '', total: NAMES.length } }) };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  check('шейпер отдал состав полей списком, а не только текстом',
+    Array.isArray(shaped.dd_fields) && shaped.dd_fields.length === NAMES.length);
+  check('и число полей рядом', shaped.dd_total === NAMES.length);
+
+  const byData = new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') {
+        return { first: () => ({ json: {
+          files: [], domains: [], dd: [{ urn: URN_KIDS, hint: '' }], dd_count: 1,
+          unit_link_kind: '', unit_link_id: '' } }) };
+      }
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      // Текст НАМЕРЕННО в формате, который разбору не по зубам: список едет
+      // данными, и текст больше ни на что не влияет.
+      if (n === 'Call DD Lookup') {
+        return { all: () => [{ json: {
+          dd_meta: 'ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ: 10.\n' + NAMES.join(' | '),
+          dd_fields: NAMES, dd_total: NAMES.length } }] };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  check('состав прочитан из данных, даже когда текст неразборный',
+    byData.dd_no_fields.length === 0 && byData.dd_parse_failed.length === 0);
+
+  // А промах разбора обязан показывать ОБРАЗЕЦ пришедшего: три неверных
+  // диагноза подряд получились ровно потому, что его было не видно.
+  const noData = new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') {
+        return { first: () => ({ json: {
+          files: [], domains: [], dd: [{ urn: URN_KIDS, hint: '' }], dd_count: 1,
+          unit_link_kind: '', unit_link_id: '' } }) };
+      }
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') {
+        return { all: () => [{ json: {
+          dd_meta: 'ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ: 10.\n' + NAMES.join(' | ') } }] };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  check('без данных промах разбора назван и показан образцом',
+    noData.dd_parse_failed.length === 1 &&
+    /пришло: «/.test(noData.dd_parse_failed[0]) &&
+    /individualid/.test(noData.dd_parse_failed[0]));
   check('и не попросило добирать состав из данных',
     m.cols_from_data.length === 0 && m.cols_unknown.length === 0);
 
@@ -3211,7 +3274,7 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
   // ТРИ РЕЖИМА ШЕЙПЕРА, И РАЗБОР ОБЯЗАН РАБОТАТЬ В КАЖДОМ. Число полей
   // шейпер называет во всех трёх, но по-разному, и без сверки с ним промах
   // разбора снова стал бы молчанием каталога — только уже в другом режиме.
-  const shaped = (search, pick) => new Function('$', '$json', ddJs('Shape table meta'))(
+  const shapedWith = (search, pick) => new Function('$', '$json', ddJs('Shape table meta'))(
     (n) => {
       if (n === 'When called by agent') return { first: () => ({ json: { urn: URN_KIDS, search } }) };
       if (n === 'dd_entity_card') {
@@ -3243,7 +3306,7 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
     ['фильтр промахнулся', 'зарплата',
      { targets: [], mode: 'by_name', total: NAMES.length }],
   ]) {
-    const t = shaped(search, pick);
+    const t = shapedWith(search, pick);
     check(`${label}: инвентарь разобран целиком`,
       api.fieldsOf(t).size === NAMES.length);
     check(`${label}: число полей объявлено и прочитано`,

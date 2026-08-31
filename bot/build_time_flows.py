@@ -2124,8 +2124,18 @@ ddResults.forEach((res, idx) => {
     //
     // Шейпер `DD Lookup` эти случаи уже различает — «ОШИБКИ DD: HTTP …»
     // против «ПОЛЯ ИЗ DD: 0», — надо было просто прочитать.
-    const inv = fieldsOf(meta);
-    const declared = declaredOf(meta);
+    // СОСТАВ ПОЛЕЙ БЕРЁТСЯ ИЗ ДАННЫХ ОТВЕТА, А НЕ ИЗ ЕГО ТЕКСТА.
+    //
+    // `DD Lookup` отдаёт `dd_fields` списком — читаем его. Разбор текста
+    // остался запасным путём для старой версии субворкфлоу: пока она
+    // не переимпортирована, ядро не должно ослепнуть. Но основной путь
+    // теперь не парсит ничего, и разъезжаться формату не с чем.
+    const listed = Array.isArray(res?.dd_fields)
+      ? res.dd_fields.map((f) => String(f || '').trim()).filter(Boolean)
+      : null;
+    const inv = listed && listed.length ? new Set(listed) : fieldsOf(meta);
+    const declared = Number.isFinite(res?.dd_total) && res.dd_total > 0
+      ? res.dd_total : declaredOf(meta);
     if (!inv.size) {
       ddNoFields.push(urn);
       if (/ОШИБКИ DD/.test(meta)) ddBadUrn.push(urn);
@@ -2142,7 +2152,16 @@ ddResults.forEach((res, idx) => {
       // Единственная защита — сверка с числом, которое та же нода объявила:
       // обещано N, разобрано 0 — говорим об этом громко и чиним разбор,
       // а не реестр и не доступ.
-      else if (declared) ddParseFailed.push(urn + ' (обещано полей: ' + declared + ')');
+      // Обещано N, а состава нет. Печатаем ОБРАЗЕЦ того, что пришло:
+      // без него причину приходится угадывать, а угадывание по этому же
+      // отказу уже дало три неверных диагноза подряд.
+      else if (declared) {
+        const at = meta.search(/ПОЛЯ|ПОДРОБНО/);
+        const sample = meta.slice(at < 0 ? 0 : at, (at < 0 ? 0 : at) + 220)
+          .replace(/\s+/g, ' ').trim();
+        ddParseFailed.push(urn + ' (обещано полей: ' + declared +
+          '; пришло: «' + sample + '…»)');
+      }
       else ddNoColumns.push(urn);
     }
     // Каждый блок подписан своим URN. Два инвентаря без подписи — приглашение
