@@ -316,6 +316,38 @@ bot AS (
            -- людей больше, чем есть. Доля показывает, держится ли умолчание.
            max_by(CAST(json_extract_scalar(payload, '$.draft_no_active_filter') AS boolean),
                   event_ts) AS draft_no_active_filter,
+           -- Оборотная сторона того же правила: увольнение определено ПО ДАТЕ,
+           -- а не по флагу. `company_fire_dt` бывает проставлена на будущее,
+           -- и такое увольнение может не состояться — значит в счёт уезжают
+           -- несвершившиеся события. Ошибка того же класса: запрос не падает,
+           -- цифра правдоподобна, сверить не с чем.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_fire_by_date') AS boolean),
+                  event_ts) AS draft_fire_by_date,
+           -- Согласование доступа: сколько полей каталог назвал закрытыми
+           -- и стоит ли в черновике хоть одна пометка 🔒. Раздел «Чего
+           -- не будет» убран (запрета на выгрузку у нас нет — есть требование
+           -- согласовать доступ), и пометка осталась единственным местом,
+           -- где заказчик про это узнаёт. Доля непомеченных показывает,
+           -- держится ли правило.
+           max_by(CAST(json_extract_scalar(payload, '$.sens_fields') AS integer),
+                  event_ts) AS sens_fields,
+           max_by(CAST(json_extract_scalar(payload, '$.sens_unmarked') AS boolean),
+                  event_ts) AS sens_unmarked,
+           -- Название своей компании, поставленное значением фильтра.
+           -- «Уволились из Тбанка» — это вся витрина, а не значение поля;
+           -- искать «Тбанк» среди подразделений бессмысленно по построению.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_company_filter') AS integer),
+                  event_ts) AS draft_company_filter,
+           -- Роутер назвал путь статьи неверно, и код восстановил его
+           -- по реестру. Доля восстановлений — метрика того, держит ли роутер
+           -- формат: до 2026-08-31 такой промах молча терял статью, и по логу
+           -- потеря была неотличима от «такой статьи в базе нет».
+           max_by(CAST(json_extract_scalar(payload, '$.articles_recovered') AS integer),
+                  event_ts) AS articles_recovered,
+           -- Сколько статей роутер назвал по id, а не путём. Обратная
+           -- метрика к предыдущей: растёт она — промахов будет меньше.
+           max_by(CAST(json_extract_scalar(payload, '$.articles_by_id') AS integer),
+                  event_ts) AS articles_by_id,
            -- Проверка значений в данных: она стоит ПОСЛЕ автора, и по этим
            -- четырём полям видно, дошла ли она до данных и что вернула.
            -- Разводить их обязательно: «автор не просил проверять» (0 пар),
@@ -335,6 +367,14 @@ bot AS (
            -- угадывает написание с первого раза.
            max_by(CAST(json_extract_scalar(payload, '$.check_exact') AS integer),
                   event_ts) AS check_exact,
+           -- ПОДМЕНА: в итоговом фильтре значение, которого заказчик
+           -- не называл. Отдельно от check_exact: там «ответ был тот самый»,
+           -- здесь «данные сказали, что такого значения нет, а в запрос всё
+           -- равно уехало чужое». Живой прогон 2026-08-31: HQ → «Финансы».
+           -- Это единственный случай, когда проверка значений работает ХУЖЕ
+           -- своего отсутствия, и доля таких ответов — её главный риск.
+           max_by(CAST(json_extract_scalar(payload, '$.check_substituted') AS integer),
+                  event_ts) AS check_substituted,
            -- Черновик просит проверить то, что уже проверено. Метрика того,
            -- держится ли запрет в промпте автора: доля не падает — значит
            -- правило надо усиливать не формулировкой.
@@ -510,6 +550,9 @@ SELECT
     COALESCE(b.check_skipped, 0)                            AS check_skipped,
     COALESCE(b.check_rows, 0)                               AS check_rows,
     COALESCE(b.check_exact, 0)                              AS check_exact,
+    -- Подмена значения: данные ответили «такого нет», а в фильтр уехало
+    -- чужое. Считается отдельно от check_exact намеренно — см. блок bot.
+    COALESCE(b.check_substituted, 0)                        AS check_substituted,
     COALESCE(b.draft_stale_caveat, false)                   AS draft_stale_caveat,
     COALESCE(b.check_missed, false)                         AS check_missed,
     COALESCE(b.check_retried, false)                        AS check_retried,
@@ -526,6 +569,15 @@ SELECT
     COALESCE(b.draft_leaks, false)                          AS draft_leaks,
     COALESCE(b.experts_invented, 0)                         AS experts_invented,
     COALESCE(b.draft_own_tools, 0)                          AS draft_own_tools,
+    COALESCE(b.draft_fire_by_date, false)                   AS draft_fire_by_date,
+    COALESCE(b.sens_fields, 0)                              AS sens_fields,
+    COALESCE(b.sens_unmarked, false)                        AS sens_unmarked,
+    COALESCE(b.draft_company_filter, 0)                     AS draft_company_filter,
+    -- Резолв путей роутера. Обе колонки про одно: насколько роутер держит
+    -- формат. Восстановленный путь — починка на лету, и если она частая,
+    -- чинить надо промпт, а не радоваться тому, что статья доехала.
+    COALESCE(b.articles_recovered, 0)                       AS articles_recovered,
+    COALESCE(b.articles_by_id, 0)                           AS articles_by_id,
     COALESCE(b.draft_too_long, false)                        AS draft_too_long,
     b.draft_len,
     COALESCE(b.confidence_capped, false)                    AS confidence_capped,

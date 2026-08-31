@@ -2566,5 +2566,117 @@ line('54. ПРОМАХ РАЗБОРА ПАР ОБЪЯВЛЯЕТ СЕБЯ САМ'
     view.includes('check_missed') && view.includes('check_reason'));
 }
 
+// ===================================================================== 55
+line('55. ПОДМЕНА ЗНАЧЕНИЯ: данные сказали «нет», а в фильтр уехало чужое');
+{
+  const finalJs = js(core, 'Final answer');
+  const runFinal = (first, revised, res) => {
+    const $ = (name) => {
+      if (name === 'Parse answer') return { first: () => ({ json: first }) };
+      if (name === 'Parse revised') {
+        if (!revised) throw new Error('node not executed: Parse revised');
+        return { first: () => ({ json: revised }) };
+      }
+      if (name === 'Build check SQL') {
+        return { first: () => ({ json: { check_pairs: [{ field: 'x' }], check_skipped: [] } }) };
+      }
+      if (name === 'Check result') return { first: () => ({ json: res }) };
+      throw new Error('node not executed: ' + name);
+    };
+    return new Function('$', '$json', finalJs)($, {})[0].json;
+  };
+
+  // ЖИВОЙ КЕЙС 2026-08-31: «сколько сотрудников по покраске HQ и BigOps».
+  // Ни «HQ», ни «BigOps» не совпали ни с одним значением поля подразделения,
+  // и автор подставил в фильтр три значения из перечня прочих, расписав,
+  // какие из них «классические штабные функции». Запрос выполнился и вернул
+  // неверные цифры молча, а проверка значений отчиталась успехом: строки-то
+  // пришли. Это единственный случай, когда проверка работает ХУЖЕ своего
+  // отсутствия — без неё автор хотя бы сказал «не нашёл».
+  const RES = {
+    check_rows: 8, check_failed: '', check_exact: 0,
+    check_rest: {
+      lvl3_mapped_management_unit_nm: [
+        'Финансы', 'Human Capital', 'Технологии, Безопасность, Операции',
+        'Бизнес линии',
+      ],
+    },
+  };
+  const FIRST = { draft: 'первый', confidence_key: 'high', confidence_claimed: 'high' };
+  const subbed = runFinal(FIRST, {
+    draft: "where lvl3_mapped_management_unit_nm in ('Финансы', 'Human Capital')",
+    confidence_key: 'high', confidence_claimed: 'high',
+  }, RES);
+  check('подмена поймана', subbed.check_substituted.length === 2);
+  check('и названы конкретные значения',
+    subbed.check_substituted.some((x) => x.value === 'Финансы'));
+  check('уверенность понижена до средней', subbed.confidence_key === 'medium');
+  check('и причина названа',
+    /которого заказчик не называл/.test(subbed.confidence_capped_reason));
+
+  // Значение, которое данные ПОДТВЕРДИЛИ, подменой не считается — иначе
+  // строка горела бы на верном черновике и её перестали бы читать.
+  const fine = runFinal(FIRST, {
+    draft: "where emp_specialization_oper_code = 'HQ'",
+    confidence_key: 'high', confidence_claimed: 'high',
+  }, {
+    check_rows: 3, check_failed: '', check_exact: 1,
+    check_rest: { emp_specialization_oper_code: ['Line', 'Support'] },
+  });
+  check('подтверждённое значение подменой не считается',
+    fine.check_substituted.length === 0 && fine.confidence_key === 'high');
+
+  // Джун видит строку раньше остальных проверок значений.
+  const msg = runChannelParts({
+    draft: 'черновик', confidence_key: 'medium', check_asked: 2, check_rows: 8,
+    check_substituted: [{ field: 'lvl3_mapped_management_unit_nm', value: 'Финансы' }],
+  }).join('\n');
+  check('джун видит подмену', /значение, которого заказчик не называл/.test(msg));
+  check('и подсказку про неверное поле', /выбрано не то поле/.test(msg));
+
+  const view = fs.readFileSync('../telemetry/support_request.sql', 'utf8');
+  check('поле читается витриной', view.includes('check_substituted'));
+}
+
+// ===================================================================== 56
+line('56. СОГЛАСОВАНИЕ ДОСТУПА: пометка 🔒 вместо раздела «Чего не будет»');
+{
+  // Запрета на выгрузку у нас нет: за выгрузками в канал приходят как раз те,
+  // у кого доступа пока нет, и согласуют его в треде. Раздел «Чего не будет»
+  // утверждал обратное — бот говорил «этого не будет», человек шёл
+  // согласовывать и получал ровно то, чего «не будет».
+  const exportRules = fs.readFileSync('prompts/export.md', 'utf8');
+  check('раздела «Чего не будет» в правилах режима больше нет',
+    !/\*\*Чего не будет\*\*/.test(exportRules));
+  check('вместо него пометка замком',
+    /помечаются 🔒 прямо в этом списке/.test(exportRules));
+  check('и сказано, что запрета нет',
+    /ЗАПРЕТА НА ВЫГРУЗКУ У НАС НЕТ/.test(exportRules));
+  // Требование ИБ при передаче наружу — единственное, что осталось жёстким.
+  check('но требование ИБ не смягчено',
+    /не передаём, пока\n?информационная безопасность не согласовала/.test(exportRules));
+
+  // ТЗ стало готовым запросом: бот уже ходит в данные, и переводить прозу
+  // в select руками аналитику больше не нужно.
+  check('ТЗ — готовый запрос, а не его описание',
+    /ТЗ — ЭТО ГОТОВЫЙ ЗАПРОС/.test(exportRules));
+  check('и разделы-дубли убраны',
+    /отдельными\nразделами больше НЕ выводятся/.test(exportRules));
+
+  const msg = runChannelParts({
+    draft: 'состав файла без пометок', confidence_key: 'high',
+    is_export: true, sens_fields: 3, sens_unmarked: true,
+  }).join('\n');
+  check('джун видит непомеченные закрытые поля',
+    /закрытых полей 3, а пометок/.test(msg));
+  check('и формулировка без запрета', /запрета нет, есть согласование/.test(msg));
+
+  const quiet = runChannelParts({
+    draft: 'логин 🔒', confidence_key: 'high',
+    is_export: true, sens_fields: 3, sens_unmarked: false,
+  }).join('\n');
+  check('с пометкой строка молчит', !/закрытых полей/.test(quiet));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

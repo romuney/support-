@@ -175,16 +175,22 @@ line('5. СЛОМАННЫЙ вывод роутера не роняет флоу
 // ====================================================================== 6
 line('6. ЛИМИТ ОБЪЁМА: обрезанное названо, а не выброшено молча');
 {
-  const many = Array.from({ length: 12 }, (_, i) => `kb/metrics/x${i}.md`);
+  const many = Array.from({ length: 16 }, (_, i) => `kb/metrics/x${i}.md`);
   const p = runPlan(JSON.stringify({
     domains: [], articles: many, dd_urn: '', field_hint: '', no_question: false,
   }));
-  check('план обрезан до 8', p.files.length === 8);
+  // Потолок поднят с 8 до 12: шесть статей добирает КОД (мастера, плейбук
+  // выгрузки, развилка структуры, sql-conventions, словарь синонимов,
+  // статья витрины), и при потолке 8 на выбор роутера оставалось две.
+  check('план обрезан до 12', p.files.length === 12);
   check('обрезанное перечислено', p.dropped.length === 4);
 
   const m = runMaterials(p, [{ content: b64('# статья') }]);
   check('автор знает про обрезку', /По лимиту объёма не читались/.test(m.materials));
-  check('названы конкретные файлы', /kb\/metrics\/x8\.md/.test(m.materials));
+  check('названы конкретные файлы', /kb\/metrics\/x12\.md/.test(m.materials));
+  // Размер материалов теперь измеряется: без числа все потолки остаются
+  // придуманными, и каждый раз, когда они мешают, это выясняется отказом.
+  check('размер материалов измерен', m.materials_len === m.materials.length);
 }
 
 // ====================================================================== 7
@@ -1453,7 +1459,9 @@ line('32. ПРОВЕРКА ЗНАЧЕНИЙ ПОСЛЕ АВТОРА: сборк�
     materials:
       '=== МЕТАДАННЫЕ urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ===\n' +
       'ПОЛЯ: business_dt, last_day_flg, emp_stream_desc, ' +
-      'mapped_management_unit_nm, legal_unit_nm, grade\n',
+      'mapped_management_unit_nm, legal_unit_nm, grade, ' +
+      'emp_specialization_desc, emp_specialization_oper_code, ' +
+      'active_type_nm, emp_grade_desc\n',
   };
 
   const runCheck = (parsed, mat = MAT) => {
@@ -1510,11 +1518,17 @@ line('32. ПРОВЕРКА ЗНАЧЕНИЙ ПОСЛЕ АВТОРА: сборк�
     bad[0].check_skipped.some((x) => /employee_login_nm/.test(x) && /инвентар/.test(x)));
 
   // --- потолок пар: тоже называется, а не режет молча.
+  // Потолок поднят с 4 до 8: запрос идёт ПО ЗАПРОСУ НА ПОЛЕ, и GROUP BY
+  // в нём всё равно проходит по всему срезу — восьмая пара стоит одного
+  // вызова, а не восьмикратного скана. В выгрузках фильтров всегда больше
+  // четырёх, и «не проверялись» в логе читалось как «проверять было нечего».
   const many = runCheck({
     check_values: ['emp_stream_desc = a', 'legal_unit_nm = b', 'grade = c',
-                   'business_dt = d', 'mapped_management_unit_nm = e'].join('\n'),
+                   'business_dt = d', 'mapped_management_unit_nm = e',
+                   'emp_specialization_desc = f', 'emp_specialization_oper_code = g',
+                   'active_type_nm = h', 'emp_grade_desc = i'].join('\n'),
   });
-  check('потолок пар соблюдён', many.length === 4);
+  check('потолок пар соблюдён', many.length === 8);
   check('и остаток назван числом',
     many[0].check_skipped.some((x) => /потолок/.test(x)));
   // Поле без подчёркивания — не выдуманное. `grade` самое частое слово
@@ -1567,8 +1581,21 @@ line('33. ПРОВЕРКА ЗНАЧЕНИЙ: пять исходов звуча�
     { fld: 'emp_stream_desc', val: 'Retail', cnt: 90, matched: false },
   ]);
   check('промах назван прямо', /НЕ СОВПАЛО НИЧЕГО/.test(miss.check_block));
-  check('и сказано искать по смыслу, а не по буквам',
-    /ПО СМЫСЛУ/.test(miss.check_block) && /«Дата» → «Data»/.test(miss.check_block));
+  // Случай (а) — другое написание того же понятия — остаётся: ради него
+  // перечень и печатается целиком.
+  check('другое написание того же понятия названо',
+    /«Дата» это «Data»/.test(miss.check_block));
+  // А случай (б) — слово из ДРУГОГО поля — раньше отсутствовал, и вместо
+  // него стояло «найди подходящее ПО СМЫСЛУ». Ровно эта строка 2026-08-31
+  // велела автору подставить «Финансы» вместо «HQ».
+  check('неверно выбранное поле названо вторым случаем',
+    /ПОЛЕ\s*\n?\s*ВЫБРАНО НЕВЕРНО/.test(miss.check_block));
+  check('подбор похожего запрещён прямо',
+    /НЕ подбирай «похожее/.test(miss.check_block));
+  check('раскладка одного слова в набор запрещена',
+    /НЕ раскладывай одно слово заказчика/.test(miss.check_block));
+  check('приглашения «найди по смыслу» больше нет',
+    !/найди подходящее/i.test(miss.check_block));
 
   // Потолок словаря зависит от исхода: при совпадениях словарь это фон
   // и шести хватает, без совпадений словарь и есть ответ.
@@ -1884,8 +1911,9 @@ line('38. ТОЧНОЕ СОВПАДЕНИЕ НЕ ПОДМЕНЯЕТСЯ ПОХО
       : { all: () => rows.slice(1).map((json) => ({ json })) }),
     {},
   )[0].json;
-  check('без точного совпадения выбор по смыслу',
-    /точного совпадения нет/.test(noExact.check_block) &&
+  check('без точного совпадения — два случая, а не «выбери по смыслу»',
+    /дословного совпадения нет/.test(noExact.check_block) &&
+    /НИЧЕГО НЕ ПОДСТАВЛЯЙ/.test(noExact.check_block) &&
     !/ТОЧНОЕ СОВПАДЕНИЕ/.test(noExact.check_block));
   check('и счётчик точных нулевой', noExact.check_exact === 0);
 
@@ -2024,6 +2052,181 @@ line('40. ДОСПРОС: автор сам знает, чего не хвати
   check('и его некуда сделать: обратной связи в графе нет',
     !(conn['Need check after ask']?.main || []).flat()
       .some((e) => /Ask pairs|Need retry/.test(e.node)));
+}
+
+// ===================================================================== 41
+line('41. ПУТЬ СТАТЬИ: реестр — источник правды, а не память роутера');
+{
+  // ЖИВОЙ КЕЙС 2026-08-31. Роутер назвал `kb/field-synonyms.md`; настоящий
+  // путь — `kb/recipes/field-synonyms.md`. Разошлись на одну папку, и
+  // потерялась ровно та статья, в которой лежал ответ: словарь
+  // «слово заказчика → поле» со строкой HQ/Line/Support →
+  // emp_specialization_oper_code. Бот сам понял, чего ему не хватает,
+  // сам это попросил — и написал в ТЗ «поля не обнаружено».
+  const said = (arts) => runPlan(JSON.stringify({
+    domains: [], articles: arts, dd: [], no_question: false,
+  }));
+
+  const miss = said(['kb/field-synonyms.md']);
+  check('промах в папке восстановлен по имени файла',
+    miss.files.includes('kb/recipes/field-synonyms.md'));
+  check('и восстановление названо, а не сделано молча',
+    miss.articles_recovered.length === 1 &&
+    miss.articles_recovered[0].said === 'kb/field-synonyms.md');
+  check('выдуманным такой путь больше не считается',
+    miss.articles_invented.length === 0);
+
+  // Основная форма после правки: роутер называет id, путь подставляет код.
+  // Тогда выдуманный путь невозможен по конструкции, а не по дисциплине.
+  const byId = said(['rc-field-synonyms', 'm-turnover']);
+  check('id резолвится в путь по реестру',
+    byId.files.includes('kb/recipes/field-synonyms.md') &&
+    byId.files.includes('kb/metrics/turnover.md'));
+  check('и это видно отдельным полем', byId.articles_by_id.length === 2);
+  check('выбор роутера засчитан путями, а не сырым вводом',
+    byId.router_articles.includes('kb/metrics/turnover.md'));
+
+  // Восстанавливаем ТОЛЬКО при единственном кандидате: тихо прочитать
+  // не ту статью хуже, чем не прочитать никакую. И то, что не резолвится
+  // ничем, остаётся выдуманным — диагноз у него свой.
+  const ghost = said(['kb/recipes/nothing-like-this.md']);
+  check('невосстановимый путь остаётся выдуманным',
+    ghost.articles_invented.includes('kb/recipes/nothing-like-this.md'));
+  check('и восстановленным не объявляется', ghost.articles_recovered.length === 0);
+
+  // Понижение уверенности: статья, которую роутер счёл нужной, не доехала.
+  // Раньше это уверенность не трогало вовсе, и по логу потеря статьи была
+  // неотличима от «такой статьи в базе нет».
+  const parseJs = js('Parse answer');
+  const runP = (mat) => new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'When called by adapter') return { first: () => ({ json: { question: 'q' } }) };
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      if (name === 'Build materials') return { first: () => ({ json: mat }) };
+      if (name === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+      throw new Error('node not executed: ' + name);
+    },
+    { output: 'ЧЕРНОВИК ОТВЕТА: текст\nУВЕРЕННОСТЬ: высокая' },
+  )[0].json;
+
+  const lost = runP({
+    materials: 'x', has_materials: true,
+    articles_invented: ['kb/field-synonyms.md'],
+  });
+  check('непрочитанная статья понижает уверенность',
+    lost.confidence_key === 'medium');
+  check('и причина названа путём',
+    /kb\/field-synonyms\.md/.test(lost.confidence_capped_reason));
+
+  const ok = runP({
+    materials: 'x', has_materials: true,
+    articles_recovered: [{ said: 'kb/field-synonyms.md',
+                           path: 'kb/recipes/field-synonyms.md' }],
+  });
+  check('восстановленная статья уверенность НЕ понижает — она доехала',
+    ok.confidence_key === 'high');
+}
+
+// ===================================================================== 41б
+line('41б. СЛОВАРЬ СИНОНИМОВ добирается КОДОМ, а не по просьбе в промпте');
+{
+  // ЖИВОЙ КЕЙС 2026-08-31, личка: «напиши sql сколько актуальных сотрудников
+  // по покраске hq и bigops». Словаря в материалах не было, и «HQ» ушло
+  // искаться среди названий управленческих подразделений — где его нет
+  // и быть не может. Заказчику уехал запрос по трём подразделениям,
+  // подобранным «по смыслу».
+  //
+  // Мост «слово заказчика → поле» существует ТОЛЬКО в rc-field-synonyms:
+  // в описаниях полей каталога нет ни «покраски», ни «HQ», и поиск
+  // по смыслу их не находит никогда.
+  const q = 'напиши sql сколько актуальных сотрудников по покраске hq и bigops';
+  const p = runPlan(
+    JSON.stringify({ domains: ['headcount-structure'], articles: [], dd: [], no_question: false }),
+    REGISTRY, { question: q },
+  );
+  check('словарь синонимов добран кодом',
+    p.added_synonyms.includes('rc-field-synonyms'));
+  check('и доехал до чтения',
+    p.files.includes('kb/recipes/field-synonyms.md'));
+
+  // Гейт тот же, что у sql-conventions и активной численности: там, где
+  // пишется select или собирается состав выгрузки. На вопросе «что такое
+  // текучесть» словарь не нужен и стоил бы токенов на каждом обращении.
+  const plain = runPlan(
+    JSON.stringify({ domains: ['movement'], articles: [], dd: [], no_question: false }),
+    REGISTRY, { question: 'что такое текучесть' },
+  );
+  check('на обычном вопросе словарь не добирается',
+    !plain.added_synonyms.length);
+
+  // Сам мост должен быть в статье: слова из живого трафика обязаны
+  // переводиться в имена полей. Тест ломается при правке базы, а не только
+  // кода — как тесты мастеров домена.
+  const dict = fs.readFileSync(
+    REGISTRY_AT.replace('index.md', 'recipes/field-synonyms.md'), 'utf8');
+  check('покраска ведёт к оперативному коду',
+    /покраска/i.test(dict) && /emp_specialization_oper_code/.test(dict));
+  check('IT-покраска — к своему полю',
+    /emp_specialization_it_code/.test(dict));
+  check('BigOps назван старым именем Line + Support',
+    /BigOps/.test(dict) && /Line/.test(dict) && /Support/.test(dict));
+  check('и требует вопроса, а не раскладки за заказчика',
+    /задай один вопрос/i.test(dict));
+}
+
+// ===================================================================== 42
+line('42. УВОЛЬНЕНИЕ — ТОЛЬКО ПО ФЛАГУ, И НАЗВАНИЕ КОМПАНИИ НЕ ФИЛЬТР');
+{
+  const parseJs = js('Parse answer');
+  const runP = (draft, question = 'сколько уволилось') =>
+    new Function('$', '$json', parseJs)(
+      (name) => {
+        if (name === 'When called by adapter') return { first: () => ({ json: { question } }) };
+        if (name === 'Plan') return { first: () => ({ json: {} }) };
+        if (name === 'Build materials') {
+          return { first: () => ({ json: { materials: 'x', has_materials: true } }) };
+        }
+        if (name === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+        throw new Error('node not executed: ' + name);
+      },
+      { output: 'ЧЕРНОВИК ОТВЕТА: ' + draft + '\nУВЕРЕННОСТЬ: высокая' },
+    )[0].json;
+
+  // Живой кейс 2026-08-31: «мастер id и дата увольнения всех, кто уволился
+  // с января 2023 по август 2026». Дата увольнения проставляется ЗАРАНЕЕ,
+  // и такое увольнение может не состояться — в счёт уезжают несвершившиеся
+  // события. Запрос не падает, цифра правдоподобна, сверить не с чем.
+  const byDate = runP(
+    "select mdm_employee_rk, company_fire_dt from prod_v_emart.mdm_employee_structure_d " +
+    "where company_fire_dt between date '2023-01-01' and date '2026-08-31'");
+  check('увольнение по дате поймано', byDate.draft_fire_by_date === true);
+
+  const byFlag = runP(
+    "select mdm_employee_rk, company_fire_dt from prod_v_emart.mdm_employee_structure_d " +
+    "where company_fire_flg = 1 and company_fire_dt >= date '2023-01-01'");
+  check('по флагу — тревоги нет', byFlag.draft_fire_by_date === false);
+
+  // Дата как ВЫВОДИМОЕ значение проверку не тревожит: неверно определять
+  // ею факт, а не упоминать её вовсе. Ложная тревога на верном черновике
+  // обесценивает и себя, и соседние строки.
+  const asColumn = runP(
+    "select mdm_employee_rk, company_fire_dt from prod_v_emart.mdm_employee_structure_d " +
+    'where last_day_flg = 1');
+  check('дата в select тревоги не даёт', asColumn.draft_fire_by_date === false);
+
+  // Название компании — это вся витрина, а не значение поля.
+  const company = runP(
+    "select * from prod_v_emart.mdm_employee_structure_d " +
+    "where lvl3_mapped_management_unit_nm = 'Тбанк' and company_fire_flg = 1");
+  check('название компании в фильтре поймано',
+    company.draft_company_filter.length === 1 &&
+    company.draft_company_filter[0].value === 'Тбанк');
+
+  const normal = runP(
+    "select * from prod_v_emart.mdm_employee_structure_d " +
+    "where lvl3_mapped_management_unit_nm = 'Финансы' and company_fire_flg = 1");
+  check('обычное подразделение тревоги не даёт',
+    normal.draft_company_filter.length === 0);
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

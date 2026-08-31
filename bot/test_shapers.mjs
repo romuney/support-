@@ -511,21 +511,35 @@ const mixRun = (search) => {
   return { out: runTable({ urn: URN, search }, mixCard, MIX, cards, pick[0]), pick };
 };
 
+// Полный список имён печатается ТЕПЕРЬ ВСЕГДА, поэтому «поля нет в выводе»
+// проверять больше нельзя — оно есть, и это новое требование, а не регрессия.
+// Инвариант остался прежним: поиск по одной игле не должен ВЫДАВАТЬ второе
+// поле за найденное. Проверяем блок совпадений, а не весь ответ.
+const matchedPart = (out) => out.split('ВСЕ ПОЛЯ ТАБЛИЦЫ')[0];
+
 const one = mixRun('логин');
 console.log('\nПРОВЕРКИ:');
-checkS('  одна игла: логин найден', /ad_login/.test(one.out));
-checkS('  одна игла: почта НЕ найдена', !/wrk_email_address_txt/.test(one.out));
+checkS('  одна игла: логин найден', /ad_login/.test(matchedPart(one.out)));
+checkS('  одна игла: почта НЕ в блоке совпадений',
+  !/wrk_email_address_txt/.test(matchedPart(one.out)));
 checkS('  но сказано, что показаны не все', /Показаны ТОЛЬКО поля, совпавшие/.test(one.out));
-checkS('  и запрещено судить об отсутствии', /об отсутствии в таблице ДРУГОГО поля/.test(one.out));
+checkS('  и отправлено судить по полному списку',
+  /судить об отсутствии поля надо по НЁМ/.test(one.out));
+// Ради чего правка 2026-08-31: полный состав таблицы приезжает автору
+// и при удачном фильтре тоже. Без него бот писал «поля нет в витрине»,
+// глядя на блок совпадений, — а поле там было.
+checkS('  полный состав таблицы приложен', /ВСЕ ПОЛЯ ТАБЛИЦЫ/.test(one.out));
+checkS('  и почта в нём есть', /wrk_email_address_txt/.test(one.out));
 
 const two = mixRun('логин, почта');
-checkS('  две иглы: логин найден', /ad_login/.test(two.out));
-checkS('  две иглы: почта найдена', /wrk_email_address_txt/.test(two.out));
-checkS('  две иглы: лишнее не притянуло', !/business_dt/.test(two.out));
+checkS('  две иглы: логин найден', /ad_login/.test(matchedPart(two.out)));
+checkS('  две иглы: почта найдена', /wrk_email_address_txt/.test(matchedPart(two.out)));
+checkS('  две иглы: лишнее не притянуло', !/business_dt/.test(matchedPart(two.out)));
 
 // Склонение: «почты» не содержит подстроку «почта», а описание — «Рабочая почта».
 const infl = mixRun('почты');
-checkS('  склонение: «почты» → найдено', /wrk_email_address_txt/.test(infl.out));
+checkS('  склонение: «почты» → найдено',
+  /wrk_email_address_txt/.test(matchedPart(infl.out)));
 
 // Формы ответов подтверждены живым запросом 2026-08-13 на report:1728:
 // markdown — плоский объект {ключ: {data}} без обёртки type; attribute —
