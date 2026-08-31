@@ -1619,17 +1619,43 @@ FIELDS_JS = r"""
 // владельца — проза, и в инвентарь она не идёт: живой прогон 2026-08-31
 // приписал витрине сотрудников `valid_to_dttm`, упомянутый в ОПИСАНИИ
 // соседнего поля, и запрос упал на несуществующей колонке.
+// ИМЯ ПОЛЯ БЫВАЕТ КОРОТКИМ, И ЭТО НЕ КРАЕВОЙ СЛУЧАЙ.
+//
+// Здесь стояло `{2,}`, то есть «не короче трёх символов», — и `id` под это
+// не подходил. А проверка требует, чтобы идентификатором был КАЖДЫЙ элемент
+// перечня: одно двухбуквенное имя делало неразборной всю строку целиком.
+//
+// Померено сквозным прогоном 2026-08-31 на витрине детей: `DD Lookup`
+// отдаёт «ВСЕ ПОЛЯ ТАБЛИЦЫ: id, individualid, birthdate, …», ровно
+// 25 имён, — а разбиралось из них НОЛЬ, и ядро объявляло, что каталог
+// состава не дал. Бьёт по любой витрине с полем `id`, `dt`, `rk`.
+const IDENT = /^[a-z][a-z0-9_]+$/;
+
+// СКОЛЬКО ПОЛЕЙ ШЕЙПЕР ОБЕЩАЛ. Нужно не для красоты: разбор идёт по формату,
+// который пишет другая нода, и промах формата обязан быть громким. Обещано
+// 25, разобрано 0 — это поломка РАЗБОРА, а не молчание каталога, и лечится
+// она в другом месте. Без сверки эти два случая неразличимы, и один уже
+// прожил сутки под видом другого.
+function declaredOf(body) {
+  const t = String(body || '');
+  const m = t.match(/ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ:\s*(\d+)/) ||
+            t.match(/ПОЛЯ:\s*получено\s*(\d+)/) ||
+            t.match(/ПОДРОБНО ПО ПОЛЯМ\s*\((\d+)\)/) ||
+            t.match(/ПОДОШЛИ ПОЛЯ[^\n]*?(\d+)/);
+  return m ? Number(m[1]) : (/ПОЛЯ ИЗ DD:\s*0/.test(t) ? 0 : null);
+}
+
 function fieldsOf(body) {
   const set = new Set();
   for (const raw of String(body || '').split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    const bullet = line.match(/^[—–-]\s*([a-z][a-z0-9_]{2,})\b/);
+    const bullet = line.match(/^[—–-]\s*([a-z][a-z0-9_]+)\b/);
     if (bullet) { set.add(bullet[1]); continue; }
     const list = line.replace(/^[^:]{0,60}:\s*/, '');
     if (!list.includes(',')) continue;
     const parts = list.split(',').map((x) => x.trim());
-    if (parts.length >= 2 && parts.every((x) => /^[a-z][a-z0-9_]{2,}$/.test(x))) {
+    if (parts.length >= 2 && parts.every((x) => IDENT.test(x))) {
       for (const x of parts) set.add(x);
     }
   }
@@ -2057,6 +2083,9 @@ const ddNoFields = [];
 // и не выдумывает: называет факт.
 const ddBadUrn = [];
 const ddNoColumns = [];
+// Шейпер объявил число полей, а разбор не увидел ни одного: формат перечня
+// разъехался с разбором. Поломка БОТА, и чинится она в коде.
+const ddParseFailed = [];
 ddResults.forEach((res, idx) => {
   // Порядок сохраняется Split Out, поэтому объект берём из плана по индексу.
   const urn = planned[idx]?.urn ?? '(объект ' + (idx + 1) + ')';
@@ -2087,9 +2116,25 @@ ddResults.forEach((res, idx) => {
     //
     // Шейпер `DD Lookup` эти случаи уже различает — «ОШИБКИ DD: HTTP …»
     // против «ПОЛЯ ИЗ DD: 0», — надо было просто прочитать.
-    if (!fieldsOf(meta).size) {
+    const inv = fieldsOf(meta);
+    const declared = declaredOf(meta);
+    if (!inv.size) {
       ddNoFields.push(urn);
       if (/ОШИБКИ DD/.test(meta)) ddBadUrn.push(urn);
+      // ШЕЙПЕР ОБЕЩАЛ ПОЛЯ, А РАЗБОР ИХ НЕ УВИДЕЛ — ЭТО ПОЛОМКА РАЗБОРА.
+      //
+      // Померено сквозным прогоном 2026-08-31: каталог отдал 25 полей витрины
+      // детей, `DD Lookup` напечатал их перечнем, а разбор вернул ноль —
+      // потому что среди имён было `id`, а правило требовало не короче трёх
+      // символов ОТ КАЖДОГО элемента строки. Одно короткое имя делало
+      // неразборным весь инвентарь, и ядро объявляло, что каталог состава
+      // не дал. Сутки этот отказ выглядел молчанием каталога.
+      //
+      // Формат печатает ДРУГАЯ нода, и разъехаться с ней разбор может молча.
+      // Единственная защита — сверка с числом, которое та же нода объявила:
+      // обещано N, разобрано 0 — говорим об этом громко и чиним разбор,
+      // а не реестр и не доступ.
+      else if (declared) ddParseFailed.push(urn + ' (обещано полей: ' + declared + ')');
       else ddNoColumns.push(urn);
     }
     // Каждый блок подписан своим URN. Два инвентаря без подписи — приглашение
@@ -2660,6 +2705,7 @@ return [{
     dd_no_fields: ddNoFields,
     dd_bad_urn: ddBadUrn,
     dd_no_columns: ddNoColumns,
+    dd_parse_failed: ddParseFailed,
     unit_rk: String(unit.unit_rk || ''),
     unit_nm: String(unit.unit_nm || ''),
     unit_levels: Array.isArray(unit.unit_levels) ? unit.unit_levels : [],
@@ -3198,6 +3244,7 @@ out.unit_state = String(mat.unit_state || '');
 // доступа — неверная строка реестра, и чинится она за минуту.
 out.dd_no_fields = Array.isArray(mat.dd_no_fields) ? mat.dd_no_fields : [];
 out.dd_bad_urn = Array.isArray(mat.dd_bad_urn) ? mat.dd_bad_urn : [];
+out.dd_parse_failed = Array.isArray(mat.dd_parse_failed) ? mat.dd_parse_failed : [];
 out.cols_from_data = Array.isArray(mat.cols_from_data) ? mat.cols_from_data : [];
 out.unit_rk = String(mat.unit_rk || '');
 
@@ -3627,6 +3674,13 @@ if (Array.isArray(mat.dd_bad_urn) && mat.dd_bad_urn.length) {
     ' — 404 значит неверный URN в реестре, 401 значит истёкший Service ' +
     'Account. Настоящий URN ищется поиском по имени витрины (фаза G ' +
     'в «DD Recon»), и правится одна строка kb/index.md' + colsTail);
+}
+if (Array.isArray(mat.dd_parse_failed) && mat.dd_parse_failed.length) {
+  tasks.push('СБОЙ БОТА, не пробел базы: каталог прислал состав полей, ' +
+    'а разбор его не увидел — ' + mat.dd_parse_failed.join(', ') +
+    '. Формат перечня печатает «DD Lookup», а читает «Build materials», ' +
+    'и разъехаться они могут молча. Чинить разбор в build_time_flows.py ' +
+    '(fieldsOf), а не реестр и не доступ');
 }
 if (Array.isArray(mat.dd_no_columns) && mat.dd_no_columns.length) {
   // КАТАЛОГ ОТВЕТИЛ 200 И ПУСТОЙ СПИСОК КОЛОНОК — А ПОЧЕМУ, КОД НЕ ЗНАЕТ.
@@ -5880,6 +5934,11 @@ return [{ json: {
     // не заведено», не чинится вовсе, и складывать их значит мерить
     // работу, которой нет.
     dd_bad_urn: (Array.isArray(a.dd_bad_urn) ? a.dd_bad_urn : []).length,
+    // Каталог прислал состав, а разбор его не увидел. Поломка бота, и она
+    // обязана быть видна цифрой: сутки этот отказ выглядел молчанием
+    // каталога, потому что мерить его было нечем.
+    dd_parse_failed:
+      (Array.isArray(a.dd_parse_failed) ? a.dd_parse_failed : []).length,
     // Запрос по сотрудникам без фильтра активности. Метрика того, насколько
     // умолчание держится: статью код добирает на каждом запросе, и если доля
     // не падает, значит одной статьи мало и правило надо усиливать иначе.
@@ -6229,6 +6288,12 @@ if (a.unit_state === 'found') {
                                : 'узел «Resolve unit» не выполнялся') +
     '). Это поломка бота: проверьте ветку разрешения ссылки в «Support ' +
     'Bot Core» и доступ аккаунта Trino к `prod_v_dds`.');
+}
+
+if (Array.isArray(a.dd_parse_failed) && a.dd_parse_failed.length) {
+  parts.push('🚩 **Каталог прислал состав полей, а разбор его не увидел:** ' +
+    a.dd_parse_failed.join(', ') + '. Это поломка бота, а не каталога: ' +
+    'формат перечня разъехался с разбором. Реестр и доступы тут ни при чём.');
 }
 
 if (Array.isArray(a.dd_no_fields) && a.dd_no_fields.length) {

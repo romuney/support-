@@ -3134,6 +3134,81 @@ line('53. «КАТАЛОГ ОТВЕТИЛ» И «КАТАЛОГ ДАЛ СОСТ�
     pZero.kb_tasks.some((t) => /по ответу не видно/.test(t) && /фаза H/.test(t)));
 }
 
+// ===================================================================== 54
+line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ ЦЕЛИКОМ');
+{
+  // СКВОЗНАЯ проверка через ДВА флоу: шейпер «DD Lookup» печатает инвентарь,
+  // «Build materials» его читает. Формат печатает одна нода, читает другая,
+  // и разъехаться они могут молча — что и случилось 2026-08-31: каталог
+  // отдал 25 полей витрины детей, а разбор увидел ноль, потому что среди
+  // имён было `id`, а правило требовало не короче трёх символов ОТ КАЖДОГО
+  // элемента строки. Сутки отказ выглядел молчанием каталога.
+  const dd = JSON.parse(fs.readFileSync('DD Lookup.json', 'utf8'));
+  const ddJs = (n) => dd.nodes.find((x) => x.name === n).parameters.jsCode;
+
+  const URN_KIDS = 'urn:dd:tables:greenplum:table:' +
+    'chrono_peoplehub_masterid.individualchildren_public';
+  // Реальные имена: первое — двухбуквенное, как в живом ответе каталога.
+  const NAMES = ['id', 'individualid', 'birthdate', 'isdeleted', 'firstname',
+    'lastname', 'gender', 'createdon', 'statecode', 'ownerid'];
+  const colsRes = { statusCode: 200, body: { totalCount: NAMES.length,
+    data: NAMES.map((n) => ({ entity: {
+      fqn: 'chrono_peoplehub_masterid.individualchildren_public.' + n } })) } };
+
+  const meta = new Function('$', '$json', ddJs('Shape table meta'))(
+    (n) => {
+      if (n === 'When called by agent') return { first: () => ({ json: { urn: URN_KIDS, search: '' } }) };
+      if (n === 'dd_entity_card') {
+        return { first: () => ({ json: { statusCode: 200, body: { data: 'Данные о детях' } } }) };
+      }
+      if (n === 'dd_entity_attrs') return { first: () => ({ json: { statusCode: 200, body: {} } }) };
+      if (n === 'dd_columns') return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      if (n === 'Pick columns') {
+        return { first: () => ({ json: { targets: [], mode: '', total: NAMES.length } }) };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json.dd_meta;
+
+  check('шейпер напечатал перечень полей', /ВСЕ ПОЛЯ ТАБЛИЦЫ/.test(meta));
+  check('и двухбуквенное имя в нём есть', /\bid,/.test(meta));
+
+  const m = new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') {
+        return { first: () => ({ json: {
+          files: [], domains: [], dd: [{ urn: URN_KIDS, hint: '' }], dd_count: 1,
+          unit_link_kind: '', unit_link_id: '' } }) };
+      }
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') return { all: () => [{ json: { dd_meta: meta } }] };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  check('ядро разобрало инвентарь, а не объявило его пустым',
+    m.dd_no_fields.length === 0);
+  check('и не попросило добирать состав из данных',
+    m.cols_from_data.length === 0 && m.cols_unknown.length === 0);
+
+  // А если формат перечня всё-таки разъедется — это обязано быть ГРОМКО
+  // и названо поломкой бота, а не молчанием каталога.
+  const broken = meta.replace(NAMES.join(', '), NAMES.join(' | '));
+  const mb = new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') {
+        return { first: () => ({ json: {
+          files: [], domains: [], dd: [{ urn: URN_KIDS, hint: '' }], dd_count: 1,
+          unit_link_kind: '', unit_link_id: '' } }) };
+      }
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') return { all: () => [{ json: { dd_meta: broken } }] };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  check('разъезд формата назван поломкой разбора',
+    mb.dd_parse_failed.length === 1 && /обещано полей: 10/.test(mb.dd_parse_failed[0]));
+  check('и не выдан за отказ каталога',
+    mb.dd_bad_urn.length === 0 && mb.dd_no_columns.length === 0);
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
