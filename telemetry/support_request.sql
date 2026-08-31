@@ -428,6 +428,13 @@ bot AS (
            -- ли запрет; ложных тревог у проверки нет по построению.
            max_by(CAST(json_extract_scalar(payload, '$.draft_foreign_ids')
                        AS integer), event_ts) AS draft_foreign_ids,
+           -- Ключ юнита в запросе без комментария с названием. Фильтр
+           -- по хешу человеком не читается: аналитик не проверит, тот ли
+           -- это юнит, а через месяц никто не поймёт, что выгружалось.
+           -- Название код получает из справочника, так что подписать его
+           -- ничего не стоит; доля показывает, держится ли правило.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_key_unlabeled')
+                       AS integer), event_ts) AS draft_key_unlabeled,
            -- Витрины, чей URN в реестре ответил, но состава полей не дал.
            -- В реестре двадцать витрин, и живым запросом подтверждена ОДНА:
            -- остальные собраны по правилу
@@ -656,6 +663,7 @@ SELECT
     b.unit_state,
     b.draft_placeholders,
     b.draft_foreign_ids,
+    b.draft_key_unlabeled,
     b.dd_no_fields,
     b.dd_bad_urn,
     b.dd_parse_failed,

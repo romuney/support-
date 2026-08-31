@@ -3314,6 +3314,113 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
   }
 }
 
+// ===================================================================== 55
+line('55. «КАК СОБРАН ЗАПРОС»: ТРАССА ИЗ ФАКТОВ И ПОДПИСАННЫЕ КЛЮЧИ');
+{
+  const UUID = 'e289067b-26b6-44f2-917e-668d1ea65cc5';
+  const RK = '7232d11411120c5914cabb21956a9e61';
+  const NM = 'Human Capital Origination';
+  const FOUND = { unit_state: 'found', unit_kind: 'management', unit_id: UUID,
+    unit_table: 'prod_v_dds.management_unit', unit_rk: RK, unit_nm: NM,
+    unit_levels: ['4'], unit_emp_cnt: 312, unit_rk_many: [],
+    columns: {}, columns_failed: {} };
+
+  const mat = (unit) => new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') {
+        return { first: () => ({ json: {
+          files: [], domains: [], dd: [{ urn: URN_TABLE, hint: '' }], dd_count: 1,
+          unit_link_kind: 'management', unit_link_id: UUID } }) };
+      }
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') {
+        return { all: () => [{ json: { dd_meta: 'ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ: 2',
+          dd_fields: ['mdm_employee_rk', 'last_day_flg'], dd_total: 2 } }] };
+      }
+      if (n === 'Lookup result') return { first: () => ({ json: unit }) };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  const m = mat(FOUND);
+  // Трасса собирается КОДОМ: модель не знает, какие запросы выполнились,
+  // и её пересказ был бы правдоподобным текстом без гарантии.
+  check('блок трассы есть', /ЧТО КОД УЖЕ ПРОВЕРИЛ/.test(m.materials));
+  check('назван справочник и что по нему разрешалось',
+    /prod_v_dds\.management_unit/.test(m.materials) && m.materials.includes(UUID));
+  check('назван полученный ключ и название юнита',
+    m.materials.includes(RK) && m.materials.includes(NM));
+  check('назван уровень и поле фильтра',
+    /lvl4_mapped_management_unit_rk/.test(m.materials));
+  check('назван каталог как источник состава полей',
+    /Каталог DD: состав полей получен/.test(m.materials));
+  // «Шаг 1 / шаг 2» — это инструкция, как получить то, что уже получено.
+  check('и прямо запрещено превращать это в шаги',
+    /Не превращай это в «шаг 1 \/ шаг 2»/.test(m.materials));
+  check('формат подписи ключа показан дословно',
+    m.materials.includes(`'${RK}'  -- ${NM}`));
+
+  // --- измеримая часть: неподписанный ключ называется джуну.
+  // Проверка живёт в «Final answer»: ключ может появиться и во ВТОРОМ
+  // проходе, а финал видит итоговый текст.
+  const parse = (spec) => new Function('$', '$json', js('Final answer'))(
+    (n) => {
+      if (n === 'Parse answer') {
+        return { first: () => ({ json: { draft: 'текст', tech_spec: spec,
+          question: 'q', confidence_key: 'high', confidence_claimed: 'high' } }) };
+      }
+      if (n === 'Parse revised') throw new Error('node not executed');
+      if (n === 'Build materials') return { first: () => ({ json: m }) };
+      if (n === 'Build check SQL') {
+        return { first: () => ({ json: { check_pairs: [], check_skipped: [] } }) };
+      }
+      if (n === 'Check result') throw new Error('node not executed');
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  const bare = parse('```sql\nwhere lvl4_mapped_management_unit_rk = \'' + RK + '\'\n```');
+  check('неподписанный ключ найден', bare.draft_key_unlabeled.length === 1);
+  const named = parse('```sql\nwhere lvl4_mapped_management_unit_rk = \'' + RK +
+    '\'  -- ' + NM + '\n```');
+  check('подписанный ключ тревоги не даёт', named.draft_key_unlabeled.length === 0);
+  // Подпись в СОСЕДНЕЙ строке фильтр не подписывает: читать надо там, где
+  // стоит условие.
+  const far = parse('-- юнит ' + NM + '\n```sql\nselect 1\nfrom t\n' +
+    'where lvl4_mapped_management_unit_rk = \'' + RK + '\'\n```');
+  check('подпись этажом выше не считается', far.draft_key_unlabeled.length === 1);
+  // Ключа в ответе нет вовсе — проверять нечего, ложной тревоги быть не должно.
+  const none = parse('```sql\nselect 1\n```');
+  check('без ключа тревоги нет', none.draft_key_unlabeled.length === 0);
+
+  // Ссылки не было — трассы про юнит тоже нет, но каталог назван.
+  const noUnit = new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') {
+        return { first: () => ({ json: {
+          files: [], domains: [], dd: [{ urn: URN_TABLE, hint: '' }], dd_count: 1,
+          unit_link_kind: '', unit_link_id: '' } }) };
+      }
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') {
+        return { all: () => [{ json: { dd_meta: 'ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ: 2',
+          dd_fields: ['mdm_employee_rk', 'last_day_flg'], dd_total: 2 } }] };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  check('без ссылки трасса про юнит не выдумывается',
+    /ЧТО КОД УЖЕ ПРОВЕРИЛ/.test(noUnit.materials) &&
+    !/Ссылка на юнит/.test(noUnit.materials));
+
+  // ТЗ теперь из трёх разделов, и промпт обязан их требовать.
+  const exp = fs.readFileSync('prompts/export.md', 'utf8');
+  check('промпт требует раздел «КАК СОБРАН ЗАПРОС»',
+    /КАК СОБРАН ЗАПРОС/.test(exp) && /Три раздела/.test(exp));
+  check('и требует подписывать непрозрачные ключи',
+    /КАЖДЫЙ НЕПРОЗРАЧНЫЙ КЛЮЧ ПОДПИСАН КОММЕНТАРИЕМ/.test(exp));
+  check('и запрещает писать «шаг 1: получить ключ»',
+    /«шаг 1: получить ключ» писать\s+нельзя/.test(exp.replace(/\n/g, ' ')) ||
+    /шаг 1: получить ключ/.test(exp));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
