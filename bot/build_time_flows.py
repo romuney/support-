@@ -3880,9 +3880,43 @@ def call_core(pos, question_expr, mode, guard_node=None):
 # честно падает с «All filters are empty», вместо тихо неработающей лички.
 DM_FILTER_FILE = "dm_trigger_filter.json"
 
+# Фильтр триггера лички: «Filters for Posted Action → Channels → Operation:
+# Is Direct Message».
+#
+# ЭТО НЕ УКРАШЕНИЕ: пустой postedFilters нода не принимает и при активации
+# падает с «All filters are empty. You must specify at least one of them»
+# (подтверждено живым запуском 2026-08-07). До 2026-08-31 сборщик отдавал
+# для лички именно `{}` — и поэтому фильтр приходилось выставлять руками
+# ПОСЛЕ КАЖДОГО импорта, иначе адаптер просто не включался. Классическая
+# ручная правка в интерфейсе, живущая до следующего импорта: тот же класс,
+# что выключенная руками нода «Collect articles» и разъехавшийся Service
+# Account, только натыкались на неё каждый раз заново.
+#
+# ЗНАЧЕНИЕ `isDirectMessage` НЕ ПОДТВЕРЖДЕНО ЖИВЫМ УЗЛОМ. Нода
+# mattermostTrigger v2 с postedFilters — сборка этого инстанса, в апстриме
+# n8n её нет, и посмотреть перечень значений негде: имя выведено по подписи
+# в интерфейсе («Is Direct Message») и обычному для n8n правилу camelCase.
+# То же положение, что было с именами полей CUSTOM.trino, и проверяется так
+# же — глазами при импорте: откройте «Time Trigger DM» и посмотрите, что
+# в поле Operation стоит «Is Direct Message», а не пусто.
+#
+# Угаданное имя здесь БЕЗОПАСНО, и это стоит понимать: отсев лички целиком
+# держится на «Guard DM» (channel_type === 'D'), фильтр триггера лишь режет
+# лишние срабатывания. Промах даёт больше вызовов, а не неверные ответы, —
+# тогда как пустой фильтр давал неработающий адаптер.
+#
+# Не совпало — скопируйте настроенную ноду из n8n (Ctrl+C) в файл
+# dm_trigger_filter.json рядом со сборщиком: он читается ниже и переопределяет
+# это значение целиком, после чего догадка больше ни на что не влияет.
+DM_POSTED_FILTER = {"channels": [{"operation": "isDirectMessage"}]}
+
 
 def load_dm_filter():
-    """Возвращает postedFilters из скопированной из n8n ноды, либо None."""
+    """postedFilters из скопированной из n8n ноды, иначе значение по умолчанию.
+
+    Возвращает DM_POSTED_FILTER, если файла нет: пустой фильтр нода
+    не принимает, и адаптер лички без него не активируется.
+    """
     if not os.path.exists(DM_FILTER_FILE):
         return None
     raw = json.load(open(DM_FILTER_FILE, encoding="utf-8"))
@@ -5178,6 +5212,11 @@ return mmItems(lines.join('\n'));
 """
 
 dm_filter = load_dm_filter()
+# Источник фильтра — для предупреждения в конце прогона: догадка это или
+# скопированная из n8n нода. Молча подставить угаданное значение нельзя.
+DM_FILTER_FROM_FILE = dm_filter is not None
+if dm_filter is None:
+    dm_filter = copy.deepcopy(DM_POSTED_FILTER)
 
 dm_nodes = [
     mm_trigger("Time Trigger DM", [-260, 300], None, posted_filters=dm_filter),
@@ -5264,6 +5303,14 @@ if not DM_ALLOWLIST:
     print()
     print("ВНИМАНИЕ: DM_ALLOWLIST пуст — в личке ответит любому сотруднику.")
     print("Заполнить username'ами команды HR-аналитики в build_time_flows.py.")
+if not DM_FILTER_FROM_FILE:
+    print()
+    print("ПРОВЕРИТЬ ПРИ ИМПОРТЕ: фильтр триггера лички подставлен по догадке.")
+    print(f"  {json.dumps(DM_POSTED_FILTER, ensure_ascii=False)}")
+    print("Откройте «Time Trigger DM» в Adapter DM: в поле Operation должно")
+    print("стоять «Is Direct Message». Пусто — имя значения угадано неверно;")
+    print("скопируйте настроенную ноду из n8n (Ctrl+C) в bot/dm_trigger_filter.json,")
+    print("и сборщик будет брать фильтр оттуда, а не из догадки.")
 if FEEDBACK_WEBHOOK_URL.startswith("__"):
     print()
     print("ВНИМАНИЕ: FEEDBACK_WEBHOOK_URL не задан.")

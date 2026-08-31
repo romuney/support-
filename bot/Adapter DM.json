@@ -6,7 +6,13 @@
         "events": [
           "posted"
         ],
-        "postedFilters": {}
+        "postedFilters": {
+          "channels": [
+            {
+              "operation": "isDirectMessage"
+            }
+          ]
+        }
       },
       "type": "n8n-nodes-base.mattermostTrigger",
       "typeVersion": 2,

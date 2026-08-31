@@ -399,8 +399,21 @@ line('16. Проводка адаптеров: связи и фильтры');
       .includes('$json.question'));
 
   const dmT = dm.nodes.find((n) => n.name === 'Time Trigger DM');
-  check('DM-триггер без фильтра каналов',
+  check('DM-триггер без фильтра по ИМЕНИ канала',
     !JSON.stringify(dmT.parameters.postedFilters).includes('nameAuto'));
+  // ФИЛЬТР ЛИЧКИ ОБЯЗАН БЫТЬ НЕПУСТЫМ. Пустой postedFilters нода не принимает:
+  // при активации падает с «All filters are empty» (живой запуск 2026-08-07).
+  // До 2026-08-31 сборщик отдавал `{}`, и фильтр «Is Direct Message»
+  // выставляли руками ПОСЛЕ КАЖДОГО импорта — ручная правка в интерфейсе
+  // живёт ровно до следующего, и натыкались на неё каждый раз заново.
+  check('DM: фильтр не пустой — иначе адаптер не активируется',
+    Object.keys(dmT.parameters.postedFilters || {}).length > 0);
+  check('DM: фильтр — именно «личка», а не канал',
+    /isDirectMessage|direct/i.test(JSON.stringify(dmT.parameters.postedFilters)));
+  // Отсев при этом держится на guard, а не на триггере: промах в имени
+  // значения даёт лишние срабатывания, а не неверные ответы.
+  check('DM: guard всё равно требует channel_type D',
+    /channel_type/.test(js(dm, 'Guard DM')) && /'D'/.test(js(dm, 'Guard DM')));
   check('DM: guard — Code-нода', dm.nodes.find(
     (n) => n.name === 'Guard DM').type === 'n8n-nodes-base.code');
   check('DM: ложная ветка ворот пустая',
