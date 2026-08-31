@@ -3016,19 +3016,66 @@ const meta = String(mat.materials || '');
 // Направление послабления выбрано по цене промаха: лишнее имя стоит одной
 // ошибки Trino, которая приезжает в check_failed и прямо запрещает автору
 // что-либо утверждать; пропущенное имя тихо выключает проверку целиком.
-const known = new Set((meta.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []));
-const table = (meta.match(/urn:dd:tables:greenplum:table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
-const hasSlice = known.has('last_day_flg');
-// Словарь значений собирается по ТЕМ ЖЕ строкам, по которым заказчик будет
-// считать. Иначе значение, встречающееся только у уволенных, приедет автору
-// как живое — и фильтр из черновика вернёт заказчику ноль строк.
-// Условие берётся из статьи (`m-active-headcount`), а применяется, только
-// если оба флага есть в инвентаре: у другой витрины их может не быть вовсе.
-const hasActive = known.has('active_employee_flg') && known.has('company_fire_flg');
-const where = [
-  hasSlice ? 'last_day_flg = 1' : '',
-  hasActive ? 'active_employee_flg = 1 AND company_fire_flg = 0' : '',
-].filter(Boolean);
+// ИНВЕНТАРЬ РАЗБИРАЕТСЯ ПО ВИТРИНАМ, А НЕ СВАЛИВАЕТСЯ В ОДНО МНОЖЕСТВО.
+//
+// Живой прогон 2026-08-31 (вопрос про скоринг сотрудников): в материалах
+// было ДВА объекта — hrmart.summary_evaluation и emart.mdm_employee_structure_d.
+// Прежний код брал ПЕРВЫЙ урн как таблицу для всех пар, а набор известных
+// полей строил объединением по обеим витринам. Получилось
+//     SELECT … FROM prod_v_hrmart.summary_evaluation WHERE last_day_flg = 1
+// — то есть срез из ОДНОЙ витрины прикрутили к ДРУГОЙ, и Trino ответил
+// «Column 'last_day_flg' cannot be resolved».
+//
+// Отказ громкий, и это единственное, что спасло: он приехал в check_failed
+// и прямо запретил автору что-либо утверждать о значениях. Но проверка
+// не выполнилась вовсе, а джун увидел строку про непроверенные значения
+// там, где проверять было можно.
+//
+// Правило то же, по которому каждый блок метаданных подписан своим URN:
+// два инвентаря без подписи — это приглашение приписать поле не той витрине.
+// Для автора это сделали 2026-08-26, а сборщик SQL остался на общем множестве.
+const tables = [];
+{
+  // Блоки в материалах: «=== МЕТАДАННЫЕ КАТАЛОГА: <urn> ===» и текст до
+  // следующего «=== ». Имя витрины — хвост урна после последнего двоеточия.
+  const RE = /=== МЕТАДАННЫЕ КАТАЛОГА: (\S+) ===/g;
+  const marks = [];
+  let m;
+  while ((m = RE.exec(meta)) !== null) marks.push({ urn: m[1], at: m.index, end: RE.lastIndex });
+  for (let i = 0; i < marks.length; i++) {
+    const body = meta.slice(marks[i].end, i + 1 < marks.length ? marks[i + 1].at : meta.length);
+    const name = (marks[i].urn.match(/table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
+    if (!name) continue;   // отчёты и ноутбуки таблицами не являются
+    tables.push({ name, fields: new Set(body.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []) });
+  }
+}
+// Запасной путь: формат блоков изменился и ни одной витрины не разобралось.
+// Тогда работаем как раньше — по всему тексту и первому урну. Хуже, чем
+// по блокам, но лучше, чем не проверить вовсе.
+if (!tables.length) {
+  const one = (meta.match(/urn:dd:tables:greenplum:table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1];
+  if (one) tables.push({ name: one, fields: new Set(meta.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []) });
+}
+const known = new Set();
+for (const t of tables) for (const f of t.fields) known.add(f);
+
+// Срез и фильтр активности считаются ПО СВОЕЙ витрине: у summary_evaluation
+// нет ни last_day_flg, ни флагов активности, и приписывать их ей нельзя.
+// Словарь значений при этом собирается по тем же строкам, по которым
+// заказчик будет считать: иначе значение, встречающееся только у уволенных,
+// приедет автору как живое. Условие — из статьи `m-active-headcount`.
+const whereFor = (t) => {
+  const hasSlice = t.fields.has('last_day_flg');
+  const hasActive = t.fields.has('active_employee_flg') && t.fields.has('company_fire_flg');
+  return {
+    hasSlice,
+    hasActive,
+    where: [
+      hasSlice ? 'last_day_flg = 1' : '',
+      hasActive ? 'active_employee_flg = 1 AND company_fire_flg = 0' : '',
+    ].filter(Boolean),
+  };
+};
 
 // ПДн НЕ ТЯНУТСЯ НИКОГДА, И ФИЛЬТРОВ ДВА.
 //
@@ -3056,10 +3103,14 @@ const skipped = [];
 const use = [];
 for (const p of pairs) {
   if (use.length >= MAX_PAIRS) { skipped.push(`${p.field} (потолок ${MAX_PAIRS} пар)`); continue; }
-  if (!known.has(p.field)) { skipped.push(`${p.field} (нет в инвентаре)`); continue; }
+  // ПОЛЕ ПРИВЯЗЫВАЕТСЯ К СВОЕЙ ВИТРИНЕ, а не к первой попавшейся. Совпало
+  // в нескольких — берём первую по порядку блоков: детерминированно, и обе
+  // витрины поле действительно содержат, так что запрос выполнится.
+  const owner = tables.find((t) => t.fields.has(p.field));
+  if (!owner) { skipped.push(`${p.field} (нет в инвентаре)`); continue; }
   if (PII_RE.test(p.field)) { skipped.push(`${p.field} (персональные данные)`); continue; }
   if (sensitive.has(p.field)) { skipped.push(`${p.field} (закрыто по признаку каталога)`); continue; }
-  use.push(p);
+  use.push({ ...p, table: owner.name });
 }
 
 // Причины РАЗНЫЕ, потому что чинятся в разных местах: нет витрины — вопрос
@@ -3075,12 +3126,12 @@ for (const p of pairs) {
 // вызов модели на каждом ответе, где значений и не было, не нужен.
 const said = String(parsed.gaps || '') + '\n' + String(parsed.draft || '');
 const NEEDS = /select\s+distinct|не\s+провер[а-яё]+|неизвестн[а-яё]*|уточни[а-яё]+\s+(?:точное\s+)?значени|подтверди[а-яё]+\s+(?:точное\s+)?(?:значени|написани)/i;
-const wantRetry = Boolean(table) && NEEDS.test(said);
+const wantRetry = tables.length > 0 && NEEDS.test(said);
 
-if (!use.length || !table) {
+if (!use.length || !tables.length) {
   return [{ json: { check_sql: '', check_pairs: [], check_skipped: skipped,
                     check_retry: wantRetry,
-                    check_table: table, check_reason: !table
+                    check_table: '', check_reason: !tables.length
                       ? 'в материалах нет витрины, к которой идти'
                       : (pairs.length ? 'ни одна пара не прошла отбор: ' + skipped.join(', ')
                                       : 'в черновике нет фильтров по значению, '
@@ -3088,11 +3139,13 @@ if (!use.length || !table) {
 }
 
 const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-const tbl = `prod_v_${table}`;
 
 // SQL пишет КОД: канонический срез, потолок строк и приведение типа —
 // свойства кода, а не пожелания к модели.
 return use.map((p) => {
+  const tbl = `prod_v_${p.table}`;
+  const { hasSlice, hasActive, where } = whereFor(
+    tables.find((t) => t.name === p.table) || { fields: new Set() });
   const v = `CAST(${p.field} AS varchar)`;
   const words = valueNeedles(p.value);
   const expr = words.map((w) => `lower(${v}) LIKE ${q('%' + w + '%')}`).join(' OR ') || 'false';
@@ -3110,7 +3163,7 @@ return use.map((p) => {
   const exact = `lower(${v}) = ${q(p.value.toLowerCase())}`;
   return { json: {
     check_sql:
-      `SELECT ${q(p.field)} AS fld, ${v} AS val, count(*) AS cnt,\n` +
+      `SELECT ${q(p.field)} AS fld, ${q(p.table)} AS tbl, ${v} AS val, count(*) AS cnt,\n` +
       `       (${exact}) AS exact_hit,\n` +
       `       (${expr}) AS matched\n` +
       `FROM ${tbl}\n` +
@@ -3156,12 +3209,28 @@ const isYes = (v) => v === true || v === 'true' || v === 1 || v === '1';
 // это ровно то значение, которое автор уже написал в черновике, и данные
 // его подтвердили. Смешать его с похожими значит предложить автору выбор
 // там, где выбор уже сделан и подтверждён.
+// Группируем по ПАРЕ «витрина + поле», а не по одному имени поля.
+// Пары теперь могут идти к РАЗНЫМ витринам (см. «Build check SQL»), и одно
+// имя поля встречается в двух — слитые в одну группу, они дали бы автору
+// перечень значений, про который неизвестно, откуда он.
 const byField = new Map();
 for (const r of rows) {
   const f = String(r.fld || '');
-  if (!byField.has(f)) byField.set(f, { exact: [], hit: [], rest: [] });
-  const g = byField.get(f);
+  const t = String(r.tbl || '');
+  const key = t ? `${t}.${f}` : f;
+  if (!byField.has(key)) byField.set(key, { exact: [], hit: [], rest: [], field: f });
+  const g = byField.get(key);
   (isYes(r.exact_hit) ? g.exact : isYes(r.matched) ? g.hit : g.rest).push(r);
+}
+
+function mergeByField(pick) {
+  const acc = {};
+  for (const g of byField.values()) {
+    const f = g.field;
+    if (!acc[f]) acc[f] = [];
+    for (const v of pick(g)) if (!acc[f].includes(v)) acc[f].push(v);
+  }
+  return acc;
 }
 
 const out = ['=== РЕАЛЬНЫЕ ЗНАЧЕНИЯ ПОЛЕЙ ==='];
@@ -3257,16 +3326,12 @@ return [{ json: {
   // Нужны «Final answer», чтобы поймать подмену: значение из этого списка,
   // оказавшееся в итоговом фильтре, заказчик не называл ни разу.
   // Режем по 200 на поле: список тут ради сверки, а не ради печати.
-  check_rest: Object.fromEntries(
-    [...byField.entries()].map(([f, g]) => [
-      f, g.rest.slice(0, 200).map((r) => String(r.val)),
-    ]),
-  ),
-  check_named: Object.fromEntries(
-    [...byField.entries()].map(([f, g]) => [
-      f, [...g.exact, ...g.hit].map((r) => String(r.val)),
-    ]),
-  ),
+  // Ключ здесь — ИМЯ ПОЛЯ без витрины: «Final answer» сверяет с этим списком
+  // пары, вынутые из черновика, а в черновике витрины у фильтра нет.
+  // Одноимённые поля двух витрин сливаются, и это правильно: проверка ловит
+  // значение, которого заказчик не называл, а из какой оно витрины — неважно.
+  check_rest: mergeByField((g) => g.rest.slice(0, 300).map((r) => String(r.val))),
+  check_named: mergeByField((g) => [...g.exact, ...g.hit].map((r) => String(r.val))),
   // Подтвердились ли значения ДОСЛОВНО. Отдельно от check_rows: строки
   // вернулись — это «данные ответили», а точное совпадение — «ответ был
   // тот самый». Разные вещи, и в телеметрии их путать нельзя.

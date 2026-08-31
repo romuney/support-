@@ -2743,5 +2743,41 @@ line('56. СОГЛАСОВАНИЕ ДОСТУПА: пометка 🔒 вмес�
   check('с пометкой строка молчит', !/закрытых полей/.test(quiet));
 }
 
+// ===================================================================== 57
+line('57. ИМЕНА ЭКСПЕРТОВ — ТОЛЬКО ИЗ ТАБЛИЦЫ МАРШРУТОВ');
+{
+  // 2026-08-31: на вопросе про скоринг и ревью бот написал «зовите
+  // @Artur Mermovich» — человека из платёжной темы, при том что про деньги
+  // в обращении не было ни слова. Имя стояло ПРЯМО В ПРОМПТЕ автора, мимо
+  // таблицы маршрутов: копия имени рядом с реестром разъезжается молча
+  // и срабатывает там, где не должна. Тот же класс, что копия состава полей
+  // рядом с каталогом.
+  const author = fs.readFileSync('prompts/author.md', 'utf8').toLowerCase();
+  const names = [];
+  const sec = REGISTRY.slice(REGISTRY.indexOf('## Маршруты'));
+  for (const ln of sec.split('\n')) {
+    const c = ln.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((x) => x.trim());
+    if (c.length < 5 || !/^\d{4}-\d{2}-\d{2}$/.test(c[4] || '')) continue;
+    for (const v of [c[2], c[3]]) {
+      if (v && v !== '—') for (const one of v.split(',')) {
+        const n = one.trim();
+        if (n) names.push(n);
+      }
+    }
+  }
+  check('адресаты маршрутов найдены', names.length > 0);
+  // Сравниваем и по полному имени, и по фамилии: в реестре «Artur Mermovich»,
+  // а в промпте стояло «@a.mermovich» — точное совпадение это не поймало бы.
+  const leaked = names.filter((n) => {
+    const bare = n.replace(/^[~@]/, '').toLowerCase();
+    const last = bare.split(/[\s.]+/).filter(Boolean).pop() || '';
+    return author.includes(bare) || (last.length > 4 && author.includes(last));
+  });
+  check('ни одного имени из таблицы маршрутов нет в промпте автора: ' +
+    (leaked.join(', ') || 'чисто'), leaked.length === 0);
+  check('и правило прямо запрещает называть имя самому',
+    /имя ты не называешь сам/.test(author));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

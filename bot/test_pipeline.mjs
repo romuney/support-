@@ -2272,6 +2272,56 @@ line('42. УВОЛЬНЕНИЕ — ТОЛЬКО ПО ФЛАГУ, И НАЗВАН
     normal.draft_company_filter.length === 0);
 }
 
+// ===================================================================== 43
+line('43. ДВЕ ВИТРИНЫ: срез не уезжает к чужой таблице');
+{
+  // ЖИВОЙ КЕЙС 2026-08-31, вопрос про скоринг сотрудников. В материалах было
+  // два объекта — summary_evaluation и mdm_employee_structure_d. Сборщик брал
+  // ПЕРВЫЙ урн как таблицу для всех пар, а известные поля — объединением
+  // по обеим витринам. Получилось
+  //   SELECT … FROM prod_v_hrmart.summary_evaluation WHERE last_day_flg = 1
+  // и Trino ответил «Column 'last_day_flg' cannot be resolved»: срез одной
+  // витрины прикрутили к другой.
+  const MAT2 = { materials:
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:greenplum:table:hrmart.summary_evaluation ===\n' +
+    'ПОЛЯ: mdm_employee_rk, summary_score, light_review_score, valid_to_dttm, deleted_flg\n\n' +
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ===\n' +
+    'ПОЛЯ: last_day_flg, active_employee_flg, company_fire_flg, emp_stream_desc, grade\n' };
+  const run2 = (parsed) => new Function('$', '$json', js('Build check SQL'))(
+    (n) => {
+      if (n === 'Build materials') return { first: () => ({ json: MAT2 }) };
+      throw new Error('node not executed: ' + n);
+    }, parsed).map((i) => i.json);
+
+  // Поле из витрины оценок: срез и флаги активности к ней НЕ приписываются.
+  const ev = run2({ check_values: 'summary_score = отлично' });
+  check('поле привязано к своей витрине',
+    ev[0].check_table === 'prod_v_hrmart.summary_evaluation');
+  check('срез чужой витрины НЕ подставлен',
+    !/last_day_flg/.test(ev[0].check_sql));
+  check('и флаги активности тоже нет',
+    !/active_employee_flg/.test(ev[0].check_sql));
+
+  // Поле из витрины сотрудников: там срез и флаги на месте.
+  const st = run2({ check_values: 'emp_stream_desc = Дата' });
+  check('вторая витрина адресована верно',
+    st[0].check_table === 'prod_v_emart.mdm_employee_structure_d');
+  check('и её собственный срез на месте', /last_day_flg = 1/.test(st[0].check_sql));
+  check('вместе с фильтром активности',
+    /active_employee_flg = 1 AND company_fire_flg = 0/.test(st[0].check_sql));
+
+  // Обе пары в одном прогоне — каждая к своей витрине.
+  const both = run2({ check_values: 'summary_score = отлично\nemp_stream_desc = Дата' });
+  check('две пары — две разные витрины',
+    new Set(both.map((i) => i.check_table)).size === 2);
+  check('и ни в одном запросе нет чужого поля',
+    both.every((i) => !/FROM prod_v_hrmart[\s\S]*last_day_flg/.test(i.check_sql)));
+
+  // Витрина едет в выдачу: два перечня значений без подписи неразличимы.
+  check('витрина названа в самом запросе',
+    both.every((i) => i.check_sql.includes('AS tbl')));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
