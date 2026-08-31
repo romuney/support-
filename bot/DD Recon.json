@@ -995,6 +995,335 @@
       ],
       "id": "recon-shape-probe-table",
       "name": "Shape probe table"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/summary' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -40,
+        1820
+      ],
+      "id": "recon-i-summary",
+      "name": "I summary",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/attribute' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        150,
+        1820
+      ],
+      "id": "recon-i-attribute",
+      "name": "I attribute",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/tag' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        340,
+        1820
+      ],
+      "id": "recon-i-tag",
+      "name": "I tag",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/markdown' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        530,
+        1820
+      ],
+      "id": "recon-i-markdown",
+      "name": "I markdown",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/link' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        1820
+      ],
+      "id": "recon-i-link",
+      "name": "I link",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/table' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        910,
+        1820
+      ],
+      "id": "recon-i-table",
+      "name": "I table",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/code' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1100,
+        1820
+      ],
+      "id": "recon-i-code",
+      "name": "I code",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/related' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1290,
+        1820
+      ],
+      "id": "recon-i-related",
+      "name": "I related",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate') + '/history' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1480,
+        1820
+      ],
+      "id": "recon-i-history",
+      "name": "I history",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// Где в ответах каталога встречается признак чувствительности. Ищем НЕ ключ\n// (его имя мы как раз и не знаем), а ЗНАЧЕНИЕ: в интерфейсе оно выглядит\n// как EMP_SENS. Плюс печатаем все ключи каждого ресурса — чтобы решение\n// принималось по списку, а не по догадке.\nconst out = [];\nconst say = (s) => out.push(s);\nconst KEYS = ['summary', 'attribute', 'tag', 'markdown', 'link', 'table',\n              'code', 'related', 'history'];\nconst MARK = /EMP_SENS|SENS|sensitiv|чувствительн/i;\n\nsay('ФАЗА I. ГДЕ ЛЕЖИТ ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ');\nsay('');\nsay('Колонка: ' + 'urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.birthdate');\nsay('');\n\nconst found = [];\nfor (const k of KEYS) {\n  let r = null;\n  try { r = $('I ' + k).first().json; } catch (e) { r = null; }\n  if (!r) { say(`  /${k.padEnd(10)} → узел не выполнялся`); continue; }\n  const code = r.statusCode;\n  if (code !== undefined && code >= 400) {\n    say(`  /${k.padEnd(10)} → HTTP ${code}`);\n    continue;\n  }\n  const body = (r.body ?? r) || {};\n  const text = JSON.stringify(body);\n  const keys = body && typeof body === 'object' && !Array.isArray(body)\n    ? Object.keys(body) : (Array.isArray(body) ? [`массив, ${body.length} элементов`] : []);\n  const hit = MARK.test(text);\n  if (hit) found.push(k);\n  say(`  /${k.padEnd(10)} → ${hit ? 'ЕСТЬ ПРИЗНАК' : 'нет'}; ключи: ` +\n      (keys.length ? keys.slice(0, 14).join(', ') : '(пусто)'));\n  if (hit) {\n    // Печатаем кусок вокруг совпадения: имя ключа видно только так.\n    const at = text.search(MARK);\n    say('      ' + text.slice(Math.max(0, at - 160), at + 120));\n  }\n}\n\nsay('');\nif (found.length) {\n  say('ПРИЗНАК НАЙДЕН В: ' + found.join(', ') + '.');\n  say('Читать его надо оттуда — вписать ресурс и ключ в build_dd_flow.py');\n  say('(ACCESS_KEYS и accessOf), и добавить запрос этого ресурса к колонке.');\n} else {\n  say('ПРИЗНАКА НЕТ НИ В ОДНОМ ИЗ ПРОВЕРЕННЫХ РЕСУРСОВ.');\n  say('Значит интерфейс берёт его не из публичного API этой сущности:');\n  say('возможно, это классификация на уровне таблицы или отдельная ручка.');\n  say('Тогда честный вывод для бота — признак недоступен, и запрет на ПДн');\n  say('держится по смыслу поля, а не по каталогу. Так сейчас и написано.');\n}\n\nreturn [{ json: { report: out.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1670,
+        1820
+      ],
+      "id": "recon-shape-sensitivity",
+      "name": "Shape sensitivity"
     }
   ],
   "connections": {
@@ -1333,6 +1662,116 @@
         [
           {
             "node": "Shape probe table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape probe table": {
+      "main": [
+        [
+          {
+            "node": "I summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I summary": {
+      "main": [
+        [
+          {
+            "node": "I attribute",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I attribute": {
+      "main": [
+        [
+          {
+            "node": "I tag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I tag": {
+      "main": [
+        [
+          {
+            "node": "I markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I markdown": {
+      "main": [
+        [
+          {
+            "node": "I link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I link": {
+      "main": [
+        [
+          {
+            "node": "I table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I table": {
+      "main": [
+        [
+          {
+            "node": "I code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I code": {
+      "main": [
+        [
+          {
+            "node": "I related",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I related": {
+      "main": [
+        [
+          {
+            "node": "I history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "I history": {
+      "main": [
+        [
+          {
+            "node": "Shape sensitivity",
             "type": "main",
             "index": 0
           }

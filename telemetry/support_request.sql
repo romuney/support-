@@ -435,6 +435,13 @@ bot AS (
            -- ничего не стоит; доля показывает, держится ли правило.
            max_by(CAST(json_extract_scalar(payload, '$.draft_key_unlabeled')
                        AS integer), event_ts) AS draft_key_unlabeled,
+           -- Переспрос про дату, которой заказчик не называл. Чаще всего
+           -- человеку нужно состояние НА СЕЙЧАС: не назвал период — значит
+           -- актуальный срез, и это не пробел запроса. Лишний вопрос стоит
+           -- заказчику круга ожидания ради очевидного ответа, поэтому доля
+           -- таких ответов — метрика, а не любопытство.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_asks_date')
+                       AS boolean), event_ts) AS draft_asks_date,
            -- Витрины, чей URN в реестре ответил, но состава полей не дал.
            -- В реестре двадцать витрин, и живым запросом подтверждена ОДНА:
            -- остальные собраны по правилу
@@ -664,6 +671,7 @@ SELECT
     b.draft_placeholders,
     b.draft_foreign_ids,
     b.draft_key_unlabeled,
+    b.draft_asks_date,
     b.dd_no_fields,
     b.dd_bad_urn,
     b.dd_parse_failed,

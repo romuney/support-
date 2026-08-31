@@ -1479,6 +1479,103 @@ nodes.append(
 )
 
 
+
+# ---------------------------------------------------------------- ФАЗА I
+#
+# ГДЕ ЛЕЖИТ ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ. Не угадать, а спросить.
+#
+# В интерфейсе Data Detective у колонок витрины детей стоит «Sensitivity»
+# со значением EMP_SENS. А `GET /entity/{col_urn}/attribute` этого признака
+# не отдаёт вовсе: живой прогон 2026-08-31 показал ровно такой набор
+# атрибутов — can_be_accessed, column_type, data_contract_domain,
+# data_contract_id, data_contract_link, data_contract_version,
+# data_contract_version_nm, keys, ordinal_position, systems_to_delete.
+#
+# Шейпер при этом писал «признака нет ни у одного из 25 полей. Считать эти
+# поля открытыми НЕЛЬЗЯ» — то есть выдавал промах ключа за факт про данные,
+# и оговорка уезжала в КАЖДЫЙ черновик. Класс известный: у кода есть право
+# назвать факт и нет права назвать причину, которую он не измерял.
+#
+# Фаза спрашивает ОДНУ колонку по ВСЕМ ресурсам-расширениям сущности сразу.
+# Ответ на вопрос «где лежит EMP_SENS» будет виден глазами, а не выведен.
+PROBE_COL = os.environ.get(
+    "PROBE_COL",
+    f"urn:dd:tables:greenplum:column:{PROBE_FQN}.birthdate",
+)
+_ENC_COL = f"encodeURIComponent('{PROBE_COL}')"
+PHASE_I = [
+    (f"I {key}", f"={{{{ '{BASE}/entity/' + {_ENC_COL} + '/{key}' }}}}")
+    for key in ("summary", "attribute", "tag", "markdown", "link", "table",
+                "code", "related", "history")
+]
+for _i, (_nm, _url) in enumerate(PHASE_I):
+    nodes.append(get(_nm, _url, [-40 + _i * 190, 1820]))
+
+SHAPE_SENS_JS = r"""
+// Где в ответах каталога встречается признак чувствительности. Ищем НЕ ключ
+// (его имя мы как раз и не знаем), а ЗНАЧЕНИЕ: в интерфейсе оно выглядит
+// как EMP_SENS. Плюс печатаем все ключи каждого ресурса — чтобы решение
+// принималось по списку, а не по догадке.
+const out = [];
+const say = (s) => out.push(s);
+const KEYS = ['summary', 'attribute', 'tag', 'markdown', 'link', 'table',
+              'code', 'related', 'history'];
+const MARK = /EMP_SENS|SENS|sensitiv|чувствительн/i;
+
+say('ФАЗА I. ГДЕ ЛЕЖИТ ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ');
+say('');
+say('Колонка: ' + '__PROBE_COL__');
+say('');
+
+const found = [];
+for (const k of KEYS) {
+  let r = null;
+  try { r = $('I ' + k).first().json; } catch (e) { r = null; }
+  if (!r) { say(`  /${k.padEnd(10)} → узел не выполнялся`); continue; }
+  const code = r.statusCode;
+  if (code !== undefined && code >= 400) {
+    say(`  /${k.padEnd(10)} → HTTP ${code}`);
+    continue;
+  }
+  const body = (r.body ?? r) || {};
+  const text = JSON.stringify(body);
+  const keys = body && typeof body === 'object' && !Array.isArray(body)
+    ? Object.keys(body) : (Array.isArray(body) ? [`массив, ${body.length} элементов`] : []);
+  const hit = MARK.test(text);
+  if (hit) found.push(k);
+  say(`  /${k.padEnd(10)} → ${hit ? 'ЕСТЬ ПРИЗНАК' : 'нет'}; ключи: ` +
+      (keys.length ? keys.slice(0, 14).join(', ') : '(пусто)'));
+  if (hit) {
+    // Печатаем кусок вокруг совпадения: имя ключа видно только так.
+    const at = text.search(MARK);
+    say('      ' + text.slice(Math.max(0, at - 160), at + 120));
+  }
+}
+
+say('');
+if (found.length) {
+  say('ПРИЗНАК НАЙДЕН В: ' + found.join(', ') + '.');
+  say('Читать его надо оттуда — вписать ресурс и ключ в build_dd_flow.py');
+  say('(ACCESS_KEYS и accessOf), и добавить запрос этого ресурса к колонке.');
+} else {
+  say('ПРИЗНАКА НЕТ НИ В ОДНОМ ИЗ ПРОВЕРЕННЫХ РЕСУРСОВ.');
+  say('Значит интерфейс берёт его не из публичного API этой сущности:');
+  say('возможно, это классификация на уровне таблицы или отдельная ручка.');
+  say('Тогда честный вывод для бота — признак недоступен, и запрет на ПДн');
+  say('держится по смыслу поля, а не по каталогу. Так сейчас и написано.');
+}
+
+return [{ json: { report: out.join('\n') } }];
+"""
+
+nodes.append(
+    node("Shape sensitivity", "n8n-nodes-base.code", 2,
+         [-40 + len(PHASE_I) * 190, 1820],
+         {"mode": "runOnceForAllItems",
+          "jsCode": SHAPE_SENS_JS.replace("__PROBE_COL__", PROBE_COL)})
+)
+
+
 CHAIN = (
     ["Run recon"]
     + [n for n, _ in PHASE_A]
@@ -1491,6 +1588,8 @@ CHAIN = (
     + ["Tables to resolve", "Search table", "Shape urns"]
     + [n for n, _, _ in PHASE_H]
     + ["Shape probe table"]
+    + [n for n, _ in PHASE_I]
+    + ["Shape sensitivity"]
 )
 conn = {
     a: {"main": [[{"node": b, "type": "main", "index": 0}]]}
@@ -1529,6 +1628,7 @@ print("  «Search probe» — форма тела и ответа POST /search/q
 print("  «Shape probes» — связи таблицы, источники отчёта, форма поиска")
 print("  «Shape urns»   — НАСТОЯЩИЕ URN витрин, готовая колонка для реестра")
 print("  «Shape probe table» — почему по верному URN нет состава полей")
+print("  «Shape sensitivity» — ГДЕ лежит признак чувствительности")
 print("  «Shape values» — видит ли Trino витрины, кардинальность поля")
 print("                   и чем отказ по недоступной таблице отличается")
 print("                   от пустого результата")

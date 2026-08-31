@@ -395,6 +395,48 @@ line('9. ФАЗА H: ДВЕ РЕГИСТРАЦИИ РЯДОМ, СРАВНЕНИ�
   check('невыполнившиеся узлы шейпер переживает', /ФАЗА H/.test(partial));
 }
 
+// ===================================================================== 10
+line('10. ФАЗА I: ГДЕ ЛЕЖИТ ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ');
+{
+  const shape = js('Shape sensitivity');
+  const run = (byNode) => new Function('$', '$json', shape)(
+    (n) => {
+      if (!(n in byNode)) throw new Error('node not executed: ' + n);
+      if (byNode[n] === null) throw new Error('node not executed: ' + n);
+      return { first: () => ({ json: byNode[n] }) };
+    }, {})[0].json.report;
+
+  const OK = (b) => ({ statusCode: 200, body: b });
+  const base = {
+    'I summary': OK({ data: 'Дата рождения ребёнка' }),
+    'I attribute': OK({ column_type: { data: 'date' }, keys: { data: ['PK'] } }),
+    'I tag': OK([{ name: 'EMP_SENS', type: 'sensitivity' }]),
+    'I markdown': OK({}), 'I link': OK({}), 'I table': OK({}),
+    'I code': OK({}), 'I related': OK({ columns: {} }), 'I history': OK([]),
+  };
+  const r = run(base);
+  // Признак ищется ПО ЗНАЧЕНИЮ, а не по имени ключа: имени мы как раз
+  // и не знаем — угадывание по нему уже стоило суток.
+  check('признак найден там, где он есть', /ПРИЗНАК НАЙДЕН В: tag/.test(r));
+  check('и напечатан кусок ответа, чтобы имя ключа было видно',
+    /EMP_SENS/.test(r) && /sensitivity/.test(r));
+  check('ресурсы без признака названы «нет»', /\/attribute\s+→ нет/.test(r));
+  check('ключи каждого ресурса перечислены', /ключи: column_type, keys/.test(r));
+
+  // Ничего не нашлось — это тоже ответ, и он не должен звучать как отказ.
+  const none = run({ ...base, 'I tag': OK([]) });
+  check('пусто — сказано прямо, без догадок',
+    /ПРИЗНАКА НЕТ НИ В ОДНОМ/.test(none));
+  check('и назван честный вывод: запрет на ПДн по смыслу поля',
+    /по смыслу поля, а не по каталогу/.test(none));
+
+  const bad = run({ ...base, 'I tag': { statusCode: 404 } });
+  check('отказ ручки назван кодом, а не «признака нет»',
+    /\/tag\s+→ HTTP 404/.test(bad));
+  const partial = run({ ...base, 'I tag': null });
+  check('невыполнившийся узел шейпер переживает', /ФАЗА I/.test(partial));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
