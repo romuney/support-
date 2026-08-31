@@ -2495,9 +2495,11 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
 
   // UUID на иглы не режется: `%26b6%` и `%44f2%` совпадут с чем угодно.
   const uuidSql = asked.find((i) => i.check_field === 'management_unit_id').check_sql;
-  // LIKE по идентификатору не нужен вовсе: написание известно дословно.
-  check('по идентификатору LIKE не используется',
-    !/LIKE/.test(uuidSql));
+  // Подстрочный поиск по идентификатору не нужен вовсе: написание известно
+  // дословно. LIKE '5999%' в срезе версии — другое дело, это не поиск
+  // значения, а фильтр актуальной версии.
+  check('по идентификатору подстрочного поиска нет',
+    !/LIKE\s+'%/.test(uuidSql));
   check('и куски hex в запрос не попали', !/%26b6%|%44f2%|%917e%/.test(uuidSql));
 
   // ТОЧНЫЙ ИДЕНТИФИКАТОР — ТОЧЕЧНЫЙ ЗАПРОС, А НЕ СЛОВАРЬ ЗНАЧЕНИЙ.
@@ -2537,6 +2539,45 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
     Boolean(reOf('Build check SQL')) && Boolean(reOf('Check result')));
   check('и она одна и та же',
     reOf('Build check SQL') === reOf('Check result'));
+
+  // ВЕРСИОННОСТЬ: срез обязан отсекать исторические и удалённые строки.
+  // Живой прогон 2026-08-31 искал идентификатор юнита по ВСЕМ версиям
+  // справочника: переименованный или удалённый юнит подтвердился бы наравне
+  // с действующим, и по виду результата это не заметно.
+  const VER = [
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:dlh:table:dds.management_unit ===',
+    'ПОЛЯ: management_unit_rk, management_unit_id, valid_from_dttm, valid_to_dttm, deleted_flg',
+  ].join('\n');
+  const ver = run(VER, "where management_unit_id = 'e289067b-26b6-44f2-917e-668d1ea65cc5'");
+  check('версионная витрина режется по актуальной версии',
+    /valid_to_dttm AS varchar\) LIKE '5999%'/.test(ver[0].check_sql));
+  check('и удалённые строки отсекаются',
+    /deleted_flg AS varchar\) IN \('0', 'false'\)/.test(ver[0].check_sql));
+  // Сравнение через CAST намеренно: у одного и того же по смыслу поля тип
+  // разный (`deleted_flg = 0` в crm_user, `= false` в disciplinary_sanction),
+  // и прямое сравнение упало бы на boolean-колонке.
+  check('сравнение типобезопасное, а не с числом',
+    !/deleted_flg = 0/.test(ver[0].check_sql));
+
+  // Витрина БЕЗ версионности лишних условий не получает — иначе запрос
+  // упал бы на несуществующем поле.
+  const plain = run(
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ===\n' +
+    'ПОЛЯ: mdm_employee_rk, last_day_flg, active_employee_flg, company_fire_flg, emp_stream_desc',
+    "where emp_stream_desc = 'Дата'");
+  check('без версионности лишних условий нет',
+    !/valid_to_dttm|deleted_flg/.test(plain[0].check_sql));
+  check('а свой срез на месте', /last_day_flg = 1/.test(plain[0].check_sql));
+
+  // СРЕЗ СВЕРЯЕТСЯ СО СТАТЬЯМИ. Единственная копия условия живёт в коде,
+  // и разъехаться с базой она может молча — как однажды разъехалась формула
+  // активной численности.
+  const kbDir = REGISTRY_AT.replace(/index\.md$/, '');
+  const arts = fs.readdirSync(kbDir + 'tables').map(
+    (f) => fs.readFileSync(kbDir + 'tables/' + f, 'utf8')).join('\n');
+  check('признак актуальной версии из статей — 5999', /valid_to_dttm\s*=\s*'5999-01-01'/.test(arts));
+  check('и оба написания флага удаления в базе есть',
+    /deleted_flg\s*=\s*0/.test(arts) && /deleted_flg\s*=\s*false/i.test(arts));
 
   // ГРАНИЦА БЛОКА — следующий «=== » любого вида. Между блоками каталога
   // лежат другие блоки, и в них полно имён полей: приписав их предыдущей
