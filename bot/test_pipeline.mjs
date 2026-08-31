@@ -2459,6 +2459,64 @@ line('46. ССЫЛКА НА ЮНИТ: id разбирается кодом, сп
     /этого идентификатора НЕТ/.test(mat.materials));
 }
 
+// ===================================================================== 47
+line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ');
+{
+  const sqlJs = js('Build check SQL');
+  const run = (materials, draft) => new Function('$', '$json', sqlJs)(
+    (n) => {
+      if (n === 'Build materials') return { first: () => ({ json: { materials } }) };
+      if (n === 'Parse answer') return { first: () => ({ json: { draft, tech_spec: '' } }) };
+      throw new Error('node not executed: ' + n);
+    }, { check_values: '' }).map((i) => i.json);
+
+  // ЖИВОЙ КЕЙС 2026-08-31. ТЗ стало готовым запросом, и в него попал
+  // канонический фильтр версии из рецепта. Разбор пар честно вытащил
+  // `valid_to_dttm = '5999-01-01'`, отправил его в Trino, запрос отказал —
+  // и ОТКАЗ ПОНИЗИЛ УВЕРЕННОСТЬ ПО ВСЕМУ ОТВЕТУ. Ответ испортила проверка
+  // того, что и так было известно из статьи.
+  const MAT = [
+    '=== СТАТЬЯ kb/recipes/unit-link.md ===',
+    "where management_unit_id = <id> and valid_to_dttm = '5999-01-01' and deleted_flg = 0",
+    '',
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:dlh:table:dds.management_unit ===',
+    'ПОЛЯ: management_unit_rk, management_unit_id, valid_to_dttm, deleted_flg',
+  ].join('\n');
+  const DRAFT = "where management_unit_id = 'e289067b-26b6-44f2-917e-668d1ea65cc5' " +
+    "and valid_to_dttm = '5999-01-01'";
+  const r = run(MAT, DRAFT);
+  const asked = r.filter((i) => i.check_sql);
+  check('константа из статьи в проверку не идёт',
+    !asked.some((i) => i.check_field === 'valid_to_dttm'));
+  check('и отсев назван причиной, а не молчанием',
+    r[0].check_skipped.some((x) => /константа из статьи/.test(x)));
+  check('а неизвестное значение проверяется как раньше',
+    asked.some((i) => i.check_field === 'management_unit_id'));
+
+  // UUID на иглы не режется: `%26b6%` и `%44f2%` совпадут с чем угодно.
+  const uuidSql = asked.find((i) => i.check_field === 'management_unit_id').check_sql;
+  check('uuid ищется целиком, а не кусками',
+    (uuidSql.match(/LIKE/g) || []).length === 1);
+  check('и куски hex в запрос не попали', !/%26b6%|%44f2%|%917e%/.test(uuidSql));
+
+  // ГРАНИЦА БЛОКА — следующий «=== » любого вида. Между блоками каталога
+  // лежат другие блоки, и в них полно имён полей: приписав их предыдущей
+  // витрине, пара уйдёт в запрос к таблице, где такого поля нет.
+  const MIXED = [
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d ===',
+    'ПОЛЯ: mdm_employee_rk, last_day_flg, mapped_management_unit_nm',
+    '',
+    '=== В ОБРАЩЕНИИ ССЫЛКА НА ЮНИТ ===',
+    'Это значение поля management_unit_id в справочнике',
+    '',
+    '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:tables:dlh:table:dds.management_unit ===',
+    'ПОЛЯ: management_unit_rk, management_unit_id, valid_to_dttm',
+  ].join('\n');
+  const mixed = run(MIXED, "where management_unit_id = 'e289067b-26b6-44f2-917e-668d1ea65cc5'");
+  check('поле из соседнего блока не приписано чужой витрине',
+    mixed[0].check_table === 'prod_v_dds.management_unit');
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
