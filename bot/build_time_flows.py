@@ -3245,10 +3245,21 @@ for (const t of tables) for (const f of t.fields) known.add(f);
 // То же с `valid_to_dttm`: это timestamp, и сравнение с текстом
 // '5999-01-01' в Trino не пройдёт.
 const DELETED_FLAGS = ['deleted_flg', 'etl_deleted_flg', 'isdeleted', 'close_flg'];
+// СЛОЙ DDS ВЕРСИОНЕН ЦЕЛИКОМ — это правило слоя, а не свойство отдельных
+// таблиц (подтверждено владельцем 2026-08-31). Нужно как страховка: инвентарь
+// мог не прийти или прийти неполным, и тогда по одному только составу полей
+// версионность не видна. У `dds.mdm_employee_x_profession` её не было даже
+// в статье — то есть дыра существовала и в базе, и в коде одновременно.
+//
+// Инвентарь при этом ГЛАВНЕЕ: состав полей живёт в каталоге, и если поле
+// там видно — берём его оттуда. Правило слоя добавляет условие только там,
+// где инвентарь молчит.
+const isDdsLayer = (name) => /^dds(_dic)?\./i.test(String(name || ''));
 const whereFor = (t) => {
   const hasSlice = t.fields.has('last_day_flg');
   const hasActive = t.fields.has('active_employee_flg') && t.fields.has('company_fire_flg');
-  const hasVersion = t.fields.has('valid_to_dttm');
+  const hasVersion = t.fields.has('valid_to_dttm') ||
+    (isDdsLayer(t.name) && !t.fields.size);
   const where = [
     hasSlice ? 'last_day_flg = 1' : '',
     hasActive ? 'active_employee_flg = 1 AND company_fire_flg = 0' : '',

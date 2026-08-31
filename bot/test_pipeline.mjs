@@ -2569,10 +2569,30 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
     !/valid_to_dttm|deleted_flg/.test(plain[0].check_sql));
   check('а свой срез на месте', /last_day_flg = 1/.test(plain[0].check_sql));
 
+  const kbDir = REGISTRY_AT.replace(/index\.md$/, '');
+
+  // ПРАВИЛО СЛОЯ: dds версионен целиком, и это подтверждено владельцем.
+  // Нужно как страховка — инвентарь мог не прийти, и тогда по составу полей
+  // версионность не видна. У dds.mdm_employee_x_profession её не было даже
+  // в статье: дыра существовала и в базе, и в коде одновременно.
+  const conv = fs.readFileSync(kbDir + 'process/sql-conventions.md', 'utf8');
+  check('правило слоя DDS записано в базе',
+    /Слой DDS: любая таблица версионная/.test(conv) &&
+    /valid_to_dttm = '5999-01-01'/.test(conv));
+  check('и сказано, что оно действует помимо статьи таблицы',
+    /даже если в статье конкретной таблицы про это/.test(conv));
+  check('а слои не смешиваются',
+    /`valid_to_dttm` в `emart` нет, `last_day_flg` в `dds` нет/.test(conv));
+  const xprof = fs.readFileSync(kbDir + 'tables/mdm-employee-x-profession.md', 'utf8');
+  check('дыра в статье dds-таблицы закрыта',
+    /valid_to_dttm = '5999-01-01'/.test(xprof));
+  // Инвентарь главнее правила слоя: состав полей живёт в каталоге.
+  check('правило слоя не перебивает инвентарь',
+    /!t\.fields\.size/.test(js('Build check SQL')));
+
   // СРЕЗ СВЕРЯЕТСЯ СО СТАТЬЯМИ. Единственная копия условия живёт в коде,
   // и разъехаться с базой она может молча — как однажды разъехалась формула
   // активной численности.
-  const kbDir = REGISTRY_AT.replace(/index\.md$/, '');
   const arts = fs.readdirSync(kbDir + 'tables').map(
     (f) => fs.readFileSync(kbDir + 'tables/' + f, 'utf8')).join('\n');
   check('признак актуальной версии из статей — 5999', /valid_to_dttm\s*=\s*'5999-01-01'/.test(arts));
