@@ -3207,6 +3207,48 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
     mb.dd_parse_failed.length === 1 && /обещано полей: 10/.test(mb.dd_parse_failed[0]));
   check('и не выдан за отказ каталога',
     mb.dd_bad_urn.length === 0 && mb.dd_no_columns.length === 0);
+
+  // ТРИ РЕЖИМА ШЕЙПЕРА, И РАЗБОР ОБЯЗАН РАБОТАТЬ В КАЖДОМ. Число полей
+  // шейпер называет во всех трёх, но по-разному, и без сверки с ним промах
+  // разбора снова стал бы молчанием каталога — только уже в другом режиме.
+  const shaped = (search, pick) => new Function('$', '$json', ddJs('Shape table meta'))(
+    (n) => {
+      if (n === 'When called by agent') return { first: () => ({ json: { urn: URN_KIDS, search } }) };
+      if (n === 'dd_entity_card') {
+        return { first: () => ({ json: { statusCode: 200, body: { data: 'Данные о детях' } } }) };
+      }
+      if (n === 'dd_entity_attrs') return { first: () => ({ json: { statusCode: 200, body: {} } }) };
+      if (n === 'dd_columns') return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      if (n === 'Pick columns') return { first: () => ({ json: pick }) };
+      if (n === 'dd_column_summary') {
+        return { all: () => pick.targets.map((t) => ({
+          json: { statusCode: 200, body: { data: 'описание ' + t.field } } })) };
+      }
+      if (n === 'dd_column_attrs') {
+        return { all: () => pick.targets.map(() => ({
+          json: { statusCode: 200, body: { column_type: { data: 'text' } } } })) };
+      }
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json.dd_meta;
+
+  const bcs = js('Build check SQL');
+  const api = new Function(
+    bcs.slice(bcs.indexOf('const IDENT'), bcs.indexOf('return set;\n}') + 13) +
+    '\nreturn { fieldsOf, declaredOf };')();
+
+  for (const [label, search, pick] of [
+    ['без фильтра', '', { targets: [], mode: '', total: NAMES.length }],
+    ['фильтр попал', 'дата рождения',
+     { targets: [{ field: 'birthdate', idx: 2 }], mode: 'by_name', total: NAMES.length }],
+    ['фильтр промахнулся', 'зарплата',
+     { targets: [], mode: 'by_name', total: NAMES.length }],
+  ]) {
+    const t = shaped(search, pick);
+    check(`${label}: инвентарь разобран целиком`,
+      api.fieldsOf(t).size === NAMES.length);
+    check(`${label}: число полей объявлено и прочитано`,
+      api.declaredOf(t) === NAMES.length);
+  }
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
