@@ -1367,6 +1367,58 @@ line('33. ЛИЧКА: причина средней уверенности на�
 }
 
 // ====================================================================== 32
+line('32б. ОДНА МОДЕЛЬ LLM во всех воркфлоу');
+{
+  // До 2026-08-31 модель нигде не была записана: узел прокси копировался
+  // из «Support Bot.json» — снимка первой конструкции, — и через него алиас
+  // доезжал до всех четырёх узлов ядра. Поменять её можно было только руками
+  // в n8n, где правка живёт ровно до следующего импорта. Тот же класс, что
+  // разъехавшийся Service Account, и лечится так же: одна константа
+  // LLM_MODEL в build_dd_flow.py плюс нормализация ВСЕХ узлов прокси.
+  //
+  // Проверяется согласованность, а не конкретный алиас: смена модели —
+  // правка одной константы, а не обход четырёх файлов. Исходник проверяется
+  // наравне с собранным: устаревшее значение лежало именно во входе.
+  const models = new Map();
+  const llmCreds = new Map();
+  for (const [name, wf] of [['DD Lookup', load('DD Lookup.json')],
+                            ['Support Bot DD', load('Support Bot DD.json')],
+                            ['Support Bot (исходник)', load('Support Bot.json')],
+                            ['Support Bot Core', core]]) {
+    for (const n of wf.nodes) {
+      if (!/llmproxy$/i.test(n.type || '')) continue;
+      const m = ((n.parameters || {}).model || {}).value || '(пусто)';
+      if (!models.has(m)) models.set(m, []);
+      models.get(m).push(`${name} / ${n.name}`);
+      const c = (n.credentials || {}).openAiApi;
+      const cid = c ? c.id : '(нет)';
+      if (!llmCreds.has(cid)) llmCreds.set(cid, []);
+      llmCreds.get(cid).push(`${name} / ${n.name}`);
+    }
+  }
+  check('узлы прокси вообще есть', models.size > 0);
+  check('модель во всех воркфлоу ОДНА',
+    models.size === 1,
+    models.size > 1
+      ? 'разъехались: ' + [...models].map(([m, at]) =>
+          `${m} → ${at.join(', ')}`).join(' | ')
+      : '');
+  check('и она не пустая', !models.has('(пусто)'));
+  check('credential прокси тоже один',
+    llmCreds.size === 1 && !llmCreds.has('(нет)'));
+
+  // Модель уезжает в телеметрию рядом с версией промпта: калибровка
+  // помодельная, а prompt_version — хеш ПРОМПТОВ, и смена модели его
+  // не двигает вовсе. Без этой пары две модели сложились бы в одну цифру.
+  const model = [...models.keys()][0];
+  const ev = js(channel, 'Answer event');
+  check('модель уезжает в телеметрию', ev.includes(model));
+  const view = fs.readFileSync('../telemetry/support_request.sql', 'utf8');
+  check('и витрина её читает', view.includes('$.llm_model'));
+  check('и режет калибровку по ней',
+    /GROUP BY channel_kind, prompt_version, llm_model/.test(view));
+}
+
 line('32. ОДИН Service Account во всех воркфлоу');
 {
   // 2026-08-27: в живых «DD Lookup» и «Support Bot Core» credential поменяли

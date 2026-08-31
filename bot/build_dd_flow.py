@@ -50,6 +50,23 @@ DD_SUBFLOW_ID = os.environ.get("DD_SUBFLOW_ID", "7tgrNcbmZGuW2AON")
 DP_CRED = {"devplatformApi": {"id": "mR1hhfmm8mKuMeX0",
                              "name": "Spirit (Devplatform) Service Account Support"}}
 
+# Модель LLM-прокси. ОДНО МЕСТО НА ВЕСЬ ПРОЕКТ, по той же причине, что
+# и DP_CRED выше.
+#
+# До 2026-08-31 модель нигде не была записана: узел «T-Bank LLM proxy»
+# копировался из «Support Bot.json» — снимка первой конструкции, — и через
+# него алиас доезжал до всех четырёх узлов ядра. То есть значение жило
+# в файле, который никто не правит, и поменять его можно было только руками
+# в интерфейсе n8n, где правка живёт ровно до следующего импорта. Ровно тот
+# же класс, что разъехавшийся Service Account и выключенная руками нода
+# «Collect articles».
+#
+# Credential для прокси при этом отдельный: DP_CRED — это Devplatform
+# (каталог и GitLab), а прокси ходит под openAiApi. Оба нормализуются здесь.
+LLM_MODEL = "tgpt/text.instant.sota"
+LLM_CRED = {"openAiApi": {"id": "r7ggVfrFwXpEzDKh",
+                          "name": "Tbank LLM Proxy account 70"}}
+
 wf = json.load(open(SRC, encoding="utf-8"))
 
 # ---------------------------------------------------------------- 1. чистка
@@ -73,6 +90,20 @@ wf["nodes"] = [n for n in wf["nodes"] if n["name"] != "HTTP Request"]
 for _n in wf["nodes"]:
     if "devplatformApi" in (_n.get("credentials") or {}):
         _n["credentials"] = copy.deepcopy(DP_CRED)
+
+# Одна модель и один credential на все узлы прокси — включая унаследованные
+# из исходника. Отсюда же их берёт build_time_flows: узел «T-Bank LLM proxy»
+# собранного «Support Bot DD» служит образцом для четырёх узлов ядра,
+# поэтому нормализовать надо здесь, а не в каждом сборщике по копии.
+for _n in wf["nodes"]:
+    if _n.get("type", "").lower().endswith("llmproxy"):
+        _n["parameters"]["model"] = {
+            "__rl": True,
+            "value": LLM_MODEL,
+            "mode": "list",
+            "cachedResultName": LLM_MODEL,
+        }
+        _n["credentials"] = copy.deepcopy(LLM_CRED)
 
 # ------------------------------------------------- 2. общие опции HTTP к DD
 # Follow Redirects выключен: иначе редирект уводит на страницу логина.

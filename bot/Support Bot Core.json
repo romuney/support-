@@ -96,9 +96,9 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "tgpt/deepseek-v4-flash-fp8",
+          "value": "tgpt/text.instant.sota",
           "mode": "list",
-          "cachedResultName": "tgpt/deepseek-v4-flash-fp8"
+          "cachedResultName": "tgpt/text.instant.sota"
         },
         "options": {}
       },
@@ -350,9 +350,9 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "tgpt/deepseek-v4-flash-fp8",
+          "value": "tgpt/text.instant.sota",
           "mode": "list",
-          "cachedResultName": "tgpt/deepseek-v4-flash-fp8"
+          "cachedResultName": "tgpt/text.instant.sota"
         },
         "options": {}
       },
@@ -485,9 +485,9 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "tgpt/deepseek-v4-flash-fp8",
+          "value": "tgpt/text.instant.sota",
           "mode": "list",
-          "cachedResultName": "tgpt/deepseek-v4-flash-fp8"
+          "cachedResultName": "tgpt/text.instant.sota"
         },
         "options": {}
       },
@@ -622,9 +622,9 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "tgpt/deepseek-v4-flash-fp8",
+          "value": "tgpt/text.instant.sota",
           "mode": "list",
-          "cachedResultName": "tgpt/deepseek-v4-flash-fp8"
+          "cachedResultName": "tgpt/text.instant.sota"
         },
         "options": {}
       },

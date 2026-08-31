@@ -432,7 +432,14 @@ bot AS (
            max_by(json_extract_scalar(payload, '$.router_error'),
                   event_ts) AS router_error,
            max_by(json_extract_scalar(payload, '$.prompt_version'),
-                  event_ts) AS prompt_version
+                  event_ts) AS prompt_version,
+           -- Модель прокси. Рядом с версией промпта, потому что калибровка
+           -- (заявленная уверенность против действующей) — величина
+           -- ПОМОДЕЛЬНАЯ: у другой модели своя манера завышать. Смена модели
+           -- prompt_version не двигает вовсе — он хеш промптов, — так что
+           -- без этой колонки две модели сложились бы в одну цифру молча.
+           max_by(json_extract_scalar(payload, '$.llm_model'),
+                  event_ts) AS llm_model
     FROM ev
     WHERE event_type = 'bot_answered'
     GROUP BY thread_id
@@ -588,6 +595,7 @@ SELECT
     NULLIF(b.parse_error, '')                               AS parse_error,
     NULLIF(b.router_error, '')                              AS router_error,
     b.prompt_version,
+    b.llm_model,
 
     f.draft_useful,
     f.feedback_at,
@@ -830,6 +838,7 @@ ans AS (
                                                                      AS confidence_capped,
            json_extract_scalar(payload, '$.capped_reason')           AS capped_reason,
            json_extract_scalar(payload, '$.prompt_version')          AS prompt_version,
+           json_extract_scalar(payload, '$.llm_model')               AS llm_model,
            CAST(json_extract_scalar(payload, '$.dd_count') AS integer)    AS dd_count,
            CAST(json_extract_scalar(payload, '$.dd_received') AS integer) AS dd_received,
            CAST(json_extract_scalar(payload, '$.dd_never_ran') AS boolean) AS dd_never_ran,
@@ -855,6 +864,9 @@ ans AS (
 SELECT
     channel_kind,
     prompt_version,
+    -- Разрез по модели обязателен: калибровка помодельная, и сравнивать
+    -- доли завышений между моделями нельзя.
+    llm_model,
     count(*)                                               AS answers,
 
     -- Калибровка. Ключи английские — так их пишет ядро (см. тест 38).
@@ -884,6 +896,6 @@ SELECT
     sum(COALESCE(kb_tasks, 0))                             AS kb_gaps_found
 FROM ans
 WHERE answered_at >= current_timestamp - INTERVAL '30' DAY
-GROUP BY channel_kind, prompt_version
-ORDER BY channel_kind, prompt_version
+GROUP BY channel_kind, prompt_version, llm_model
+ORDER BY channel_kind, prompt_version, llm_model
 ;

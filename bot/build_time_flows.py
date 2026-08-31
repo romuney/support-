@@ -325,6 +325,21 @@ GITLAB_PROJECT = GET_INDEX["parameters"]["projectId"]
 # ai_languageModel-входом к двум разным агентам.
 LLM_SRC = next(n for n in src["nodes"] if n["name"] == "T-Bank LLM proxy")
 
+# Модель и credential прокси берутся ИЗ СОБРАННОГО «Support Bot DD», а не
+# дублируются здесь константой — то же решение, что с id «DD Lookup»
+# и с GITLAB_CRED: одно значение, одно место, разъезжаться нечему.
+# Владеет ими build_dd_flow.py (LLM_MODEL / LLM_CRED), он же их и проставляет.
+#
+# Читается ЯВНО, а не молча наследуется через deepcopy: пустое значение здесь
+# означает, что узел прокси в исходнике сломан, и четыре узла ядра уехали бы
+# в n8n без модели — а это не падение сборки, это падение первого же вопроса.
+LLM_MODEL = ((LLM_SRC.get("parameters") or {}).get("model") or {}).get("value") or ""
+if not LLM_MODEL:
+    raise SystemExit(
+        f"в {SRC} у ноды «T-Bank LLM proxy» не задана модель — сначала "
+        f"python3 build_dd_flow.py: модель живёт там, в константе LLM_MODEL"
+    )
+
 
 def llm(name, pos):
     n = copy.deepcopy(LLM_SRC)
@@ -4485,6 +4500,15 @@ return [{ json: {
     confidence_capped: a.confidence_capped === true,
     capped_reason: a.confidence_capped_reason || '',
     prompt_version: PROMPT_VERSION,
+    // МОДЕЛЬ — РЯДОМ С ВЕРСИЕЙ ПРОМПТА, И ПО ТОЙ ЖЕ ПРИЧИНЕ.
+    //
+    // Калибровка (заявленная уверенность против действующей) — самая ценная
+    // метрика проекта, и она про КОНКРЕТНУЮ модель: у другой своя манера
+    // завышать. Сменить модель и не отметить это в логе значит смешать две
+    // популяции в одной цифре: доля завышений поедет, а списать её будет
+    // не на что. `prompt_version` этого не ловит — он хеш ПРОМПТОВ, и смена
+    // модели его не двигает вовсе (2026-08-31 модель сменили, хеш не изменился).
+    llm_model: LLM_MODEL_LITERAL,
     is_export: a.is_export === true,
     // Из чего собран ответ: по этим числам видно, что чинить — базу или промпт.
     // Имя поля — articles_read, а не articles: support_request.sql (CTE bot)
@@ -4616,6 +4640,7 @@ def answer_event_js(guard_node, source):
     return (
         ANSWER_EVENT_JS
         .replace("PROMPT_VERSION", json.dumps(PROMPT_VERSION))
+        .replace("LLM_MODEL_LITERAL", json.dumps(LLM_MODEL))
         .replace("__GUARD__", json.dumps(guard_node, ensure_ascii=False))
         .replace("__SOURCE__", json.dumps(source))
     )
