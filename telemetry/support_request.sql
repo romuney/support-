@@ -338,6 +338,18 @@ bot AS (
            -- искать «Тбанк» среди подразделений бессмысленно по построению.
            max_by(CAST(json_extract_scalar(payload, '$.draft_company_filter') AS integer),
                   event_ts) AS draft_company_filter,
+           -- Имена полей, названные заказчику, которых нет ни в каталоге,
+           -- ни в прочитанных статьях. По виду черновика настоящее имя поля
+           -- от правдоподобного не отличить, и джун их не поймает.
+           max_by(CAST(json_extract_scalar(payload, '$.draft_invented_fields') AS integer),
+                  event_ts) AS draft_invented_fields,
+           -- Что потерял второй проход правки и пришлось добрать из первого.
+           -- revise_dropped — полный слом формата: в ответе не нашлось
+           -- ни одного ярлыка, и правленый черновик пришлось отбросить.
+           max_by(CAST(json_extract_scalar(payload, '$.revise_carried') AS integer),
+                  event_ts) AS revise_carried,
+           max_by(CAST(json_extract_scalar(payload, '$.revise_dropped') AS boolean),
+                  event_ts) AS revise_dropped,
            -- Роутер назвал путь статьи неверно, и код восстановил его
            -- по реестру. Доля восстановлений — метрика того, держит ли роутер
            -- формат: до 2026-08-31 такой промах молча терял статью, и по логу
@@ -367,6 +379,11 @@ bot AS (
            -- угадывает написание с первого раза.
            max_by(CAST(json_extract_scalar(payload, '$.check_exact') AS integer),
                   event_ts) AS check_exact,
+           -- По скольким «витрина.поле» поднимался словарь значений.
+           -- Отдельно от check_rows: строки — это размер словаря, а не
+           -- число проверенных полей, и путать их в дашборде дорого.
+           max_by(CAST(json_extract_scalar(payload, '$.check_fields') AS integer),
+                  event_ts) AS check_fields,
            -- ПОДМЕНА: в итоговом фильтре значение, которого заказчик
            -- не называл. Отдельно от check_exact: там «ответ был тот самый»,
            -- здесь «данные сказали, что такого значения нет, а в запрос всё
@@ -557,6 +574,7 @@ SELECT
     COALESCE(b.check_skipped, 0)                            AS check_skipped,
     COALESCE(b.check_rows, 0)                               AS check_rows,
     COALESCE(b.check_exact, 0)                              AS check_exact,
+    COALESCE(b.check_fields, 0)                             AS check_fields,
     -- Подмена значения: данные ответили «такого нет», а в фильтр уехало
     -- чужое. Считается отдельно от check_exact намеренно — см. блок bot.
     COALESCE(b.check_substituted, 0)                        AS check_substituted,
@@ -580,6 +598,9 @@ SELECT
     COALESCE(b.sens_fields, 0)                              AS sens_fields,
     COALESCE(b.sens_unmarked, false)                        AS sens_unmarked,
     COALESCE(b.draft_company_filter, 0)                     AS draft_company_filter,
+    COALESCE(b.draft_invented_fields, 0)                    AS draft_invented_fields,
+    COALESCE(b.revise_carried, 0)                           AS revise_carried,
+    COALESCE(b.revise_dropped, false)                       AS revise_dropped,
     -- Резолв путей роутера. Обе колонки про одно: насколько роутер держит
     -- формат. Восстановленный путь — починка на лету, и если она частая,
     -- чинить надо промпт, а не радоваться тому, что статья доехала.

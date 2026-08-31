@@ -2322,6 +2322,90 @@ line('43. ДВЕ ВИТРИНЫ: срез не уезжает к чужой та
     both.every((i) => i.check_sql.includes('AS tbl')));
 }
 
+// ===================================================================== 44
+line('44. ВЫДУМАННОЕ ИМЯ ПОЛЯ И ПОТЕРЯННЫЕ БЛОКИ ВТОРОГО ПРОХОДА');
+{
+  const parseJs = js('Parse answer');
+  const runP = (draft, materials) => new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'When called by adapter') return { first: () => ({ json: { question: 'выгрузка' } }) };
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      if (name === 'Build materials') {
+        return { first: () => ({ json: { materials, has_materials: true } }) };
+      }
+      if (name === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+      throw new Error('node not executed: ' + name);
+    },
+    { output: 'ЧЕРНОВИК ОТВЕТА: ' + draft + '\nУВЕРЕННОСТЬ: высокая' },
+  )[0].json;
+
+  // ЖИВОЙ КЕЙС 2026-08-31, выгрузка про детей сотрудников. Бот назвал
+  // заказчику поле `age`, а идентификатор юнита предложил искать
+  // в `unit_id`, `structure_resource_link`, `internal_id`. Ни одного
+  // из четырёх имён в метаданных не было — выведены из ссылки в обращении.
+  const MAT = 'ПОЛЯ: mdm_employee_rk, birthdate, firstname, surname, ' +
+    'mapped_management_unit_nm';
+  const bad = runP('в витрине есть поле age ребёнка, а юнит скорее всего ' +
+    'в unit_id или structure_resource_link', MAT);
+  check('выдуманные имена полей названы',
+    bad.draft_invented_fields.includes('unit_id') &&
+    bad.draft_invented_fields.includes('structure_resource_link'));
+
+  // Настоящее поле тревоги не даёт — иначе строка горела бы на верном
+  // черновике и её перестали бы читать.
+  const good = runP('дата рождения ребёнка в поле birthdate, ' +
+    'сотрудник — mdm_employee_rk', MAT);
+  check('настоящие поля тревоги не дают', good.draft_invented_fields.length === 0);
+
+  // Ссылки не разбираются как имена полей: в URL подчёркиваний хватает.
+  const url = runP('юнит https://my.tbank.ru/structure/resource/units/e28?searchEmployee=1', MAT);
+  check('ссылка выдуманным полем не считается', url.draft_invented_fields.length === 0);
+}
+
+// ===================================================================== 45
+line('45. ВТОРОЙ ПРОХОД НЕ ТЕРЯЕТ БЛОКИ ПЕРВОГО');
+{
+  const finalJs = js('Final answer');
+  const runFinal = (first, revised) => new Function('$', '$json', finalJs)(
+    (name) => {
+      if (name === 'Parse answer') return { first: () => ({ json: first }) };
+      if (name === 'Parse revised') {
+        if (!revised) throw new Error('node not executed');
+        return { first: () => ({ json: revised }) };
+      }
+      if (name === 'Build check SQL') {
+        return { first: () => ({ json: { check_pairs: [{ field: 'x' }], check_skipped: [] } }) };
+      }
+      if (name === 'Check result') {
+        return { first: () => ({ json: { check_rows: 600, check_failed: '', check_exact: 1 } }) };
+      }
+      throw new Error('node not executed: ' + name);
+    }, {})[0].json;
+
+  const FIRST = { draft: 'первый', tech_spec: 'ТАБЛИЦА: prod_v_emart.x',
+                  sources: 'kb/a.md', confidence_key: 'high', confidence_claimed: 'high' };
+
+  // ЖИВОЙ КЕЙС: правка вернулась без ТЗ, и оно исчезло целиком — REVISE_PROMPT
+  // о нём не говорил вовсе, а в логе это выглядело сбоем формата.
+  const lost = runFinal(FIRST, { draft: 'правленый', tech_spec: '',
+                                 confidence_key: 'high', confidence_claimed: 'high' });
+  check('ТЗ добрано из первого прохода', lost.tech_spec === 'ТАБЛИЦА: prod_v_emart.x');
+  check('и потеря названа, а не сделана молча',
+    lost.revise_carried.includes('tech_spec'));
+  check('правленый черновик при этом сохранён', lost.draft === 'правленый');
+
+  // Формат сломан целиком: черновиком стал сырой текст со служебными
+  // рассуждениями модели. Тогда первый черновик лучше правленого.
+  const broken = runFinal(FIRST, {
+    draft: 'Отлично, принимаю инструкцию. Проверил значения…',
+    parse_error: 'в ответе агента не найдено ни одного блока',
+    confidence_key: 'medium', confidence_claimed: 'medium' });
+  check('сырой текст второго прохода не уходит заказчику',
+    broken.draft === 'первый');
+  check('и это названо джуну', broken.revise_dropped === true);
+  check('с честной причиной', /значения в нём НЕ проверены/.test(broken.parse_error));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
