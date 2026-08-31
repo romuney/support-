@@ -2495,9 +2495,48 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
 
   // UUID на иглы не режется: `%26b6%` и `%44f2%` совпадут с чем угодно.
   const uuidSql = asked.find((i) => i.check_field === 'management_unit_id').check_sql;
-  check('uuid ищется целиком, а не кусками',
-    (uuidSql.match(/LIKE/g) || []).length === 1);
+  // LIKE по идентификатору не нужен вовсе: написание известно дословно.
+  check('по идентификатору LIKE не используется',
+    !/LIKE/.test(uuidSql));
   check('и куски hex в запрос не попали', !/%26b6%|%44f2%|%917e%/.test(uuidSql));
+
+  // ТОЧНЫЙ ИДЕНТИФИКАТОР — ТОЧЕЧНЫЙ ЗАПРОС, А НЕ СЛОВАРЬ ЗНАЧЕНИЙ.
+  // Словарь отвечает на вопрос «как записано слово заказчика»; по uuid
+  // написание известно дословно, и вопрос другой — «есть ли такая строка».
+  // Живой прогон 2026-08-31 сканировал ВЕСЬ справочник юнитов, группируя
+  // по уникальному ключу, чтобы ответить на то, на что отвечает WHERE.
+  check('по идентификатору запрос точечный, а не GROUP BY по всей таблице',
+    /WHERE lower\(CAST\(management_unit_id/.test(uuidSql) &&
+    !/ORDER BY exact_hit/.test(uuidSql));
+  check('и словарь на 300 строк не поднимается', !/LIMIT 300/.test(uuidSql));
+
+  // Ноль строк на точечном запросе — ОТВЕТ, а не отказ проверки.
+  const resJs = js('Check result');
+  const empty = new Function('$', '$json', resJs)(
+    (n) => {
+      if (n === 'Retry check SQL') throw new Error('доспроса не было');
+      if (n === 'Build check SQL') {
+        return { first: () => ({ json: {
+          check_pairs: [{ field: 'management_unit_id',
+                          value: 'e289067b-26b6-44f2-917e-668d1ea65cc5' }],
+          check_skipped: [] } }) };
+      }
+      if (n === 'Check values') return { all: () => [{ json: {} }] };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  check('пустой точечный запрос — определённый ответ',
+    /ИДЕНТИФИКАТОР В СПРАВОЧНИКЕ НЕ НАЙДЕН/.test(empty.check_block));
+  check('и автору запрещено подбирать похожий',
+    /Не подбирай похожий идентификатор/.test(empty.check_block));
+
+  // Регулярка uuid живёт в ДВУХ нодах и обязана совпадать: «Build check SQL»
+  // решает форму запроса, «Check result» — как читать пустой результат.
+  const reOf = (node) =>
+    (js(node).match(/\[0-9a-f\]\{8\}-[^/\n]*\{12\}/) || [])[0];
+  check('регулярка идентификатора найдена в обеих нодах',
+    Boolean(reOf('Build check SQL')) && Boolean(reOf('Check result')));
+  check('и она одна и та же',
+    reOf('Build check SQL') === reOf('Check result'));
 
   // ГРАНИЦА БЛОКА — следующий «=== » любого вида. Между блоками каталога
   // лежат другие блоки, и в них полно имён полей: приписав их предыдущей
