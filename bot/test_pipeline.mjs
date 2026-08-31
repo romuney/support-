@@ -2549,8 +2549,14 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
     'ПОЛЯ: management_unit_rk, management_unit_id, valid_from_dttm, valid_to_dttm, deleted_flg',
   ].join('\n');
   const ver = run(VER, "where management_unit_id = 'e289067b-26b6-44f2-917e-668d1ea65cc5'");
+  // ЖЁСТКОЕ РАВЕНСТВО, А НЕ ПРЕФИКС. Здесь стоял `LIKE '5999%'`, и это была
+  // ошибка, а не компромисс: префикс пропускает любую дату 5999 года, тогда
+  // как признак актуальной версии — конкретный день, и статьи витрин пишут
+  // его конкретным. Приводится КОЛОНКА, а не литерал: Trino строг по типам.
   check('версионная витрина режется по актуальной версии',
-    /valid_to_dttm AS varchar\) LIKE '5999%'/.test(ver[0].check_sql));
+    /CAST\(valid_to_dttm AS date\) = DATE '5999-01-01'/.test(ver[0].check_sql));
+  check('и это равенство, а не подстрочный поиск',
+    !/valid_to_dttm[^\n]*LIKE/.test(ver[0].check_sql));
   check('и удалённые строки отсекаются',
     /deleted_flg AS varchar\) IN \('0', 'false'\)/.test(ver[0].check_sql));
   // Сравнение через CAST намеренно: у одного и того же по смыслу поля тип
@@ -2636,7 +2642,14 @@ line('47. ПРОВЕРКА ЗНАЧЕНИЙ НЕ ЛОМАЕТ САМА СЕБЯ'
   // активной численности.
   const arts = fs.readdirSync(kbDir + 'tables').map(
     (f) => fs.readFileSync(kbDir + 'tables/' + f, 'utf8')).join('\n');
-  check('признак актуальной версии из статей — 5999', /valid_to_dttm\s*=\s*'5999-01-01'/.test(arts));
+  // Дата вынимается ИЗ СТАТЬИ и сверяется с кодом: единственная копия
+  // условия живёт в сборщике, и разъехаться с базой она может молча —
+  // как однажды разъехалась формула активной численности.
+  const openDt = (arts.match(/valid_to_dttm\s*=\s*'(\d{4}-\d{2}-\d{2})'/) || [])[1];
+  check('признак актуальной версии взят из статей', Boolean(openDt));
+  check('и код использует ровно эту дату',
+    Boolean(openDt) && js('Build check SQL').includes(openDt) &&
+    js('Build lookups').includes(openDt));
   check('и оба написания флага удаления в базе есть',
     /deleted_flg\s*=\s*0/.test(arts) && /deleted_flg\s*=\s*false/i.test(arts));
 
