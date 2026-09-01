@@ -78,6 +78,30 @@
     },
     {
       "parameters": {
+        "resource": "reaction",
+        "operation": "create",
+        "userId": "",
+        "postId": "={{ $('Guard DM').first().json.post.id }}",
+        "emojiName": "bully_work"
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        440,
+        160
+      ],
+      "id": "react-work-in-dm",
+      "name": "React work in DM",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
         "workflowId": {
           "__rl": true,
           "value": "quV6Ec1hmobZefBX",
@@ -189,6 +213,30 @@
       ],
       "id": "build-dm-reply",
       "name": "Build DM reply"
+    },
+    {
+      "parameters": {
+        "resource": "reaction",
+        "operation": "delete",
+        "userId": "",
+        "postId": "={{ $('Guard DM').first().json.post.id }}",
+        "emojiName": "bully_work"
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        220
+      ],
+      "id": "unreact-work-in-dm",
+      "name": "Unreact work in DM",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -317,6 +365,11 @@
       "main": [
         [
           {
+            "node": "React work in DM",
+            "type": "main",
+            "index": 0
+          },
+          {
             "node": "Call core",
             "type": "main",
             "index": 0
@@ -351,6 +404,17 @@
         [
           {
             "node": "Reply in DM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply in DM": {
+      "main": [
+        [
+          {
+            "node": "Unreact work in DM",
             "type": "main",
             "index": 0
           }

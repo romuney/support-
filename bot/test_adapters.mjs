@@ -2155,6 +2155,46 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   const twice = targets.filter((n, i) => targets.indexOf(n) !== i);
   check('ни один узел не получает две ветви', twice.length === 0);
 
+  // РЕАКЦИЯ «БОТ ДУМАЕТ» — только в личке, и только вокруг ожидания.
+  //
+  // Порядок в списке связей значим: n8n идёт по ветвям в порядке объявления,
+  // а отметка «думаю», поставленная после ответа, бессмысленна. Проверяется
+  // именно индекс, а не факт наличия — «стоит первой» и «стоит где-то»
+  // здесь разные вещи, и вторая ничего не гарантирует.
+  const allowed = dm.connections['DM allowed'].main[0].map((t) => t.node);
+  check('реакция ставится ПЕРЕД вызовом ядра',
+    allowed.indexOf('React work in DM') === 0 &&
+    allowed.indexOf('React work in DM') < allowed.indexOf('Call core'));
+  // Снятие — хвостом за отправкой, а не параллельно: параллельная ветвь
+  // могла бы снять отметку раньше, чем ответ уйдёт.
+  check('реакция снимается ПОСЛЕ отправки ответа',
+    dm.connections['Reply in DM'].main[0][0].node === 'Unreact work in DM');
+
+  const react = dm.nodes.find((n) => n.name === 'React work in DM');
+  const unreact = dm.nodes.find((n) => n.name === 'Unreact work in DM');
+  check('обе операции реакции на месте',
+    react.parameters.operation === 'create' &&
+    unreact.parameters.operation === 'delete' &&
+    react.parameters.resource === 'reaction');
+  check('эмодзи одна и та же на постановке и снятии',
+    react.parameters.emojiName === unreact.parameters.emojiName &&
+    react.parameters.emojiName === 'bully_work');
+  // Реакция — украшение: нет эмодзи на сервере, пуст BOT_USER_ID, сменилось
+  // имя поля — ответ человеку всё равно обязан уйти. Без onError падение
+  // узла оборвало бы выполнение до «Reply in DM».
+  check('падение реакции не роняет ответ',
+    react.onError === 'continueRegularOutput' &&
+    unreact.onError === 'continueRegularOutput');
+  // Реакция вешается на сообщение ЧЕЛОВЕКА, а не на пост бота.
+  check('реакция адресована посту из guard\'а',
+    /Guard DM.*post\.id/.test(String(react.parameters.postId)) &&
+    react.parameters.postId === unreact.parameters.postId);
+
+  // В КАНАЛЕ реакций бота нет — там словарь дежурного, и своя реакция
+  // читалась бы как чужое действие. Решение владельца, а не недосмотр.
+  check('в канале бот реакций не ставит',
+    !channel.nodes.some((n) => n.parameters?.resource === 'reaction'));
+
   // ИСТОЧНИК различает канал и личку. У обращения из лички нет ни формы,
   // ни реакций дежурного, ни задачи в трекере: время реакции и решения
   // по нему не считаются, и смешать его с канальным значило бы разбавить

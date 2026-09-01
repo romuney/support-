@@ -13,6 +13,8 @@
   Adapter Channel.json       — слушает hr-report-ask, пишет черновик в stonis_hakcs_2.
   Adapter Chat.json          — chatTrigger для ручного тестирования.
   Adapter DM.json            — личка с ботом, ответ в тот же диалог.
+                               На время работы ядра вешает реакцию
+                               :bully_work: и снимает её после ответа.
 
 ГДЕ ЖИВЁТ ПРОМПТ
 В prompts/router.md и prompts/author.md — источник правды. Сборщик вклеивает их
@@ -88,6 +90,30 @@ MM_CRED = {"mattermostApi": {"id": "7SgPbuQnw6w2wzMl", "name": "Time Bully"}}
 # (подтверждено живым payload 2026-08-07). Собака снимается перед сравнением,
 # иначе условие молча не совпадёт ни с кем.
 DM_ALLOWLIST = []
+
+# user_id бота Bully в Mattermost. Нужен, чтобы СТАВИТЬ реакции: в API
+# `POST /reactions` реагирующий назван явно, и вывести его из credential
+# нода не умеет.
+#
+# Пусто по умолчанию, и это НЕ плейсхолдер-заглушка: узлы реакции собираются
+# всё равно, но помечены `onError: continueRegularOutput` — с пустым id они
+# отвалятся, а ответ человеку уйдёт. Украшение не смеет ронять ответ.
+#
+# Тот же самый id нужен телеметрии в BOT_USER_IDS
+# (telemetry/build_telemetry_flows.py): там он отделяет реакции бота от
+# действий дежурного. Одно значение — два места, и добывается один раз:
+#   GET /api/v4/users/username/<логин бота>  → поле id
+# либо System Console → Users → карточка бота.
+BOT_USER_ID = os.environ.get("BOT_USER_ID", "")
+
+# Эмодзи «бот думает». Имя — от владельца (2026-09-01), пишется БЕЗ двоеточий:
+# нода Mattermost обрамляет его сама.
+#
+# Обратите внимание на написание: пак иконок называет своих `bulli_*`
+# (`bulli_ready`, `bulli_wait`), а эта — `bully_*`. Расхождение намеренно
+# оставлено как есть: имя должно совпадать с тем, что реально загружено
+# в Mattermost, а не с соглашением пака. Переименуют эмодзи — править здесь.
+WORK_EMOJI = "bully_work"
 
 # id воркфлоу «Telemetry · Ingest» — единственной точки записи в лог.
 # Значение по умолчанию совпадает с telemetry/build_telemetry_flows.py и там же
@@ -5779,6 +5805,37 @@ def mm_trigger(name, pos, channels, posted_filters=None):
     )
 
 
+def mm_reaction(name, pos, operation, post_id_expr, emoji):
+    """Поставить или снять реакцию бота на пост.
+
+    ПАРАМЕТРЫ ЗАДАНЫ ПО СХЕМЕ НОДЫ, А НЕ ПО СНЯТОМУ СНИМКУ. В Time examples.json
+    нода реакции лежит без операции и полей, сверить было не с чем. Поэтому
+    сборщик предупреждает об этом в конце прогона — тем же приёмом, что
+    с фильтром триггера лички: угаданное имя ключа даёт не ошибку, а тихо
+    неработающий узел.
+
+    onError у обоих узлов НЕ случаен. Реакция — украшение: нет эмодзи
+    на сервере, пуст BOT_USER_ID, сменилось имя поля — ответ человеку всё
+    равно обязан уйти. Тот же довод, по которому лог телеметрии вынесен
+    отдельной ветвью: падение второстепенного не трогает главное.
+    """
+    return node(
+        name,
+        "n8n-nodes-base.mattermost",
+        1,
+        pos,
+        {
+            "resource": "reaction",
+            "operation": operation,
+            "userId": BOT_USER_ID,
+            "postId": post_id_expr,
+            "emojiName": emoji,
+        },
+        credentials=copy.deepcopy(MM_CRED),
+        onError="continueRegularOutput",
+    )
+
+
 def mm_post(name, pos, channel_expr, message_expr, root_id_expr=None,
             attachments=None):
     """Пост в Mattermost. root_id_expr — ответ в тред к указанному посту.
@@ -7246,6 +7303,11 @@ DM_FILTER_FROM_FILE = dm_filter is not None
 if dm_filter is None:
     dm_filter = copy.deepcopy(DM_POSTED_FILTER)
 
+# id сообщения человека — на него вешается и с него снимается реакция.
+# Берётся у guard'а, а не у триггера: guard уже разобрал `post`,
+# который в событии Time приезжает JSON-строкой.
+DM_POST_ID = "={{ $('Guard DM').first().json.post.id }}"
+
 dm_nodes = [
     mm_trigger("Time Trigger DM", [-260, 300], None, posted_filters=dm_filter),
     # В личке префикса темы нет — человек пишет обычным текстом. Зато
@@ -7257,8 +7319,21 @@ dm_nodes = [
     # В личке формы нет: человек пишет обычным текстом. Guard там всё равно
     # прогоняет разбор — если человек пришлёт ссылку на отчёт, правило про
     # непокрытые отчёты сработает и в личке.
+    # «Бот думает» — реакция на сообщение человека, пока работает ядро.
+    #
+    # ТОЛЬКО В ЛИЧКЕ, и это решение владельца. В hr-report-ask реакции —
+    # словарь дежурного (:loading:, :done_checkmark:), и своя реакция бота
+    # читалась бы там как чужое действие. В личке дежурного нет.
+    #
+    # Ядро работает секунды и дольше: роутер, чтение статей, DD, автор,
+    # проверочный запрос. Без отметки человек не отличает «бот думает»
+    # от «бот не услышал» и пишет второй раз.
+    mm_reaction("React work in DM", [440, 160], "create", DM_POST_ID, WORK_EMOJI),
     call_core([440, 300], POST_MSG, "dm", guard_node="Guard DM"),
     node("Build DM reply", "n8n-nodes-base.code", 2, [680, 220], {"jsCode": DM_MSG_JS}),
+    # Снятие — после того, как ответ УЖЕ отправлен: реакция обязана пережить
+    # ровно то ожидание, ради которого ставилась, и ни секундой меньше.
+    mm_reaction("Unreact work in DM", [1160, 220], "delete", DM_POST_ID, WORK_EMOJI),
     mm_post(
         "Reply in DM",
         [920, 220],
@@ -7286,8 +7361,14 @@ dm_nodes = [
     }),
 ]
 dm_conn = chain("Time Trigger DM", "Guard DM", "DM allowed")
+# Реакция стоит ПЕРЕД вызовом ядра в списке связей, и порядок здесь значим:
+# n8n идёт по ветвям в порядке объявления, а отметка «думаю», поставленная
+# после ответа, бессмысленна.
 dm_conn["DM allowed"] = {"main": [
-    [{"node": "Call core", "type": "main", "index": 0}],
+    [
+        {"node": "React work in DM", "type": "main", "index": 0},
+        {"node": "Call core", "type": "main", "index": 0},
+    ],
     [],
 ]}
 # Три ветви от ядра: ответ человеку, копия в канал джуна и запись в лог.
@@ -7305,6 +7386,9 @@ dm_conn["Call core"] = {
     ]
 }
 dm_conn["Build DM reply"] = {"main": [[{"node": "Reply in DM", "type": "main", "index": 0}]]}
+# Снятие реакции — хвостом за отправкой ответа, а не параллельной ветвью:
+# параллельная могла бы снять отметку раньше, чем ответ уйдёт.
+dm_conn.update(chain("Reply in DM", "Unreact work in DM"))
 dm_conn["Build DM log"] = {
     "main": [[{"node": "Log DM to junior channel", "type": "main", "index": 0}]]
 }
@@ -7339,6 +7423,24 @@ if not DM_FILTER_FROM_FILE:
     print("стоять «Is Direct Message». Пусто — имя значения угадано неверно;")
     print("скопируйте настроенную ноду из n8n (Ctrl+C) в bot/dm_trigger_filter.json,")
     print("и сборщик будет брать фильтр оттуда, а не из догадки.")
+if not BOT_USER_ID:
+    print()
+    print(f"ВНИМАНИЕ: BOT_USER_ID пуст — реакция :{WORK_EMOJI}: в личке не встанет.")
+    print("Узлы «React work in DM» и «Unreact work in DM» отвалятся молча")
+    print("(onError: continueRegularOutput) — ответ человеку при этом уйдёт.")
+    print("Взять id:  GET /api/v4/users/username/<логин бота>  → поле id,")
+    print("либо System Console → Users → карточка бота. Затем:")
+    print("  BOT_USER_ID=<id> python3 build_time_flows.py")
+    print("Тот же id нужен телеметрии: BOT_USER_IDS в build_telemetry_flows.py,")
+    print("иначе реакции бота в канале лягут в лог как действия дежурного.")
+print()
+print(f"ПРОВЕРИТЬ ПРИ ИМПОРТЕ: узлы реакции :{WORK_EMOJI}: собраны по схеме ноды,")
+print("а не по снятому снимку — в Time examples.json нода реакции без полей.")
+print("Откройте «React work in DM» в Adapter DM: Resource = Reaction,")
+print("Operation = Create, заполнены User ID, Post ID и Emoji Name.")
+print("Пусто — имена ключей угаданы неверно; скопируйте настроенную ноду")
+print("из n8n и скажите, какие там поля. Эмодзи должна быть загружена")
+print("в Mattermost под этим именем, иначе API ответит отказом.")
 if FEEDBACK_WEBHOOK_URL.startswith("__"):
     print()
     print("ВНИМАНИЕ: FEEDBACK_WEBHOOK_URL не задан.")
