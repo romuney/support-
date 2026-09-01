@@ -3598,19 +3598,41 @@ out.ib_missing = out.ib_required && !out.ib_stated;
       sensNames.add(String(f).toLowerCase());
     }
   }
+  // СЧИТАЕТСЯ ПО СПИСКУ КОЛОНОК ЗАПРОСА, А НЕ «ГДЕ-НИБУДЬ В ОТВЕТЕ».
+  //
+  // Живой прогон 01.09, второй заход. Правило промпта отработало наполовину:
+  // в прозе стояло «disability_flg (🔒, чувствительное: данные о здоровье)»,
+  // а в самом select то же поле шло без пометки. Прежняя проверка считала
+  // поле помеченным, если замок нашёлся ХОТЬ ГДЕ, — и промолчала.
+  //
+  // Копируют и запускают ИМЕННО ЗАПРОС. Замок в прозе над ним не спасает:
+  // аналитик берёт select, а не абзац перед ним.
+  //
+  // Проверяются строки СПИСКА КОЛОНОК — между `select` и `from`. Условия
+  // в `where` намеренно не трогаем: там поле стоит фильтром, а не выгружается,
+  // и требовать замок в каждом условии значило бы засыпать запрос значками
+  // и обесценить их.
   const said = (String(out.draft || '') + '\n' + String(out.tech_spec || ''))
     .split('\n');
   const namedSens = new Set();
-  const markedSens = new Set();
+  const markedAnywhere = new Set();
+  const bareInSelect = new Set();
+  let inSelect = false;
   for (const line of said) {
     const low = line.toLowerCase();
+    if (/^\s*select\b/.test(low)) inSelect = true;
+    else if (/^\s*from\b/.test(low)) inSelect = false;
     for (const f of sensNames) {
       if (!low.includes(f)) continue;
       namedSens.add(f);
-      if (line.includes('🔒')) markedSens.add(f);
+      if (line.includes('🔒')) markedAnywhere.add(f);
+      else if (inSelect) bareInSelect.add(f);
     }
   }
-  out.sens_unmarked_fields = [...namedSens].filter((f) => !markedSens.has(f));
+  // Поле считается непомеченным, если замка нет нигде ЛИБО он есть в прозе,
+  // но в списке колонок запроса поле идёт голым.
+  out.sens_unmarked_fields = [...namedSens].filter(
+    (f) => !markedAnywhere.has(f) || bareInSelect.has(f));
   out.sens_unmarked = out.sens_unmarked_fields.length > 0;
 }
 out.external_transfer = mat.external_transfer ?? '';

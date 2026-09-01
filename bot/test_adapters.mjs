@@ -183,6 +183,12 @@ line('0ж. ЗАКРЫТОЕ КАТАЛОГОМ ПОЛЕ БЕЗ ЗАМКА — л
   const DRAFT = 'ЧЕРНОВИК ОТВЕТА: Состав файла:\n' +
     '- full_nm 🔒\n- disability_flg — признак инвалидности\n- mdm_employee_rk\n' +
     'УВЕРЕННОСТЬ: высокая';
+  // ЗАМОК В ПРОЗЕ, НО НЕ В ЗАПРОСЕ — это промах 01.09, второй заход.
+  // Копируют и запускают select, абзац над ним не переносят.
+  const PROSE_ONLY = 'ЧЕРНОВИК ОТВЕТА: Поле disability_flg 🔒 — данные о здоровье.\n' +
+    'select\n    mdm_employee_rk\n  , full_nm  -- 🔒 нужен доступ\n  , disability_flg\n' +
+    'from prod_v_emart.mdm_employee_structure_d\nwhere disability_flg = 1;\n' +
+    'УВЕРЕННОСТЬ: высокая';
   const p = runParse(DRAFT, { question: 'инвалидность', mode: 'dm' }, {}, mat);
   check('незамеченное поле названо поимённо',
     (p.sens_unmarked_fields || []).join() === 'disability_flg');
@@ -191,9 +197,16 @@ line('0ж. ЗАКРЫТОЕ КАТАЛОГОМ ПОЛЕ БЕЗ ЗАМКА — л
   check('помеченное поле не попадает в список',
     !(p.sens_unmarked_fields || []).includes('full_nm'));
 
+  const prose = runParse(PROSE_ONLY, { question: 'инвалидность', mode: 'dm' }, {}, mat);
+  check('замок в прозе не закрывает голое поле в select',
+    (prose.sens_unmarked_fields || []).includes('disability_flg'));
+  check('поле с замком в самом select не считается пропущенным',
+    !(prose.sens_unmarked_fields || []).includes('full_nm'));
+
   // Все закрытые помечены — тревоги нет.
-  const okDraft = 'ЧЕРНОВИК ОТВЕТА: Состав:\n- full_nm 🔒\n- disability_flg 🔒\n' +
-    'УВЕРЕННОСТЬ: высокая';
+  const okDraft = 'ЧЕРНОВИК ОТВЕТА: Состав:\n' +
+    'select\n    full_nm  -- 🔒 нужен доступ\n  , disability_flg  -- 🔒 нужен доступ\n' +
+    'from t\nwhere disability_flg = 1;\nУВЕРЕННОСТЬ: высокая';
   const ok = runParse(okDraft, { question: 'инвалидность', mode: 'dm' }, {}, mat);
   check('когда всё помечено — признака нет', ok.sens_unmarked === false);
 }
