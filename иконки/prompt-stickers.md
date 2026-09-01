@@ -1,123 +1,164 @@
 # Задание Nano Banana: стикер-пак
 
-Приложить `bulli-ref.png`. Просить **PNG в максимальном разрешении**
-(если предлагается 2K — брать 2K: при сетке 3×3 это 680 px на ячейку
-против 341, а нам нужен запас на die-cut контур).
+## Что сломалось в первой попытке
 
-Две пачки по 9 — **не одна на 18**. Причина не в лени модели: чем больше
-ячеек, тем меньше пикселей на персонажа, и на 4×4 морда уже разъезжается
-между ячейками. Девять — предел, при котором Nano Banana держит одного
-и того же бульдожку.
+Лист 3×3 пришёл механически правильным — сетка, серый фон, обводка, ни одной
+подписи, CROSS на кепках, позы те. **Разъехался только стиль:** плоский
+рисованный стикер с бумажной фактурой, персонаж во весь рост, глаза мелкие,
+морда другая. То есть модель не отредактировала приложенную картинку,
+а нарисовала своего бульдожку по описанию.
 
-Промпты ниже — **на английском намеренно**: у Nano Banana на английском
-заметно выше следование ограничениям вида «no text», «no cell borders»,
-а именно они здесь и решают, придётся ли переделывать.
+Три причины, и все три в моём промпте:
 
----
+1. **Слово `sticker`.** Это сильный стилевой токен: он тянет за собой
+   печатный стикер — бумажную фактуру, глянец, плоскую заливку. Оно стояло
+   в промпте семь раз, включая `die-cut sticker outline`. Ровно это и пришло.
+2. **Девять НОВЫХ поз одним листом — это генерация, а не правка.** Когда
+   в одной картинке надо придумать девять композиций, приложенный референс
+   становится подсказкой, а рисует модель по своему представлению
+   о стикер-паке. Идентичность персонажа держится тем сильнее, чем меньше
+   меняется за один прогон.
+3. **Просил во весь рост, а референс — портрет.** У исходной картинки голова
+   занимает почти весь кадр, глаза огромные — в этом вся узнаваемость.
+   Тело в референсе не показано, и на просьбу о полном росте модель его
+   ДОДУМЫВАЕТ, а вместе с телом переезжают пропорции: голова уменьшается,
+   глаза уменьшаются, персонаж становится другим.
 
-## Пачка A — процесс обращения
+Отсюда переделка: **по одному стикеру за прогон, крупным планом, со словом
+`sticker` убранным из промпта целиком.** Восемнадцать прогонов вместо двух —
+но каждый неудачный перекатывается отдельно, а не всем листом.
 
-```
-Use the attached image as the exact character reference. Every cell must show
-the SAME character: a 3D Pixar-style cartoon French bulldog, cream and tan fur,
-big glossy brown eyes, dark brown nose, freckled muzzle, oversized upright ears,
-wearing a worn blue denim baseball cap with the white embroidered word "CROSS"
-on the front panel.
-
-Output ONE single square image, 1:1 aspect ratio, at the highest resolution
-available.
-
-LAYOUT: a strict 3 x 3 grid of 9 separate sticker poses. Nine equal square
-cells, equal outer margins, a uniform gap between cells. Each character is
-centred inside its own cell with a small empty margin, never touching the cell
-edges. All nine characters are at exactly the SAME scale, the same frontal
-camera distance and the same eye level, lit by the same soft studio light.
-No cell borders, no frames, no grid lines, no numbers, no captions, no labels,
-no watermark, no signature. The ONLY text anywhere in the whole image is the
-word "CROSS" on the cap.
-
-BACKGROUND: one flat uniform medium grey (#808080) filling the entire canvas
-including the gaps between the cells. No gradient, no vignette, no drop shadow
-on the background, no ground plane, no reflections.
-
-Every character has a clean, even white die-cut sticker outline about 8 pixels
-thick around its full silhouette, including any prop it holds.
-
-PROPS must be large, simple and high contrast: each sticker has to stay readable
-when scaled down to 128 x 128 pixels. No small details, no thin lines, no tiny
-objects, no fine text.
-
-The nine cells, reading left to right, top to bottom:
-
-1. Answer is ready: sitting upright, chest puffed out proudly, chin high, one
-   front paw raised in a confident presenting gesture, wide happy smile.
-2. Confident yes: one front paw raised in a big thumbs-up, one eye winking,
-   cheerful grin.
-3. Not sure: head tilted to one side, shoulders shrugged, both front paws turned
-   palms-up, mouth a small wavy unsure line.
-4. No idea: both front paws spread wide apart, eyebrows raised high, one large
-   bold white question mark floating above the head.
-5. Solved: standing beside a huge bright green check mark almost as tall as the
-   dog, eyes closed in a satisfied happy smile.
-6. Not solved: standing beside a huge bright red cross mark almost as tall as
-   the dog, ears drooping, sad apologetic face.
-7. Searching: holding a big magnifying glass in front of one eye, that eye
-   hugely magnified through the lens, focused curious expression.
-8. Locked, needs approval: holding a big closed golden padlock in both front
-   paws in front of the chest, serious stern expression, one eyebrow raised.
-9. Call the expert: one front paw pointing off to the side, a big bold yellow
-   arrow beside it pointing the same way, alert helpful expression, ears perked
-   up high.
-```
-
-Порядок имён для нарезки — `names-a.txt`.
+Обводку тоже убрал: она была нужна для чистого вырезания фона, а прогон
+показал, что серый фон снимается с кремовой шерсти и без неё, без каймы
+на тёмной теме. Платить за неё стилевым сломом незачем.
 
 ---
 
-## Пачка B — тематические и человеческие
+## Способ 1 — по одному стикеру (рабочий)
 
-Тот же промпт целиком, заменяется только список из девяти ячеек:
+Приложить `bulli-ref.png`. Шаблон один на все восемнадцать, меняется только
+строка после `Change ONLY this:`.
 
 ```
-1. Data export: holding up a big simple spreadsheet document with a few thick
-   rows and columns drawn on it, businesslike helpful expression.
-2. Report: standing beside a large simple bar chart with three thick bars,
-   one front paw pointing at the tallest bar, explaining expression.
-3. Broken: dazed and rumpled, cap knocked crooked, small white smoke puffs
-   above the head, spiral dizzy eyes, one big bold red exclamation mark beside
-   the head.
-4. Hello: waving one front paw high in a friendly greeting, big warm open smile,
-   ears perked up.
-5. Waiting: sitting behind a big simple steaming mug held in both front paws,
-   sleepy half-closed eyes, patient bored expression.
-6. Facepalm: one front paw covering the whole face, other paw hanging down,
-   ears flat, exasperated posture.
-7. Thank you: hugging a big bright red heart against the chest with both front
-   paws, eyes closed, blissful happy smile.
-8. Nothing like that: holding a big open cardboard box tipped upside down and
-   completely empty, shrugging, apologetic expression.
-9. Idea: a big glowing yellow light bulb floating above the head, one front paw
-   raised with the pad up as if it just realised something, bright wide eyes,
-   delighted expression.
+This is the same character as in the attached image. Keep him EXACTLY as he is:
+the same 3D render, the same soft studio lighting, the same fur shading and
+texture, the same huge glossy dark-brown eyes with the same white highlights,
+the same head-to-body proportions with the head filling most of the frame, the
+same freckled muzzle, the same big upright ears, the same worn blue denim
+baseball cap with the white embroidered word "CROSS".
+
+Do NOT redraw him. Do NOT restyle him. Do NOT turn him into a 2D illustration,
+a painted cartoon, a vector drawing or a printed sticker. No paper texture, no
+canvas texture, no glossy print finish, no outline drawing, no flat shading.
+He must look like the exact same 3D render as the attached image, only in a
+different pose.
+
+Keep the same close-up framing as the attached image: seen from the front at
+eye level, the head filling most of the frame, the eyes the same huge size.
+Do NOT zoom out, do NOT show a full body, do NOT make the head smaller.
+
+Change ONLY this: <ПОЗА>
+
+Background: one flat uniform medium grey (#808080), completely empty. No
+gradient, no vignette, no shadow on the background, no ground plane, no
+reflections, no extra objects apart from the one described above.
+
+Square image, 1:1 aspect ratio, at the highest resolution available. The only
+text anywhere in the image is the word "CROSS" on the cap. No caption, no
+label, no watermark, no border, no frame.
 ```
 
-Порядок имён для нарезки — `names-b.txt`.
+### Восемнадцать поз
+
+Каждая написана так, чтобы голова осталась крупной, а предмет входил в кадр
+сбоку или снизу — тела в кадре по-прежнему почти нет.
+
+| файл | `<ПОЗА>` |
+|---|---|
+| `bulli_ready` | `chin lifted proudly, chest puffed up, wide happy open smile, one front paw raised into the bottom of the frame in a confident presenting gesture` |
+| `bulli_yes` | `one front paw raised into the frame beside the head giving a big thumbs-up, one eye winking, cheerful grin` |
+| `bulli_hmm` | `head tilted to one side, both front paws raised into the bottom of the frame turned palms-up, mouth a small wavy unsure line, eyebrows uneven` |
+| `bulli_noidea` | `eyebrows raised high, mouth slightly open, both front paws spread into the bottom of the frame, one large bold white question mark floating above the cap` |
+| `bulli_done` | `a huge bright green check mark beside the head, as tall as the head itself, eyes closed in a satisfied happy smile` |
+| `bulli_fail` | `a huge bright red cross mark beside the head, as tall as the head itself, ears drooping down, sad apologetic face` |
+| `bulli_search` | `holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression` |
+| `bulli_lock` | `holding a big closed golden padlock up just under the chin in both front paws, stern serious expression, one eyebrow raised` |
+| `bulli_expert` | `head turned slightly to one side, one front paw raised into the frame pointing off to that side, a big bold yellow arrow beside the head pointing the same way, ears perked up high` |
+| `bulli_export` | `holding up beside the head a big simple white spreadsheet sheet with a few thick rows and columns drawn on it, helpful businesslike expression` |
+| `bulli_report` | `a big simple bar chart with three thick bars beside the head, one front paw raised pointing at the tallest bar, explaining expression` |
+| `bulli_broken` | `the cap knocked crooked and sitting askew, dizzy spiral eyes, small white smoke puffs rising above the cap, one big bold red exclamation mark beside the head` |
+| `bulli_hi` | `one front paw raised high beside the head waving hello, big warm open smile, ears perked up` |
+| `bulli_wait` | `holding a big simple steaming mug in both front paws just under the chin, sleepy half-closed eyes, patient bored expression` |
+| `bulli_facepalm` | `one front paw pressed flat over the eyes and muzzle covering the face, ears flat back, exasperated posture` |
+| `bulli_thanks` | `hugging a big bright red heart just under the chin in both front paws, eyes closed, blissful happy smile` |
+| `bulli_nothing` | `holding a big open cardboard box tipped upside down and completely empty beside the head, apologetic shrug, ears slightly down` |
+| `bulli_idea` | `a big glowing yellow light bulb floating above the cap, bright wide eyes, delighted open-mouth expression, one front paw raised into the frame with the pad up` |
+
+### Приём, который держит стиль дальше
+
+Первый прогон делать **`bulli_yes`** — поза простая, и по ней сразу видно,
+сохранился стиль или нет. Как только один результат устраивает, дальше
+в ТОЙ ЖЕ сессии прикладывать **два** изображения: исходный `bulli-ref.png`
+и этот принятый стикер, с фразой:
+
+```
+Match the style of both attached images exactly. The second image is the
+approved reference for this set.
+```
+
+Два образца одного стиля сужают модели пространство сильнее, чем один плюс
+описание словами: описание она может понять по-своему, а второй образец
+подтверждает, что первый не случайность.
+
+### Нарезка
+
+```
+python3 slice_grid.py bulli_yes.png --cols 1 --rows 1 --names bulli_yes --out out/
+```
 
 ---
 
-## Что проверить в результате до нарезки
+## Способ 2 — всё же одним листом
 
-Сверять глазами, а не на веру — переделать лист дешевле, чем чинить
-восемнадцать PNG:
+Если восемнадцать прогонов дорого, лист можно попробовать снова — но с теми
+же тремя правками, иначе повторится ровно то же самое. К шаблону выше
+добавляется блок сетки:
 
-- **фон ровно серый и связный**, в том числе в промежутках между ячейками.
-  Если модель подложила градиент или тень под персонажа — вырезание фона
-  оставит серую подложку, и на тёмной теме Mattermost это будет заметный
-  прямоугольник;
-- **ни одной подписи, номера и рамки ячейки.** Текст врисован в пиксели,
-  из эмодзи он потом не убирается;
-- **кепка везде синяя и с надписью CROSS.** Модель любит терять надпись
-  на дальних ячейках;
-- **персонаж не касается краёв ячейки** — иначе нарезка срежет ухо;
-- **все девять одного размера.** Разнобой масштаба в паке виден сразу:
-  реакции стоят в ряд, и мелкий бульдожка среди крупных читается как брак.
+```
+Output ONE single square image containing a strict 3 x 3 grid of 9 versions of
+this same character, nine equal square cells, equal outer margins, a uniform
+gap between cells, flat uniform medium grey (#808080) across the entire canvas
+including the gaps.
+
+In EVERY cell the character is the same close-up portrait as the attached
+image: the head fills most of the cell, the eyes stay huge, the framing, the
+scale and the lighting are identical in all nine cells. Every cell must look
+like the exact same 3D render as the attached image, not a redrawn version of
+it. No cell borders, no frames, no grid lines, no numbers, no captions.
+
+The nine cells, reading left to right, top to bottom, differ ONLY in this:
+1. …
+9. …
+```
+
+Ниже — девять строк `<ПОЗА>` из таблицы. Нарезка обычная:
+
+```
+python3 slice_grid.py sheet-a.png --names names-a.txt --out out/
+```
+
+**Лист принимать только по стилю**, а не по позам: если глаза стали меньше,
+появилась фактура бумаги или персонаж во весь рост — переделывать целиком,
+починить нарезкой это нельзя.
+
+---
+
+## Что проверить в любом случае
+
+- **глаза того же размера, что в референсе.** Это первое, что уезжает,
+  и по нему видно, отредактирована картинка или нарисована заново;
+- **никакой фактуры бумаги, холста и глянца** — только 3D-рендер;
+- **кепка синяя и с надписью CROSS** — модель теряет надпись чаще всего;
+- **фон ровно серый, без градиента и тени под персонажем.** Тень связана
+  с фоном не везде, и вырезание оставит серые ошмётки под лапами;
+- **персонаж не касается краёв кадра** — иначе обрежется ухо.
