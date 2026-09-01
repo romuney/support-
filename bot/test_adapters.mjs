@@ -122,6 +122,16 @@ function runDmLogParts(parsed) {
 }
 const runDmLog = (parsed) => runDmLogParts(parsed).join('\n');
 
+// Тред под шапкой лога лички: то, что человек реально прочитал.
+function runDmLogThread(parsed) {
+  const $ = (name) => {
+    if (name === 'Call core') return { first: () => ({ json: parsed }) };
+    throw new Error('node not executed: ' + name);
+  };
+  return new Function('$', js(dm, 'Build DM log thread'))($)
+    .map((i) => i.json.text).join('\n');
+}
+
 // --- Guard: прогон Code-ноды отсева на событии Time.
 // Проверяется поведением, а не поиском подстроки в параметрах: прежний
 // IF-фильтр содержал и префикс, и root_id, и всё равно пропускал в живом
@@ -336,18 +346,25 @@ line('13. Лог лички в канал джуна: разбор И сам о�
     mode: 'dm',
   });
   const log = runDmLog(p);
-  console.log(log);
+  const thread = runDmLogThread(p);
+  console.log(log + '\n--- тред ---\n' + thread);
   check('помечено как личка', log.includes('**Личка**'));
   check('вопрос есть', log.includes('декрет'));
   check('пробел есть', log.includes('management_position_d'));
-  check('ответ человеку есть дословно', log.includes('Длинный ответ про численность'));
-  check('ответ отбит своим заголовком', log.includes('Ушло человеку'));
-  check('ТЗ в логе есть — в нём и живут промахи по полям',
-    log.includes('legal_position_nm'));
+  // ШАПКА — только разбор. Тремя постами подряд лог забивал канал джуна
+  // и читался как три разных обращения.
+  check('шапка не тащит ответ за собой',
+    !log.includes('Длинный ответ про численность'));
+
+  check('ответ человеку есть дословно — в треде',
+    thread.includes('Длинный ответ про численность'));
+  check('ответ отбит своим заголовком', thread.includes('Ушло человеку'));
+  check('ТЗ в треде есть — в нём и живут промахи по полям',
+    thread.includes('legal_position_nm'));
   // Предупреждение об уверенности — часть того, что ПРОЧИТАЛ человек:
-  // без него по логу не отличить «бот сказал уверенно» от «бот предупредил».
-  check('предупреждение об уверенности видно и в логе',
-    log.includes('Уверенность средняя'));
+  // без него не отличить «бот сказал уверенно» от «бот предупредил».
+  check('предупреждение об уверенности видно и в треде',
+    thread.includes('Уверенность средняя'));
 }
 
 // ====================================================================== 14
@@ -2194,6 +2211,21 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   // читалась бы как чужое действие. Решение владельца, а не недосмотр.
   check('в канале бот реакций не ставит',
     !channel.nodes.some((n) => n.parameters?.resource === 'reaction'));
+
+  // ЛОГ ЛИЧКИ — ШАПКА ПЛЮС ТРЕД, той же конструкцией, что в канале.
+  // Тремя постами подряд он забивал канал джуна и читался как три разных
+  // обращения; одно обращение обязано выглядеть одной строкой канала.
+  check('тред лога лички идёт за шапкой',
+    dm.connections['Log DM to junior channel'].main[0][0].node === 'Build DM log thread' &&
+    dm.connections['Build DM log thread'].main[0][0].node === 'Log DM thread');
+  const logThread = dm.nodes.find((n) => n.name === 'Log DM thread');
+  check('тред привязан к id ОТПРАВЛЕННОЙ шапки, а не к своему',
+    /Log DM to junior channel.*\.id/.test(
+      String(logThread.parameters.otherOptions?.root_id)));
+  // Тот же канал, что и шапка: тред в другом канале — это не тред.
+  const logHead = dm.nodes.find((n) => n.name === 'Log DM to junior channel');
+  check('шапка и тред уходят в один канал',
+    logThread.parameters.channelId.value === logHead.parameters.channelId.value);
 
   // ИСТОЧНИК различает канал и личку. У обращения из лички нет ни формы,
   // ни реакций дежурного, ни задачи в трекере: время реакции и решения
