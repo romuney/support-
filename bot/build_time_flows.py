@@ -3576,8 +3576,42 @@ out.ib_missing = out.ib_required && !out.ib_stated;
     closed = m ? Number(m[1]) : 0;
   }
   out.sens_fields = closed;
-  out.sens_unmarked = out.is_export && out.sens_fields > 0 &&
-    !String(out.draft || '').includes('🔒');
+
+  // ПОЛЕ, ЗАКРЫТОЕ КАТАЛОГОМ, НАЗВАНО БЕЗ ЗАМКА — В ЛЮБОМ РЕЖИМЕ.
+  //
+  // Живой прогон 01.09, ЛИЧКА: бот перечислил состав и пометил 🔒 поля
+  // `full_nm`, `ad_login`, `wrk_email_address_txt` — те, что персональные
+  // ПО СМЫСЛУ. А `disability_flg` не пометил, хотя каталог отдал по нему
+  // ярлык EMP_SENS. Это данные о здоровье, то есть чувствительнее почты,
+  // и ушли они заказчику готовым запросом без единой оговорки.
+  //
+  // Прежняя проверка не могла это поймать по двум причинам, и обе из одного
+  // класса, что чинили сегодня весь день:
+  //   1. гейт `out.is_export` — в личке формы нет, проверка молчала;
+  //   2. условие «в черновике нет НИ ОДНОГО 🔒» — а замки были, просто
+  //      на других полях.
+  // Теперь считается ПОИМЁННО: поле закрыто каталогом, названо в ответе,
+  // и ни в одной строке рядом с ним замка нет.
+  const sensNames = new Set();
+  for (const t of tabs) {
+    for (const f of (Array.isArray(t.sens) ? t.sens : [])) {
+      sensNames.add(String(f).toLowerCase());
+    }
+  }
+  const said = (String(out.draft || '') + '\n' + String(out.tech_spec || ''))
+    .split('\n');
+  const namedSens = new Set();
+  const markedSens = new Set();
+  for (const line of said) {
+    const low = line.toLowerCase();
+    for (const f of sensNames) {
+      if (!low.includes(f)) continue;
+      namedSens.add(f);
+      if (line.includes('🔒')) markedSens.add(f);
+    }
+  }
+  out.sens_unmarked_fields = [...namedSens].filter((f) => !markedSens.has(f));
+  out.sens_unmarked = out.sens_unmarked_fields.length > 0;
 }
 out.external_transfer = mat.external_transfer ?? '';
 
@@ -5364,6 +5398,13 @@ try {
        list(A.catalog_only_fields));
   }
 
+  // Чувствительность: сколько полей каталог назвал закрытыми и какие из них
+  // остались без замка. Без этих строк промах 01.09 по отчёту не виден вовсе.
+  kv('закрытых полей по каталогу', A.sens_fields == null ? '—' : A.sens_fields);
+  if (arr(A.sens_unmarked_fields).length) {
+    kv('⚠️ ЗАКРЫТО КАТАЛОГОМ, А ЗАМКА НЕТ', list(A.sens_unmarked_fields));
+  }
+
   h('8. ИТОГ: что не отработало');
   const bad = [];
   if (P.registry_error) bad.push('реестр не прочитан');
@@ -5378,6 +5419,10 @@ try {
   if (C.check_failed) bad.push('проверочный запрос упал');
   if (A.parse_error) bad.push('ответ автора не разобрался');
   if (A.confidence_capped) bad.push('уверенность понижена кодом');
+  if (arr(A.sens_unmarked_fields).length) {
+    bad.push('закрытое каталогом поле названо без замка: ' +
+             arr(A.sens_unmarked_fields).join(', '));
+  }
   L.push(bad.length ? bad.map((b) => '- ' + b).join('\n') : '- всё отработало штатно');
 
   text = L.join('\n');
@@ -7038,6 +7083,11 @@ return [{ json: {
     // которого не ждал.
     sens_fields: a.sens_fields || 0,
     sens_unmarked: a.sens_unmarked === true,
+    // Сколько закрытых полей названо БЕЗ замка. Отдельно от sens_unmarked:
+    // флаг говорит «случилось», число — насколько часто и помногу ли.
+    // По нему видно, работает ли правило промпта, или его роняют молча.
+    sens_unmarked_fields: Array.isArray(a.sens_unmarked_fields)
+      ? a.sens_unmarked_fields.length : 0,
     // Поля, которые закрыл КАТАЛОГ: их нет ни в одной прочитанной статье,
     // и понижение за пустой реестр по ним не выписывается. В витрине нужны
     // для сверки: если правило начнёт срабатывать слишком часто, это будет
@@ -7325,11 +7375,15 @@ if (a.draft_no_active_filter) {
 }
 
 if (a.sens_unmarked) {
-  parts.push('🔒 **По каталогу закрытых полей ' + a.sens_fields + ', а пометок ' +
-    'в составе файла нет.** Поля с закрытым доступом остаются в выгрузке — ' +
+  // ПОЛЯ НАЗЫВАЮТСЯ ПОИМЁННО. Прежняя строка сообщала только число закрытых
+  // полей по каталогу, а джуну нужно знать, КАКИЕ именно остались без замка:
+  // искать их глазами по составу из двадцати имён он не станет.
+  const miss = Array.isArray(a.sens_unmarked_fields) ? a.sens_unmarked_fields : [];
+  parts.push('🔒 **Закрыто каталогом, а замка в ответе нет: ' +
+    miss.join(', ') + '.** Поля с закрытым доступом из ответа не убираются — ' +
     'запрета нет, есть согласование, — но заказчик должен видеть, по каким ' +
-    'из них оно понадобится. Пометить 🔒 в списке полей и дописать строку ' +
-    'под ним.');
+    'из них оно понадобится. Пометить 🔒 рядом с полем и дописать строку ' +
+    'под списком.');
 }
 
 if (a.draft_fire_by_date) {
