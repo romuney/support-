@@ -24,6 +24,7 @@ import sys
 from collections import defaultdict
 
 KB = "kb"
+CASES = "cases"
 INDEX = os.path.join(KB, "index.md")
 
 # Префикс id по типу и папка, в которой этот тип живёт.
@@ -492,6 +493,38 @@ def enum_values(block):
             if not re.fullmatch(r"[a-z][a-z0-9_]*", v)}
 
 
+def check_case_links():
+    """Ссылки из кейсов — ПРЕДУПРЕЖДЕНИЕМ, а не ошибкой.
+
+    Тот же пробел, что был у регламентов: check_articles() обходит строки
+    реестра, кейсов в реестре нет, и их ссылки не проверял никто. Нашёлся он
+    так же — задним числом: удаление kb/curated, kb/derived, kb/proposals
+    и старой выгрузки оборвало три ссылки из кейсов, и валидатор остался
+    зелёным.
+
+    ПОЧЕМУ ПРЕДУПРЕЖДЕНИЕ. Кейс append-only: правка задним числом запрещена
+    правилом, а не ленью — это архив того, что было. Ссылка в нём может
+    протухнуть законно, когда владелец удаляет то, на что кейс ссылался,
+    и чинить это переписыванием кейса нельзя. Плюс кейсы в контекст агента
+    не подаются: битая ссылка здесь стоит дешевле, чем в статье, — она
+    неудобна человеку, читающему историю, но не уводит бота.
+
+    Ошибкой это сделать нельзя ещё и практически: любое законное удаление
+    останавливало бы коммит в чужой части репозитория.
+    """
+    if not os.path.isdir(CASES):
+        return
+    for path in sorted(glob.glob(os.path.join(CASES, "*.md"))):
+        body = open(path, encoding="utf-8").read()
+        for link in re.findall(r"\[[^\]]*\]\(([^)#]+)\)", body):
+            if link.startswith(("http://", "https://", "mailto:")):
+                continue
+            target = os.path.normpath(os.path.join(os.path.dirname(path), link))
+            if not os.path.exists(target):
+                warn(f"{path}: ссылка «{link}» никуда не ведёт "
+                     f"(кейс append-only — чинится удалением цели или новым кейсом)")
+
+
 def check_process_links():
     """Ссылки и упоминания id в регламентах kb/process/.
 
@@ -652,6 +685,7 @@ def main():
         check_routes(rt_rows)
     check_process()
     check_process_links()
+    check_case_links()
     check_enum_values()
     check_sql_schemas()
 
