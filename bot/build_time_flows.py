@@ -283,6 +283,39 @@ core_trigger = node(
         "workflowInputs": {"values": [{"name": k} for k in CORE_INPUTS]},
     },
 )
+
+# РАЗВОРОТ СПИСКОВ БЕРЁТСЯ ИЗ ПЛАНА, А НЕ ИЗ $json.
+#
+# Здесь стояли ноды splitOut по полям `files` и `dd` ВХОДНОГО элемента.
+# Гейты «Any articles» и «Need DD» уже переведены на чтение у «Plan»,
+# а разворот остался на $json — и это половина починки, которая хуже целой.
+#
+# Живой прогон 01.09, сборка 4db939d0. ДО починки гейта: `$json.dd_count`
+# читалось undefined, «Need DD» был ложным, метаданные не запрашивались.
+# ПОСЛЕ починки гейт стал истинным — и ветка умерла НА УЗЕЛ ДАЛЬШЕ: в splitOut
+# приходил элемент без поля `dd`, разворот давал НОЛЬ элементов, и
+# «Call DD Lookup» снова не выполнялся. Симптом тот же, место другое.
+#
+# Причина общая: и гейт, и разворот стоят за «Collect articles», а выключенная
+# или подменённая нода в n8n пропускает данные НАСКВОЗЬ — доезжает ответ
+# GitLab по статье, где нет ни `dd_count`, ни `dd`.
+#
+# Code-нода вместо splitOut, потому что `fieldToSplitOut` умеет читать только
+# входной элемент: сослаться на «Plan» оттуда нечем.
+#
+# Имя ключа `files` сохранено НАМЕРЕННО: splitOut клал строку именно в него,
+# и «Read article» читает путь как `$json.files`. Переименование здесь тихо
+# оборвало бы чтение статей.
+SPLIT_PATHS_JS = r"""
+const files = $('Plan').first().json.files;
+return (Array.isArray(files) ? files : []).map((p) => ({ json: { files: p } }));
+"""
+
+SPLIT_DD_JS = r"""
+const dd = $('Plan').first().json.dd;
+return (Array.isArray(dd) ? dd : []).map((d) => ({ json: d }));
+"""
+
 core_nodes.append(core_trigger)
 
 # Узлы, унаследованные из Support Bot DD.json без изменений: чтение реестра,
@@ -1556,10 +1589,10 @@ core_nodes.append(node("Plan", "n8n-nodes-base.code", 2, [620, 300], {"jsCode": 
 core_nodes += [
     node(
         "Split paths",
-        "n8n-nodes-base.splitOut",
-        1,
-        [840, 200],
-        {"fieldToSplitOut": "files", "options": {}},
+        "n8n-nodes-base.code",
+        2,
+        [1060, 140],
+        {"jsCode": SPLIT_PATHS_JS},
     ),
     node(
         "Read article",
@@ -1686,10 +1719,10 @@ core_nodes += [
     # на каждый объект: n8n делает это сам, цикл не нужен.
     node(
         "Split DD",
-        "n8n-nodes-base.splitOut",
-        1,
+        "n8n-nodes-base.code",
+        2,
         [1060, 560],
-        {"fieldToSplitOut": "dd", "options": {}},
+        {"jsCode": SPLIT_DD_JS},
     ),
     node(
         "Call DD Lookup",
@@ -5195,14 +5228,30 @@ try {
   if (arr(P.dd_dropped).length) kv('срезано потолком метаданных', list(P.dd_dropped));
   if (arr(M.tables_no_meta).length) kv('ВИТРИНА БЕЗ ИНВЕНТАРЯ ПОЛЕЙ', list(M.tables_no_meta));
 
-  h('5. Узлы — что отработало, а что не запускалось');
-  const st = (name, s2) => L.push('- ' + name + ': ' +
-    (s2.ran ? ('отработал, элементов ' + s2.n) : 'НЕ ЗАПУСКАЛСЯ'));
-  st('Call DD Lookup (метаданные)', ddl);
-  st('Lookup result', lk);
-  st('Check values → Check result (сверка значений)', chk);
-  st('Ask pairs → Parse pairs (доспрос)', ask);
-  st('Parse revised (второй проход автора)', rev);
+  // ВСЕ УЗЛЫ ЯДРА, А НЕ ПЯТЬ ИЗБРАННЫХ.
+  //
+  // Прошлая версия перечисляла только листья: «Call DD Lookup не запускался»,
+  // а какой именно узел до него оборвал цепочку — приходилось домысливать.
+  // Сам «Split DD» в отчёт не попадал вовсе, и разбор 01.09 из-за этого ушёл
+  // на две итерации починки не того места.
+  //
+  // Список имён вклеивает сборщик — он и так знает все узлы. Значит список
+  // не разъедется: добавили узел в конвейер — он появился и в отчёте.
+  //
+  // ПУТЬ ПРОГОНА, А НЕ «ГДЕ ОБОРВАЛОСЬ». Ветки IF взаимоисключающие, и
+  // невыполненный узел — чаще норма, чем поломка: назвать первый попавшийся
+  // «местом обрыва» значило бы обвинять исправный узел.
+  h('5. Узлы ядра — что отработало');
+  const CHAIN = __CORE_NODES__;
+  const ranNames = [];
+  for (const name of CHAIN) {
+    const s2 = stage(name);
+    if (s2.ran) ranNames.push(name);
+    L.push('- ' + name + ': ' +
+      (s2.ran ? ('отработал, элементов ' + s2.n) : 'НЕ ЗАПУСКАЛСЯ'));
+  }
+  L.push('');
+  L.push('**Путь прогона:** ' + (ranNames.join(' → ') || 'ни один узел не отработал'));
 
   h('6. Сверка значений в Trino');
   if (!chk.ran) {
@@ -5896,6 +5945,10 @@ core_nodes += [
     }),
     llm("Revise model", [2680, 440]),
     node("Parse revised", "n8n-nodes-base.code", 2, [2860, 220], {"jsCode": PARSE_JS}),
+    # Имена узлов для переписи берутся из САМИХ узлов, а не вписываются
+    # руками: вписанный список разъехался бы с конвейером молча. Модели
+    # исключены — они подвешены к агентам как ai_languageModel и в основной
+    # цепочке не участвуют, «НЕ ЗАПУСКАЛСЯ» на них читалось бы как поломка.
     node("Trace", "n8n-nodes-base.code", 2, [3040, 300],
          {"jsCode": TRACE_JS.replace("__CORE_BUILD__", CORE_BUILD)}),
     node("Final answer", "n8n-nodes-base.code", 2, [3220, 300],
@@ -6011,6 +6064,25 @@ for model, agent_name in (("Router model", "Router"), ("Author model", "Author")
             [{"node": agent_name, "type": "ai_languageModel", "index": 0}]
         ]
     }
+
+# Перепись узлов для трассировки подставляется ЗДЕСЬ, а не при создании ноды:
+# на том месте `core_nodes` ещё не полон — узлы цикла проверки добавляются
+# ниже, и снимок обрывался на «Parse answer». Тот же класс, что снимок модели
+# из первой конструкции: список, снятый раньше времени, отстаёт молча.
+#
+# Имена берутся из самих узлов, а не вписываются руками: вписанный список
+# разъехался бы с конвейером. Модели исключены — они подвешены к агентам
+# как ai_languageModel, в основной цепочке не участвуют, и «НЕ ЗАПУСКАЛСЯ»
+# на них читалось бы как поломка.
+_census = json.dumps([n["name"] for n in core_nodes
+                      if not n["name"].endswith("model") and n["name"] != "Trace"],
+                     ensure_ascii=False)
+for _n in core_nodes:
+    if _n["name"] == "Trace":
+        _n["parameters"]["jsCode"] = _n["parameters"]["jsCode"].replace(
+            "__CORE_NODES__", _census)
+assert "__CORE_NODES__" not in json.dumps(core_nodes, ensure_ascii=False), \
+    "перепись узлов не подставилась в «Trace»"
 
 core = wf("Support Bot Core", core_nodes, core_conn)
 
