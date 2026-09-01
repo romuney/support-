@@ -123,7 +123,11 @@ cd bot
 node test_pipeline.mjs   # план, мастера домена, сборка материалов, проекция реестра
 node test_adapters.mjs   # разбор ответа, сборка сообщений, guard, домены
 node test_shapers.mjs    # шейперы DD на подставных данных
+node test_recon.mjs      # разведка DD: формы ответов каталога
 ```
+
+Каждый набор — своей командой. `node test_pipeline.mjs test_adapters.mjs`
+запускает только первый файл, второй молча становится аргументом.
 
 ### Промпты
 
