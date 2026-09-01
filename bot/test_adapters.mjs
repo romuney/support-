@@ -159,6 +159,46 @@ function check(label, cond) {
 const line = (t) => console.log('\n' + '='.repeat(70) + '\n' + t + '\n' + '='.repeat(70));
 
 // ====================================================================== 1
+// --- «Каталог ответил» — понижения за отсутствие статьи не происходит.
+//
+// Средняя уверенность здесь не оттенок мнения, а ЗАДАЧА: джун читает её как
+// «в базе чего-то не хватает». Если имя поля подтвердил каталог, править
+// нечего — состав полей в базе жить и не должен.
+line('0е. КАТАЛОГ ОТВЕТИЛ — уверенность не режется за пустой реестр');
+{
+  const MART = 'emart.mdm_employee_structure_d';
+  // Витрина прочитана, инвентарь пришёл; статья про инвалидность в базе
+  // отсутствует и отсутствовать должна.
+  const mat = {
+    ...MAT_OK,
+    masters_only: true,
+    router_empty: true,
+    router_picked: [],
+    materials: '=== СТАТЬЯ kb/tables/mdm-employee-structure-d.md ===\n' +
+               'Основная витрина. Ключ mdm_employee_rk, фильтр active_employee_flg.\n' +
+               '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:x ===\ndisability_flg\n',
+    tables: [{ name: MART, sens: [],
+               fields: ['mdm_employee_rk', 'active_employee_flg', 'disability_flg'] }],
+  };
+  const ANS = 'ЧЕРНОВИК ОТВЕТА: Признак есть — поле disability_flg.\nУВЕРЕННОСТЬ: высокая';
+  const ok = runParse(ANS, { question: 'сотрудники с инвалидностью', mode: 'dm' }, {}, mat);
+  check('высокая уверенность сохранена', ok.confidence_key === 'high');
+  check('поле названо найденным каталогом',
+    (ok.catalog_only_fields || []).includes('disability_flg'));
+
+  // УЗКО: поле, названное В СТАТЬЕ, «каталогом найденным» не считается —
+  // иначе `mdm_employee_rk` и `active_employee_flg` давали бы «каталог
+  // ответил» на каждом прогоне, и сигнал умер бы.
+  const generic = runParse(
+    'ЧЕРНОВИК ОТВЕТА: Считаем по active_employee_flg и mdm_employee_rk.\nУВЕРЕННОСТЬ: высокая',
+    { question: 'сколько людей', mode: 'dm' }, {}, mat);
+  check('поля из статьи за каталог не засчитываются',
+    (generic.catalog_only_fields || []).length === 0);
+  check('и понижение за пустой реестр остаётся', generic.confidence_key === 'medium');
+  check('причина названа', /реестре нет|роутер не подобрал/.test(
+    generic.confidence_capped_reason || ''));
+}
+
 // --- «Поля нет» без инвентаря: утверждение, которое никто не перепроверит.
 //
 // Живой прогон 01.09, ЛИЧКА: метаданные не запрашивались вовсе, а в ответе
