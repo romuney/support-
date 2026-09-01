@@ -1671,6 +1671,19 @@ function fieldsOf(body) {
       for (const x of parts) set.add(x);
     }
   }
+  // Витрина с ОДНИМ полем перечнем не выглядит: запятой в строке нет,
+  // и разбор давал пустой набор — то есть гейт выгрузки получал ложное
+  // «метаданных не пришло». Одиночное имя принимается ТОЛЬКО следом
+  // за заголовком про поля, иначе в инвентарь полезет любое слово прозы.
+  if (!set.size) {
+    const lines = String(body || '').split('\n').map((x) => x.trim());
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (!/ПОЛ[ЕЙЯ]/i.test(lines[i])) continue;
+      for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
+        if (lines[j] && IDENT.test(lines[j])) { set.add(lines[j]); break; }
+      }
+    }
+  }
   return set;
 }
 
@@ -2147,6 +2160,9 @@ const ddNoColumns = [];
 // Шейпер объявил число полей, а разбор не увидел ни одного: формат перечня
 // разъехался с разбором. Поломка БОТА, и чинится она в коде.
 const ddParseFailed = [];
+// Отказы каталога с КОДОМ. 404, 401 и 5xx чинятся в разных местах, и слитые
+// в один диагноз они отправляют чинить не то.
+const ddFailedHttp = [];
 // Витрины с разобранным составом полей — структурой, а не прозой.
 // Потребители в ядре читают этот список, а не разгадывают текст.
 const ddTables = [];
@@ -2199,7 +2215,20 @@ ddResults.forEach((res, idx) => {
     }
     if (!inv.size) {
       ddNoFields.push(urn);
-      if (/ОШИБКИ DD/.test(meta)) ddBadUrn.push(urn);
+      // ДИАГНОЗ ПО СТАТУСУ, А НЕ ПО РЕГУЛЯРКЕ ПО ТЕКСТУ.
+      //
+      // Статус был измерен нодой каталога и выброшен: `httpFail` превращал
+      // его в русскую фразу, а ядро вылавливало из неё один бит
+      // регуляркой `/ОШИБКИ DD/`. На каждом новом виде отказа диагноз
+      // оказывался неверен и отправлял чинить не то — а это ТРИ РАЗНЫХ
+      // действия: 404 правит строку реестра, 401 — Service Account,
+      // 5xx значит «каталог лежит, повторить позже».
+      const codes = (res?.dd?.http || [])
+        .map((h) => Number(h && h.status))
+        .filter((c) => Number.isFinite(c) && c >= 400);
+      const worst = codes.length ? Math.max(...codes) : 0;
+      if (worst) ddFailedHttp.push({ urn, status: worst });
+      if (worst || /ОШИБКИ DD/.test(meta)) ddBadUrn.push(urn);
       // ШЕЙПЕР ОБЕЩАЛ ПОЛЯ, А РАЗБОР ИХ НЕ УВИДЕЛ — ЭТО ПОЛОМКА РАЗБОРА.
       //
       // Померено сквозным прогоном 2026-08-31: каталог отдал 25 полей витрины
@@ -2867,6 +2896,7 @@ return [{
     // реестра, а не доступом.
     dd_no_fields: ddNoFields,
     dd_bad_urn: ddBadUrn,
+    dd_failed_http: ddFailedHttp,
     dd_no_columns: ddNoColumns,
     dd_parse_failed: ddParseFailed,
     unit_rk: String(unit.unit_rk || ''),
@@ -3407,6 +3437,7 @@ out.unit_state = String(mat.unit_state || '');
 // доступа — неверная строка реестра, и чинится она за минуту.
 out.dd_no_fields = Array.isArray(mat.dd_no_fields) ? mat.dd_no_fields : [];
 out.dd_bad_urn = Array.isArray(mat.dd_bad_urn) ? mat.dd_bad_urn : [];
+out.dd_failed_http = Array.isArray(mat.dd_failed_http) ? mat.dd_failed_http : [];
 out.dd_parse_failed = Array.isArray(mat.dd_parse_failed) ? mat.dd_parse_failed : [];
 out.cols_from_data = Array.isArray(mat.cols_from_data) ? mat.cols_from_data : [];
 out.unit_rk = String(mat.unit_rk || '');
@@ -3832,11 +3863,22 @@ const colsTail = gotCols.length
     'не хватает только описаний полей'
   : '';
 if (Array.isArray(mat.dd_bad_urn) && mat.dd_bad_urn.length) {
-  tasks.push('КАТАЛОГ ОТКАЗАЛ по объектам: ' +
-    mat.dd_bad_urn.map(shortUrn).join(', ') +
-    ' — 404 значит неверный URN в реестре, 401 значит истёкший Service ' +
-    'Account. Настоящий URN ищется поиском по имени витрины (фаза G ' +
-    'в «DD Recon»), и правится одна строка kb/index.md' + colsTail);
+  // Каждый код — своё действие. Раньше печаталась одна строка про «404 или
+  // 401», и на 5xx она отправляла править реестр, который не сломан.
+  const byCode = Array.isArray(mat.dd_failed_http) ? mat.dd_failed_http : [];
+  const say = (c) =>
+    c === 404 ? 'URN в реестре неверный — настоящий ищется поиском по имени '
+                + 'витрины (фаза G в «DD Recon»), правится одна строка kb/index.md'
+    : c === 401 ? 'истёк Service Account каталога — обновить credential'
+    : c >= 500 ? 'каталог отвечает ошибкой сервера: это не реестр и не доступ, '
+                 + 'повторить позже, а если повторяется — писать владельцам DD'
+    : c === 403 ? 'доступ к объекту запрещён — вопрос прав, а не реестра'
+    : `каталог ответил кодом ${c}, что это значит — не знаем`;
+  const lines = byCode.length
+    ? byCode.map((x) => `${shortUrn(x.urn)}: HTTP ${x.status} — ${say(Number(x.status))}`)
+    : [mat.dd_bad_urn.map(shortUrn).join(', ') +
+       ': каталог ответил ошибкой, код не сохранился'];
+  tasks.push('КАТАЛОГ ОТКАЗАЛ — ' + lines.join('; ') + colsTail);
 }
 if (Array.isArray(mat.dd_parse_failed) && mat.dd_parse_failed.length) {
   tasks.push('СБОЙ БОТА, не пробел базы: каталог прислал состав полей, ' +
@@ -6193,6 +6235,10 @@ return [{ json: {
     // не заведено», не чинится вовсе, и складывать их значит мерить
     // работу, которой нет.
     dd_bad_urn: (Array.isArray(a.dd_bad_urn) ? a.dd_bad_urn : []).length,
+    // Худший код отказа каталога: 404/401/5xx чинятся в разных местах,
+    // и разрез по коду показывает, что чинить первым.
+    dd_http_status: (Array.isArray(a.dd_failed_http) && a.dd_failed_http.length
+      ? Math.max(...a.dd_failed_http.map((x) => Number(x.status) || 0)) : 0),
     // Каталог прислал состав, а разбор его не увидел. Поломка бота, и она
     // обязана быть видна цифрой: сутки этот отказ выглядел молчанием
     // каталога, потому что мерить его было нечем.

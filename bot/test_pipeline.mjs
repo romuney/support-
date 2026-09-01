@@ -3116,9 +3116,11 @@ line('53. «КАТАЛОГ ОТВЕТИЛ» И «КАТАЛОГ ДАЛ СОСТ�
   // у него не заведено. Валя это в один диагноз, джуна отправляли править
   // строку реестра, которая не сломана.
   check('отказ каталога назван отказом', parsed.dd_bad_urn.length === 1);
-  check('и «Задача для базы» говорит про URN и Service Account',
+  // Код не сохранился (старый субворкфлоу без структуры) — говорим это
+  // прямо, а не придумываем причину.
+  check('и «Задача для базы» честно говорит, что кода нет',
     parsed.kb_tasks.some((t) => /КАТАЛОГ ОТКАЗАЛ/.test(t)) &&
-    parsed.kb_tasks.some((t) => /kb\/index\.md/.test(t)));
+    parsed.kb_tasks.some((t) => /код не сохранился/.test(t)));
 
   const mZero = mat0('ПОЛЯ ИЗ DD: 0\nDD не вернул ни одного поля.');
   const pZero = parse(mZero);
@@ -3509,6 +3511,62 @@ line('56. ОДИН ИСТОЧНИК ИСТИНЫ: ДВЕ НОДЫ НЕ МОГУ�
   check('и срез по нему ставится, а не пропускается',
     /last_day_flg = 1/.test(data[0].check_sql) &&
     /company_fire_flg = 0/.test(data[0].check_sql));
+}
+
+// ===================================================================== 57
+line('57. ДИАГНОЗ КАТАЛОГА — ПО СТАТУСУ, А НЕ ПО РЕГУЛЯРКЕ ПО ТЕКСТУ');
+{
+  const URN_K = 'urn:dd:tables:greenplum:table:' +
+    'chrono_peoplehub_masterid.individualchildren_public';
+  const PLAN = { files: [], domains: [], dd: [{ urn: URN_K, hint: '' }],
+                 dd_count: 1, unit_link_kind: '', unit_link_id: '' };
+  const run = (status) => {
+    const DD = { dd_meta: 'ОШИБКИ DD: карточка объекта: HTTP ' + status + '.',
+                 dd: { ok: false, object_type: 'table', urn: URN_K,
+                       http: [{ req: 'карточка объекта', status }],
+                       total: 0, fields: [] } };
+    const mat = new Function('$', '$json', js('Build materials'))(
+      (n) => {
+        if (n === 'Plan') return { first: () => ({ json: PLAN }) };
+        if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+        if (n === 'Call DD Lookup') return { all: () => [{ json: DD }] };
+        throw new Error('node not executed: ' + n);
+      }, {})[0].json;
+    return new Function('$', '$json', js('Parse answer'))(
+      (n) => {
+        if (n === 'When called by adapter') return { first: () => ({ json: { question: 'q' } }) };
+        if (n === 'Plan') return { first: () => ({ json: {} }) };
+        if (n === 'Build materials') return { first: () => ({ json: mat }) };
+        if (n === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+        throw new Error('node not executed: ' + n);
+      }, { output: 'ЧЕРНОВИК ОТВЕТА: текст\nУВЕРЕННОСТЬ: высокая' })[0].json;
+  };
+  const task = (r) => r.kb_tasks.find((t) => /КАТАЛОГ ОТКАЗАЛ/.test(t)) || '';
+
+  // 404 — строка реестра. 401 — Service Account. 500 — каталог лежит.
+  // Три РАЗНЫХ действия, и раньше на всех трёх печаталась одна строка
+  // «404 значит неверный URN, 401 значит истёкший Service Account»,
+  // то есть на 500 джуна отправляли править реестр, который не сломан.
+  const r404 = run(404);
+  check('404 → правим строку реестра',
+    /URN в реестре неверный/.test(task(r404)) && /kb\/index\.md/.test(task(r404)));
+  const r401 = run(401);
+  check('401 → обновляем Service Account',
+    /истёк Service Account/.test(task(r401)) && !/kb\/index\.md/.test(task(r401)));
+  const r500 = run(500);
+  check('500 → каталог лежит, а не реестр',
+    /ошибкой сервера/.test(task(r500)) &&
+    !/kb\/index\.md/.test(task(r500)) && !/Service Account/.test(task(r500)));
+  const r418 = run(418);
+  check('неизвестный код назван кодом, а причина не выдумана',
+    /кодом 418/.test(task(r418)) && /не знаем/.test(task(r418)));
+
+  for (const [code, r] of [[404, r404], [401, r401], [500, r500], [418, r418]]) {
+    check(`HTTP ${code}: состав полей не выдан за полученный`,
+      r.dd_no_fields.length === 1 && r.dd_bad_urn.length === 1);
+    check(`HTTP ${code}: код доехал до телеметрии`, r.dd_failed_http.length === 1 &&
+      Number(r.dd_failed_http[0].status) === code);
+  }
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
