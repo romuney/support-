@@ -23,7 +23,7 @@ def main():
     ap.add_argument("image")
     ap.add_argument("--cols", type=int, default=3)
     ap.add_argument("--rows", type=int, default=3)
-    ap.add_argument("--names", help="файл с именами, по одному на строку")
+    ap.add_argument("--names", help="файл с именами по строке, либо имена через запятую")
     ap.add_argument("--out", default="out")
     ap.add_argument("--size", type=int, default=128)
     ap.add_argument("--thresh", type=int, default=sheet.FLOOD_THRESH)
@@ -33,7 +33,12 @@ def main():
 
     names = []
     if a.names:
-        names = [n.strip() for n in Path(a.names).read_text().split("\n") if n.strip()]
+        # Поштучная генерация даёт один файл на стикер, и заводить ради имени
+        # файл со списком — лишний шаг. Путь и список различаются по наличию
+        # файла на диске, а не по запятой: имя может её содержать.
+        src = Path(a.names)
+        raw = src.read_text() if src.is_file() else a.names.replace(",", "\n")
+        names = [n.strip() for n in raw.split("\n") if n.strip()]
         if len(names) != len(cells):
             sys.exit(f"имён {len(names)}, ячеек {len(cells)} — не совпало")
 
