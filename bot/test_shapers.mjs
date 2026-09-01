@@ -41,9 +41,19 @@ function shortNameLocal(o) {
 // entityAttrs — ответ dd_entity_attrs (атрибуты ТАБЛИЦЫ, не колонки), для
 // «КОММЕНТАРИЙ ИЗ DD». Не передан — как и раньше, {} по умолчанию: comment
 // пуст, строка не печатается.
-function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = null,
-                  valuesPlan = null, valuesRes = undefined) {
-  const pickList = cards !== null ? cards.map((c) => ({ field: shortNameLocal((c && c.body) || c || {}) })) : [];
+function runTableFull(...a) { return runTableRaw(...a); }
+function runTable(...a) { return runTableRaw(...a).dd_meta; }
+function runTableRaw(inputs, card, cols, cards = null, pick = null, entityAttrs = null,
+                  valuesPlan = null, valuesRes = undefined, pickNames = null) {
+  // ИМЯ ПОЛЯ БЕРЁТСЯ ИЗ `Pick columns`, А НЕ ИЗ ОТВЕТА КАРТОЧКИ.
+  //
+  // Так устроен живой флоу: ни /summary, ни /attribute имени не несут, оно
+  // приходит из списка целей по индексу. Харнесс выводил его из тела
+  // карточки — и на упавшей карточке терял, чего в проде не бывает.
+  const pickList = cards === null ? [] : cards.map((c, i) => ({
+    field: (Array.isArray(pickNames) && pickNames[i])
+      || shortNameLocal((c && c.body) || c || {}),
+  }));
   const $ = (name) => {
     if (name === 'dd_column_summary') {
       if (cards === null) throw new Error('node not executed');
@@ -114,7 +124,7 @@ function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = n
       }),
     };
   };
-  return new Function('$', js('Shape table meta'))($)[0].json.dd_meta;
+  return new Function('$', js('Shape table meta'))($)[0].json;
 }
 
 // Прогон ноды «Build values SQL»: какой SQL она построит и что исключит.
@@ -974,6 +984,63 @@ line('13. МЁРТВЫЙ СОВЕТ ВРЕМЁН TOOL-LOOP УБРАН');
     !/вызови dd_lookup ещё раз/i.test(ddSrc));
   checkS('но говорит, что перечень имён — только про наличие поля',
     /по нему видно только, ЕСТЬ поле в витрине/.test(ddSrc));
+}
+
+// ===================================================================== 14
+line('14. КОНТРАКТ НА ВЫХОДЕ: ДАННЫЕ РЯДОМ С ТЕКСТОМ');
+{
+  // Пока факт существовал только как формулировка внутри `dd_meta`, каждый
+  // потребитель в ядре разгадывал его своей регуляркой, и правка текста
+  // молча ослепляла соседа. Проверяем, что структура есть и полна ДАЖЕ
+  // на фикстуре, где текст намеренно неудобен: двухбуквенное имя, смешанный
+  // регистр, служебные колонки в двойных подчёркиваниях.
+  const URN_K = 'urn:dd:tables:greenplum:table:' +
+    'chrono_peoplehub_masterid.individualchildren_public';
+  const NAMES = ['id', 'individualid', 'birthdate', 'CommonAddressId',
+                 'Email', '__contract__', '__offset__'];
+  const colsK = { statusCode: 200, body: { totalCount: NAMES.length,
+    data: NAMES.map((n) => ({ entity: {
+      fqn: `chrono_peoplehub_masterid.individualchildren_public.${n}`,
+      urn: `urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.${n}` } })) } };
+  const cardsK = NAMES.map((n) => (n.startsWith('__')
+    ? { statusCode: 500 }
+    : { statusCode: 200, body: {
+        fqn: `chrono_peoplehub_masterid.individualchildren_public.${n}`,
+        summary: { data: `описание ${n}` },
+        attributes: { column_type: { type: 'text', data: 'text' } },
+        ...(n === 'birthdate' ? { sensitivity: ['EMP_SENS'] } : {}) } }));
+  const pickK = runPick({ urn: URN_K, search: 'дети, возраст детей' }, colsK);
+  const res = runTableFull({ urn: URN_K, search: 'дети, возраст детей' },
+    { statusCode: 200, body: { data: 'Данные о детях' } }, colsK, cardsK, pickK[0],
+    null, null, undefined, NAMES);
+
+  checkS('структура отдана рядом с текстом',
+    res.dd && typeof res.dd === 'object' && typeof res.dd_meta === 'string');
+  checkS('тип объекта назван', res.dd.object_type === 'table');
+  checkS('состав полей полон, включая двухбуквенное и служебные',
+    res.dd.fields.length === NAMES.length &&
+    res.dd.fields.some((f) => f.name === 'id') &&
+    res.dd.fields.some((f) => f.name === '__contract__'));
+  checkS('описания лежат рядом с именами',
+    (res.dd.fields.find((f) => f.name === 'birthdate') || {}).desc === 'описание birthdate');
+  checkS('чувствительность — тоже поле структуры, а не строка текста',
+    (res.dd.fields.find((f) => f.name === 'birthdate') || {}).sensitive === true &&
+    (res.dd.fields.find((f) => f.name === 'id') || {}).sensitive === false);
+  checkS('исход карточки назван по каждому полю',
+    (res.dd.fields.find((f) => f.name === '__contract__') || {}).card === 'failed' &&
+    (res.dd.fields.find((f) => f.name === 'id') || {}).card === 'ok');
+  checkS('карточки посчитаны фактом, а не пересказом',
+    res.dd.cards_requested === NAMES.length && res.dd.cards_received === 5);
+  // Статус измерен двумя нодами и раньше выбрасывался — теперь доживает
+  // до ядра: 404 это строка реестра, 401 — Service Account, 500 — ретрай,
+  // и это три РАЗНЫХ действия.
+  checkS('статусы запросов сохранены числами',
+    Array.isArray(res.dd.http) && res.dd.http.some((h) => h.status === 500));
+  checkS('режим назван', res.dd.mode === 'by_meaning');
+
+  // Главное: структура собирается НЕЗАВИСИМО от текста.
+  checkS('состав полей не зависит от разборности текста',
+    res.dd.fields.length === NAMES.length && res.dd_total === NAMES.length);
 }
 
 console.log(ddFails ? `ПРОВАЛОВ: ${ddFails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
