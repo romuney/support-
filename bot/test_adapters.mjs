@@ -303,6 +303,60 @@ line('0д. «ПОЛЯ НЕТ» БЕЗ ИНВЕНТАРЯ — увереннос�
   check('обычный ответ без инвентаря не трогаем', p3.confidence_key === 'high');
 }
 
+line('0з. ПРОДОЛЖЕНИЕ РАЗГОВОРА: личка тредом, канал по тегу');
+{
+  // Бот задаёт уточняющие вопросы, и до этой правки ответ на них не читался
+  // вовсе: реплика в треде отсеивалась как «не обращение», а человек ждал.
+  const dmPost = (message, root) => ({
+    channel_type: 'D', sender_name: '@r.kazantsev',
+    post: JSON.stringify({ id: 'p2', root_id: root || '', message, channel_id: 'c1' }),
+  });
+
+  // ЛИЧКА: ответ в треде — продолжение, тег не нужен. Кроме двоих,
+  // в диалоге никого нет, и требовать тег значило бы добавить трение
+  // на ровном месте.
+  const reply = guardDm(dmPost('по дням', 'p1'));
+  check('личка: ответ в треде пропущен', reply.pass === true);
+  check('и назван продолжением разговора', reply.is_follow_up === true);
+  check('корень треда — для дочитывания', reply.thread_root === 'p1');
+
+  // Новое обращение в личке — по-прежнему обращение, но НЕ продолжение:
+  // дочитывать нечего, и лишний HTTP-запрос не нужен.
+  const fresh = guardDm(dmPost('нужна выгрузка'));
+  check('личка: новый вопрос пропущен', fresh.pass === true);
+  check('и продолжением не считается', fresh.is_follow_up === false);
+  check('корень треда — он сам', fresh.thread_root === 'p2');
+
+  // КАНАЛ: реплика в треде БЕЗ тега молчит. Там тред живёт своей жизнью —
+  // дежурный, согласование, обсуждение, — и бот, отвечающий на всё подряд,
+  // стал бы шумом.
+  const chPost = (message, root) => ({
+    sender_name: '@duty',
+    post: JSON.stringify({ id: 'q2', root_id: root || '', message, channel_id: 'c2' }),
+  });
+  const chatter = guardChannel(chPost('согласовал, выгружаем', 'q1'));
+  check('канал: реплика без тега отсеяна', chatter.pass === false);
+  check('и причина названа', /реплика в треде/.test(chatter.reason));
+
+  // ТЕГ. В сборке BOT_USERNAME пуст (логин бота — значение окружения),
+  // поэтому подставляем его в код guard'а и проверяем саму логику.
+  // Без этого правило про тег осталось бы непроверенным до продакшена.
+  const tagged = (event, name = 'bully') => new Function('$json',
+    js(channel, 'Guard channel').replace('const MENTION      = "";',
+                                         `const MENTION      = "${name}";`))(event)[0].json;
+  const call = tagged(chPost('@bully посмотри тред и ответь', 'q1'));
+  check('канал: реплика С тегом пропущена', call.pass === true);
+  check('и это продолжение — тред будет дочитан', call.is_follow_up === true);
+  check('корень треда взят у реплики', call.thread_root === 'q1');
+  // Префикс формы с тега не требуется: человек зовёт бота обычным текстом.
+  check('шапка intake-формы для тега не нужна', !/не наша тема/.test(call.reason || ''));
+
+  // Чужой логин, начинающийся так же, бота не будит: `\b` после логина
+  // совпал бы и с `@bully_bot`, поэтому ограничитель — «дальше не символ логина».
+  const other = tagged(chPost('@bully_bot сделай что-нибудь', 'q1'));
+  check('на чужой похожий логин не отзывается', other.pass === false);
+}
+
 line('1. Полный ответ из четырёх блоков');
 {
   const p = runParse(`ЧЕРНОВИК ОТВЕТА: Численность считается по legal_employee_flg = 1
@@ -2319,10 +2373,24 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
     fromCore.includes('Answer event DM') &&
     fromCore.includes('Build DM reply'));
   // Ветви не сходятся — иначе узел выполнился бы дважды.
+  //
+  // ИСКЛЮЧЕНИЕ ОДНО и оно названо: «Build thread DM» стоит на схождении
+  // двух выходов ОДНОГО IF «Need thread DM» — продолжение разговора идёт
+  // через чтение треда, новое обращение мимо него. Ветви взаимоисключающие,
+  // узел выполняется РАЗ. Это не веер, за которым следит проверка: тот же
+  // случай, что «Check values» с двумя входами в ядре.
+  const CONVERGE_OK = new Set(['Build thread DM']);
   const targets = Object.values(dm.connections)
     .flatMap((c) => (c.main || []).flatMap((b) => (b || []).map((t) => t.node)));
-  const twice = targets.filter((n, i) => targets.indexOf(n) !== i);
-  check('ни один узел не получает две ветви', twice.length === 0);
+  const twice = targets.filter((n, i) => targets.indexOf(n) !== i)
+    .filter((n) => !CONVERGE_OK.has(n));
+  check(`ни один узел не получает две ветви${twice.length ? ': ' + twice.join(', ') : ''}`,
+    twice.length === 0);
+  // И схождение, которое разрешено, обязано быть выходами одного IF.
+  const fromNeed = (dm.connections['Need thread DM'].main || [])
+    .map((b) => (b || []).map((t) => t.node));
+  check('чтение треда и обход — две ветви одного гейта',
+    fromNeed[0].includes('Get thread DM') && fromNeed[1].includes('Build thread DM'));
 
   // РЕАКЦИЯ «БОТ ДУМАЕТ» — только в личке, и только вокруг ожидания.
   //
@@ -2331,9 +2399,11 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   // именно индекс, а не факт наличия — «стоит первой» и «стоит где-то»
   // здесь разные вещи, и вторая ничего не гарантирует.
   const allowed = dm.connections['DM allowed'].main[0].map((t) => t.node);
-  check('реакция ставится ПЕРЕД вызовом ядра',
+  // Ядро теперь зовётся не сразу: между гейтом и им стоит чтение треда.
+  // Проверяем то же по смыслу — реакция первой, до всей работы.
+  check('реакция ставится ПЕРЕД работой ядра',
     allowed.indexOf('React work in DM') === 0 &&
-    allowed.indexOf('React work in DM') < allowed.indexOf('Call core'));
+    allowed.indexOf('React work in DM') < allowed.indexOf('Need thread DM'));
   // Снятие — хвостом за отправкой, а не параллельно: параллельная ветвь
   // могла бы снять отметку раньше, чем ответ уйдёт.
   check('реакция снимается ПОСЛЕ отправки ответа',

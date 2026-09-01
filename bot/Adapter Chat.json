@@ -31,7 +31,8 @@
             "form_domain": "",
             "report_url": "",
             "form_context": "",
-            "external_transfer": ""
+            "external_transfer": "",
+            "thread": ""
           },
           "matchingColumns": [],
           "schema": [
@@ -92,6 +93,15 @@
             {
               "id": "external_transfer",
               "displayName": "external_transfer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "thread",
+              "displayName": "thread",
               "required": false,
               "defaultMatch": false,
               "display": true,
