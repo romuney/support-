@@ -22,7 +22,7 @@ const dm = load('Adapter DM.json');
 // таблица «Домены» в kb/index.md изменится, а не только когда изменится код.
 // База знаний лежит уровнем выше и в двух возможных местах — см. тот же
 // резолв в test_pipeline.mjs.
-const REGISTRY_PATHS = ['../executive-support/kb/index.md', '../kb/index.md'];
+const REGISTRY_PATHS = ['../kb/index.md', '../executive-support/kb/index.md'];
 const REGISTRY_AT = REGISTRY_PATHS.find((p) => fs.existsSync(p));
 if (!REGISTRY_AT) {
   console.error('не найден реестр базы знаний, искали: ' + REGISTRY_PATHS.join(', '));
@@ -937,7 +937,7 @@ line('26. Уверенность понижает КОД: вопрос по от
     dd_objects: ['urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d'],
   };
 
-  const p = runParse(ANSWER, trigger, { domains: ['headcount-structure'] }, mastersOnly);
+  const p = runParse(ANSWER, trigger, { domains: ['headcount'] }, mastersOnly);
   check('заявленное сохранено', p.confidence_claimed === 'high');
   check('действует «нет ответа»', p.confidence_key === 'none');
   check('понижение отмечено', p.confidence_capped === true);
@@ -956,7 +956,7 @@ line('26. Уверенность понижает КОД: вопрос по от
   check('основание: метаданные названы',
     basis.includes('mdm_employee_structure_d') && !basis.includes('urn:dd:'));
   check('основание: домен формы против домена бота',
-    basis.includes('Стоимость и расходы') && basis.includes('headcount-structure'));
+    basis.includes('Стоимость и расходы') && basis.includes('headcount'));
 
   // ЗАДАЧА ДЛЯ БАЗЫ — готовый список правок, собранный из фактов.
   const tasks = p.kb_tasks.join('\n');
@@ -980,7 +980,7 @@ line('26. Уверенность понижает КОД: вопрос по от
   // рабочим, но про сам отчёт бот по-прежнему не знает ничего — «средняя».
   // Понижать такое до «нет ответа» значит отучить джуна читать черновики,
   // то есть тот же тихий отказ, только в другую сторону.
-  const picked = runParse(ANSWER, trigger, { domains: ['headcount-structure'] }, {
+  const picked = runParse(ANSWER, trigger, { domains: ['headcount'] }, {
     ...MAT_OK,
     masters_only: false,
     router_picked: ['kb/metrics/legal-headcount.md'],
@@ -991,7 +991,7 @@ line('26. Уверенность понижает КОД: вопрос по от
   check('причина всё равно про отчёт', /отч[её]т/.test(picked.confidence_capped_reason));
 
   // Отчёт РАЗОБРАН (пришли метаданные объекта отчёта) — не понижаем.
-  const seen = runParse(ANSWER, trigger, { domains: ['headcount-structure'] }, {
+  const seen = runParse(ANSWER, trigger, { domains: ['headcount'] }, {
     ...MAT_OK,
     asks_report: true,
     report_seen: true,
@@ -2171,7 +2171,7 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   const answer = {
     draft: 'ответ', confidence_key: 'medium', confidence_claimed: 'high',
     confidence_capped: true, confidence_capped_reason: 'метаданные не дошли',
-    domains: ['headcount-structure'], articles_read: ['kb/tables/x.md'],
+    domains: ['headcount'], articles_read: ['kb/tables/x.md'],
     dd_count: 2, dd_received: 0, dd_never_ran: false, kb_tasks: ['пробел'],
     routes: [], experts_invented: [], draft_own_tools: [], tables_no_meta: [],
     is_query_help: true, router_empty: false,

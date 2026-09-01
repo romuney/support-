@@ -83,7 +83,7 @@ import os
 import re
 
 OUT = "DD Recon.json"
-REGISTRY_PATHS = ("../executive-support/kb/index.md", "../kb/index.md")
+REGISTRY_PATHS = ("../kb/index.md", "../executive-support/kb/index.md")
 
 # Credential и опции HTTP берём из собранного «DD Lookup»: один Service Account
 # на все воркфлоу — то самое свойство, которое 2026-08-27 разъехалось молча

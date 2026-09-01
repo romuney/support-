@@ -22,7 +22,7 @@ const js = (n) => {
 // отдельным репозиторием executive-support/ и просто папкой kb/. Проверяем
 // оба и говорим, чего не нашли: молча взять пустой реестр значит получить
 // зелёные тесты мастеров на нулевой таблице «Домены».
-const REGISTRY_PATHS = ['../executive-support/kb/index.md', '../kb/index.md'];
+const REGISTRY_PATHS = ['../kb/index.md', '../executive-support/kb/index.md'];
 const REGISTRY_AT = REGISTRY_PATHS.find((p) => fs.existsSync(p));
 if (!REGISTRY_AT) {
   console.error('не найден реестр базы знаний, искали: ' + REGISTRY_PATHS.join(', '));
@@ -82,11 +82,11 @@ const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
 // ====================================================================== 1
 line('1. МАСТЕРА ДОМЕНА добираются кодом, а не промптом');
 {
-  // Роутер назвал домен и одну узкую статью. Мастера headcount-structure —
+  // Роутер назвал домен и одну узкую статью. Мастера headcount —
   // t-emp-structure, m-legal-headcount, rc-structure-choice — код обязан
   // добавить сам, иначе основание неполное.
   const p = runPlan(JSON.stringify({
-    domains: ['headcount-structure'],
+    domains: ['headcount'],
     articles: ['kb/metrics/active-headcount.md'],
     dd_urn: '',
     field_hint: '',
@@ -110,7 +110,7 @@ line('1. МАСТЕРА ДОМЕНА добираются кодом, а не п
 line('2. ДВА ДОМЕНА — мастера обоих');
 {
   const p = runPlan(JSON.stringify({
-    domains: ['headcount-structure', 'legal'],
+    domains: ['headcount', 'legal'],
     articles: [],
     dd_urn: '',
     field_hint: '',
@@ -201,7 +201,7 @@ line('6. ЛИМИТ ОБЪЁМА: обрезанное названо, а не �
   // добирается ПЕРВЫМ, и обрезка бьёт по хвосту.
   const worst = runPlan(
     JSON.stringify({
-      domains: ['headcount-structure', 'legal'],
+      domains: ['headcount', 'legal'],
       articles: ['m-turnover', 'm-hiring', 'rc-cohort-analysis',
                  'rc-attribute-tenure', 't-attendance', 't-education'],
       dd: [], no_question: false,
@@ -286,7 +286,7 @@ line('8б. НЕСКОЛЬКО объектов DD: отчёт + витрина �
   // Кейс, ради которого мультивызов и делался: по отчёту видно готовое решение,
   // по витрине — из чего оно считается.
   const p = runPlan(JSON.stringify({
-    domains: ['headcount-structure'],
+    domains: ['headcount'],
     articles: [],
     dd: [{ urn: URN_REPORT, hint: '' }, { urn: URN_TABLE, hint: 'численность' }],
     no_question: false,
@@ -564,7 +564,7 @@ line('15. ВЫБОР РОУТЕРА отделён от добора масте�
   // подобранного под вопрос основания не было. Отличить эти два случая можно
   // только имея выбор роутера отдельно от итога.
   const mastersOnly = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }));
   check('мастера всё равно добраны', mastersOnly.files.length === 3);
   check('выбор роутера пуст', mastersOnly.router_articles.length === 0);
@@ -640,7 +640,7 @@ line('17. ВЫГРУЗКА: плейбук и развилка витрины д
   // правдоподобной и неверной.
   const EXPORT = { topic_kind: 'Выгрузка данных' };
   const p = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }), REGISTRY, EXPORT);
 
   check('режим выгрузки определён', p.is_export === true);
@@ -653,14 +653,14 @@ line('17. ВЫГРУЗКА: плейбук и развилка витрины д
   check('мастера домена никуда не делись',
     p.files.includes('kb/tables/mdm-employee-structure-d.md'));
 
-  // Развилка витрины — мастер домена headcount-structure, то есть добралась
+  // Развилка витрины — мастер домена headcount, то есть добралась
   // бы и так. Дубля в files быть не должно.
   check('дублей нет', new Set(p.files).size === p.files.length);
 
   // Не выгрузка — ничего не добавляется: за правила выгрузки платят токенами
   // 43% обращений, остальные 57% платить не должны.
   const other = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }), REGISTRY, { topic_kind: 'Вопрос по отчетам' });
   check('вопрос по отчёту: режима нет', other.is_export === false);
   check('вопрос по отчёту: плейбука нет',
@@ -766,7 +766,7 @@ line('20. САМООБСЛУЖИВАНИЕ: self-service отчёт находи
     question: 'Нужна выгрузка ФИО и логинов моей команды',
   };
   const p = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }), REGISTRY, EXPORT_Q);
 
   check('self-service отчёт найден', p.self_service.some((s) => s.id === 'r-hr-detail-list'));
@@ -780,7 +780,7 @@ line('20. САМООБСЛУЖИВАНИЕ: self-service отчёт находи
   // не то, что заявлено. Гейт самообслуживания теперь принимает и слово
   // в тексте — в личке формы нет вовсе, и там это единственный сигнал.
   const notExport = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }), REGISTRY, { topic_kind: 'Вопрос по отчетам',
                   question: 'Где посмотреть табельный номер сотрудника?' });
   check('не выгрузка: self-service не ищется', notExport.self_service.length === 0);
@@ -788,7 +788,7 @@ line('20. САМООБСЛУЖИВАНИЕ: self-service отчёт находи
   // Личка и чат: темы нет вовсе, но человек просит выгрузку словами.
   // Ровно этот случай и провалился на живом прогоне 2026-08-17.
   const dm = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }), REGISTRY, { question: 'Нужна выгрузка логинов моей команды' });
   check('личка: self-service находится без темы',
     dm.self_service.some((s) => s.id === 'r-hr-detail-list'));
@@ -877,7 +877,7 @@ line('22. САМООБСЛУЖИВАНИЕ на РЕАЛЬНОМ обращен�
 
   // Чат: guard формы не разбирал, topic_kind пустой — ровно как в прогоне.
   const chat = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }), REGISTRY, { question: REAL });
 
   check('тема восстановлена из шапки: режим выгрузки включён', chat.is_export === true);
@@ -902,7 +902,7 @@ line('22. САМООБСЛУЖИВАНИЕ на РЕАЛЬНОМ обращен�
   // Канал: guard тему разобрал. Результат обязан быть тем же — иначе тест
   // в чате проверяет не то, что работает в канале.
   const channel = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   }), REGISTRY, { topic_kind: 'Выгрузка данных', question: REAL });
   check('канал и чат дают один результат',
     JSON.stringify(channel.self_service) === JSON.stringify(chat.self_service) &&
@@ -1144,7 +1144,7 @@ line('25. ИНВЕНТАРЬ ВИТРИН добирает код, а несоб
   // этом утверждало: «в метаданных витрины mdm_employee_structure_d нет поля
   // с мобильным телефоном». Утверждение о факте, которого бот не видел.
   const ROUTER = JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   });
 
   const exp = runPlan(ROUTER, REGISTRY, {
@@ -1171,7 +1171,7 @@ line('25. ИНВЕНТАРЬ ВИТРИН добирает код, а несоб
   // Роутер назвал витрину сам, со своим фильтром — его не затираем:
   // фильтр даёт ещё и описания полей, а пустой их не даёт.
   const withHint = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [],
+    domains: ['headcount'], articles: [],
     dd: [{ urn: URN_TABLE, hint: 'телефон' }], no_question: false,
   }), REGISTRY, { topic_kind: 'Выгрузка данных', question: 'телефоны' });
   check('фильтр роутера сохранён',
@@ -1208,7 +1208,7 @@ line('26. «КАК НАПИСАТЬ ЗАПРОС» — это вопрос, а �
   const Q = 'Можешь подсказать, как написать select, чтобы выгрузить ' +
             'сотрудника, его управленческий юнит и его юнит из функциональной структуры?';
   const ROUTER = JSON.stringify({
-    domains: ['headcount-structure'],
+    domains: ['headcount'],
     articles: ['kb/process/export-playbook.md'], dd: [], no_question: false,
   });
 
@@ -1316,7 +1316,7 @@ line('28. ЗНАЧЕНИЯ ФИЛЬТРОВ: роутер их больше не
   // Оставлять сбор values «на всякий случай» нельзя: это код, который
   // не работает и выглядит рабочим. Тест держит именно отсутствие пути.
   const p = runPlan(JSON.stringify({
-    domains: ['headcount-structure'],
+    domains: ['headcount'],
     articles: ['kb/tables/mdm-employee-structure-d.md'],
     dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
            hint: 'специализация, стрим', values: 'BI-аналитик, Дата' }],
@@ -1332,7 +1332,7 @@ line('28. ЗНАЧЕНИЯ ФИЛЬТРОВ: роутер их больше не
   // иглы. Вопрос «какое поле хранит логин и есть ли рабочая почта» — это
   // один объект и ДВА понятия, и вторая игла раньше выбрасывалась.
   const merged = runPlan(JSON.stringify({
-    domains: ['headcount-structure'], articles: [],
+    domains: ['headcount'], articles: [],
     dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
            hint: 'логин' },
          { urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d',
@@ -1403,7 +1403,7 @@ line('30. ВОПРОС ПРО ОТЧЁТ распознаётся и без фо
   // в чате не работало самообслуживание: у режима выгрузки фолбэк был,
   // у поиска отчёта — нет.
   const ROUTER = JSON.stringify({
-    domains: ['headcount-structure'], articles: [], dd: [], no_question: false,
+    domains: ['headcount'], articles: [], dd: [], no_question: false,
   });
   const q = 'привет! почему в дашборде ' +
     'https://proteus.tcsbank.ru/superset/dashboard/budget-corporate-events/ ' +
@@ -2212,7 +2212,7 @@ line('41б. СЛОВАРЬ СИНОНИМОВ добирается КОДОМ, �
   // по смыслу их не находит никогда.
   const q = 'напиши sql сколько актуальных сотрудников по покраске hq и bigops';
   const p = runPlan(
-    JSON.stringify({ domains: ['headcount-structure'], articles: [], dd: [], no_question: false }),
+    JSON.stringify({ domains: ['headcount'], articles: [], dd: [], no_question: false }),
     REGISTRY, { question: q },
   );
   check('словарь синонимов добран кодом',

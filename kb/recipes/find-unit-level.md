@@ -51,7 +51,8 @@ order by management_unit_lvl_num;
 select
     e.mdm_employee_rk                   -- ключ сотрудника
     , e.emp_specialization_desc         -- специализация
-    , e.management_position_nm          -- должность
+    , e.legal_position_nm               -- должность по трудовому договору
+    , e.management_position_nm          -- управленческая роль, НЕ должность
     , e.lvl5_mapped_management_unit_nm  -- подразделение уровень 5
 from prod_v_emart.mdm_employee_structure_d e
 where last_day_flg = 1                  -- актуальная дата
