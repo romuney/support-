@@ -166,37 +166,51 @@ const line = (t) => console.log('\n' + '='.repeat(70) + '\n' + t + '\n' + '='.re
 // нечего — состав полей в базе жить и не должен.
 line('0е. КАТАЛОГ ОТВЕТИЛ — уверенность не режется за пустой реестр');
 {
-  const MART = 'emart.mdm_employee_structure_d';
-  // Витрина прочитана, инвентарь пришёл; статья про инвалидность в базе
-  // отсутствует и отсутствовать должна.
+  const MART_PATH = 'kb/tables/mdm-employee-structure-d.md';
+  const HC_PATH = 'kb/metrics/active-headcount.md';
+  const SYN_PATH = 'kb/recipes/field-synonyms.md';
+  // Механика витрины и фильтр активности едут на КАЖДОМ вопросе — названные
+  // в них поля это леса. Словарь синонимов тоже едет всегда, но он не леса:
+  // он переводит слово заказчика в имя поля, то есть отвечает по существу.
   const mat = {
     ...MAT_OK,
     masters_only: true,
     router_empty: true,
     router_picked: [],
-    materials: '=== СТАТЬЯ kb/tables/mdm-employee-structure-d.md ===\n' +
-               'Основная витрина. Ключ mdm_employee_rk, фильтр active_employee_flg.\n' +
-               '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:x ===\ndisability_flg\n',
-    tables: [{ name: MART, sens: [],
+    materials:
+      `=== СТАТЬЯ ${MART_PATH} ===\nКлюч mdm_employee_rk, гранулярность по дням.\n` +
+      `=== СТАТЬЯ ${HC_PATH} ===\nФильтр active_employee_flg = 1.\n` +
+      `=== СТАТЬЯ ${SYN_PATH} ===\nинвалидность → disability_flg\n` +
+      '=== МЕТАДАННЫЕ КАТАЛОГА: urn:dd:x ===\ndisability_flg\n',
+    tables: [{ name: 'emart.mdm_employee_structure_d', sens: [],
                fields: ['mdm_employee_rk', 'active_employee_flg', 'disability_flg'] }],
   };
-  const ANS = 'ЧЕРНОВИК ОТВЕТА: Признак есть — поле disability_flg.\nУВЕРЕННОСТЬ: высокая';
-  const ok = runParse(ANS, { question: 'сотрудники с инвалидностью', mode: 'dm' }, {}, mat);
+  const plan = { mechanics_paths: [MART_PATH, HC_PATH] };
+
+  const ok = runParse(
+    'ЧЕРНОВИК ОТВЕТА: Признак есть — поле disability_flg.\nУВЕРЕННОСТЬ: высокая',
+    { question: 'сотрудники с инвалидностью', mode: 'dm' }, plan, mat);
   check('высокая уверенность сохранена', ok.confidence_key === 'high');
-  check('поле названо найденным каталогом',
+  check('поле названо закрытым каталогом',
     (ok.catalog_only_fields || []).includes('disability_flg'));
 
-  // УЗКО: поле, названное В СТАТЬЕ, «каталогом найденным» не считается —
-  // иначе `mdm_employee_rk` и `active_employee_flg` давали бы «каталог
-  // ответил» на каждом прогоне, и сигнал умер бы.
-  const generic = runParse(
-    'ЧЕРНОВИК ОТВЕТА: Считаем по active_employee_flg и mdm_employee_rk.\nУВЕРЕННОСТЬ: высокая',
-    { question: 'сколько людей', mode: 'dm' }, {}, mat);
-  check('поля из статьи за каталог не засчитываются',
-    (generic.catalog_only_fields || []).length === 0);
-  check('и понижение за пустой реестр остаётся', generic.confidence_key === 'medium');
+  // ГЛАВНОЕ: поле, названное В СЛОВАРЕ, засчитывается. Первая версия правила
+  // вычитала любое поле из любой прочитанной статьи — и молчала ровно тогда,
+  // когда база отработала лучше всего: словарь перевёл слово заказчика.
+  // Условие наказывало за то, за что должно хвалить.
+  check('поле из словаря синонимов за леса НЕ считается',
+    (ok.catalog_only_fields || []).includes('disability_flg'));
+
+  // Обратная сторона: только леса — понижение остаётся. Иначе «каталог
+  // ответил» стало бы истиной на каждом прогоне и сигнал умер бы.
+  const bare = runParse(
+    'ЧЕРНОВИК ОТВЕТА: Считаем по mdm_employee_rk с active_employee_flg = 1.\nУВЕРЕННОСТЬ: высокая',
+    { question: 'сколько людей', mode: 'dm' }, plan, mat);
+  check('поля механики за каталог не засчитываются',
+    (bare.catalog_only_fields || []).length === 0);
+  check('и понижение за пустой реестр остаётся', bare.confidence_key === 'medium');
   check('причина названа', /реестре нет|роутер не подобрал/.test(
-    generic.confidence_capped_reason || ''));
+    bare.confidence_capped_reason || ''));
 }
 
 // --- «Поля нет» без инвентаря: утверждение, которое никто не перепроверит.
