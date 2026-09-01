@@ -1,0 +1,8 @@
+bully_high
+bully_mid
+bully_none
+bully_unknown
+bully_flag
+bully_warn
+bully_lock
+bully_expert

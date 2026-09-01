@@ -79,28 +79,28 @@ label, no watermark, no border, no frame.
 
 | файл | `<ПОЗА>` |
 |---|---|
-| `bulli_ready` | `chin lifted proudly, chest puffed up, wide happy open smile, one front paw raised into the bottom of the frame in a confident presenting gesture` |
-| `bulli_yes` | `one front paw raised into the frame beside the head giving a big thumbs-up, one eye winking, cheerful grin` |
-| `bulli_hmm` | `head tilted to one side, both front paws raised into the bottom of the frame turned palms-up, mouth a small wavy unsure line, eyebrows uneven` |
-| `bulli_noidea` | `eyebrows raised high, mouth slightly open, both front paws spread into the bottom of the frame, one large bold white question mark floating above the cap` |
-| `bulli_done` | `a huge bright green check mark beside the head, as tall as the head itself, eyes closed in a satisfied happy smile` |
-| `bulli_fail` | `a huge bright red cross mark beside the head, as tall as the head itself, ears drooping down, sad apologetic face` |
-| `bulli_search` | `holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression` |
-| `bulli_lock` | `holding a big closed golden padlock up just under the chin in both front paws, stern serious expression, one eyebrow raised` |
-| `bulli_expert` | `head turned slightly to one side, one front paw raised into the frame pointing off to that side, a big bold yellow arrow beside the head pointing the same way, ears perked up high` |
-| `bulli_export` | `holding up beside the head a big simple white spreadsheet sheet with a few thick rows and columns drawn on it, helpful businesslike expression` |
-| `bulli_report` | `a big simple bar chart with three thick bars beside the head, one front paw raised pointing at the tallest bar, explaining expression` |
-| `bulli_broken` | `the cap knocked crooked and sitting askew, dizzy spiral eyes, small white smoke puffs rising above the cap, one big bold red exclamation mark beside the head` |
-| `bulli_hi` | `one front paw raised high beside the head waving hello, big warm open smile, ears perked up` |
-| `bulli_wait` | `holding a big simple steaming mug in both front paws just under the chin, sleepy half-closed eyes, patient bored expression` |
-| `bulli_facepalm` | `one front paw pressed flat over the eyes and muzzle covering the face, ears flat back, exasperated posture` |
-| `bulli_thanks` | `hugging a big bright red heart just under the chin in both front paws, eyes closed, blissful happy smile` |
-| `bulli_nothing` | `holding a big open cardboard box tipped upside down and completely empty beside the head, apologetic shrug, ears slightly down` |
-| `bulli_idea` | `a big glowing yellow light bulb floating above the cap, bright wide eyes, delighted open-mouth expression, one front paw raised into the frame with the pad up` |
+| `bully_ready` | `chin lifted proudly, chest puffed up, wide happy open smile, one front paw raised into the bottom of the frame in a confident presenting gesture` |
+| `bully_yes` | `one front paw raised into the frame beside the head giving a big thumbs-up, one eye winking, cheerful grin` |
+| `bully_hmm` | `head tilted to one side, both front paws raised into the bottom of the frame turned palms-up, mouth a small wavy unsure line, eyebrows uneven` |
+| `bully_noidea` | `eyebrows raised high, mouth slightly open, both front paws spread into the bottom of the frame, one large bold white question mark floating above the cap` |
+| `bully_done` | `a huge bright green check mark beside the head, as tall as the head itself, eyes closed in a satisfied happy smile` |
+| `bully_fail` | `a huge bright red cross mark beside the head, as tall as the head itself, ears drooping down, sad apologetic face` |
+| `bully_search` | `holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression` |
+| `bully_lock` | `holding a big closed golden padlock up just under the chin in both front paws, stern serious expression, one eyebrow raised` |
+| `bully_expert` | `head turned slightly to one side, one front paw raised into the frame pointing off to that side, a big bold yellow arrow beside the head pointing the same way, ears perked up high` |
+| `bully_export` | `holding up beside the head a big simple white spreadsheet sheet with a few thick rows and columns drawn on it, helpful businesslike expression` |
+| `bully_report` | `a big simple bar chart with three thick bars beside the head, one front paw raised pointing at the tallest bar, explaining expression` |
+| `bully_broken` | `the cap knocked crooked and sitting askew, dizzy spiral eyes, small white smoke puffs rising above the cap, one big bold red exclamation mark beside the head` |
+| `bully_hi` | `one front paw raised high beside the head waving hello, big warm open smile, ears perked up` |
+| `bully_wait` | `holding a big simple steaming mug in both front paws just under the chin, sleepy half-closed eyes, patient bored expression` |
+| `bully_facepalm` | `one front paw pressed flat over the eyes and muzzle covering the face, ears flat back, exasperated posture` |
+| `bully_thanks` | `hugging a big bright red heart just under the chin in both front paws, eyes closed, blissful happy smile` |
+| `bully_nothing` | `holding a big open cardboard box tipped upside down and completely empty beside the head, apologetic shrug, ears slightly down` |
+| `bully_idea` | `a big glowing yellow light bulb floating above the cap, bright wide eyes, delighted open-mouth expression, one front paw raised into the frame with the pad up` |
 
 ### Приём, который держит стиль дальше
 
-Первый прогон делать **`bulli_yes`** — поза простая, и по ней сразу видно,
+Первый прогон делать **`bully_yes`** — поза простая, и по ней сразу видно,
 сохранился стиль или нет. Как только один результат устраивает, дальше
 в ТОЙ ЖЕ сессии прикладывать **два** изображения: исходный `bulli-ref.png`
 и этот принятый стикер, с фразой:
@@ -117,7 +117,7 @@ approved reference for this set.
 ### Нарезка
 
 ```
-python3 slice_grid.py bulli_yes.png --cols 1 --rows 1 --names bulli_yes --out out/
+python3 slice_grid.py bully_yes.png --cols 1 --rows 1 --names bully_yes --out out/
 ```
 
 ---
