@@ -51,6 +51,18 @@ function runPlan(routerOutput, registry = REGISTRY, trigger = {}) {
   return new Function('$', '$json', js('Plan'))($, { output: routerOutput })[0].json;
 }
 
+// --- Trace: прогон узла трассировки. `present` — узлы, которые ОТРАБОТАЛИ;
+// на всех остальных $() бросает, ровно как n8n на невыполненной ноде. Это
+// и проверяется: «не запускался» узел обязан отличать от «отработал пусто».
+function runTrace(present) {
+  const $ = (name) => {
+    if (!(name in present)) throw new Error('node not executed: ' + name);
+    const items = [{ json: present[name] }];
+    return { first: () => items[0], all: () => items };
+  };
+  return new Function('$', '$json', js('Trace'))($, {})[0].json;
+}
+
 // --- Build materials: articles === null означает, что ветка чтения не
 // выполнялась и $() должна бросить — ровно так ведёт себя n8n.
 // dd — массив результатов DD Lookup, по одному на объект (Split DD + вызов
@@ -106,6 +118,84 @@ line('1. МАСТЕРА ДОМЕНА добираются кодом, а не п
     p.files.indexOf('kb/tables/mdm-employee-structure-d.md')
       < p.files.indexOf('kb/metrics/active-headcount.md'));
   check('добор мастеров виден в отчёте', p.added_masters.length === 3);
+}
+
+// ====================================================================== 1а0
+line('1а0. ВОЗВРАТ ЯДРА: «Final answer» обязан остаться последним узлом');
+{
+  // Сабворкфлоу отдаёт данные ПОСЛЕДНЕГО узла. Любая нода после финала
+  // подменит собой ответ ядра, и адаптеры получат её выход вместо черновика —
+  // тот же довод, по которому Ingest зовёт адаптер, а не ядро. Трассировка
+  // поэтому стоит В РАЗРЫВЕ перед финалом, и это надо держать проверкой:
+  // поломка тихая, флоу останется зелёным, а в канал уедет отчёт.
+  const after = core.connections['Final answer'];
+  const targets = ((after && after.main) || []).flatMap((b) => (b || []).map((t) => t.node));
+  check(`после «Final answer» никого нет${targets.length ? ': ' + targets.join(', ') : ''}`,
+    targets.length === 0);
+  // И обратное: трассировка обязана быть НА пути к финалу, иначе она
+  // просто не выполнится и отчёта не будет вовсе.
+  check('«Trace» ведёт в «Final answer»',
+    core.connections['Trace'].main[0][0].node === 'Final answer');
+}
+
+// ====================================================================== 1а
+line('1а. ТРАССИРОВКА: один текст вместо шести открытых нод');
+{
+  // Прогон, похожий на промах 01.09: роутер промолчал, витрину добрал код,
+  // инвентарь не приехал, проверка значений не запускалась.
+  const t = runTrace({
+    'When called by adapter': { question: 'все сотрудники с инвалидностью', mode: 'dm' },
+    'Plan': {
+      domains: [], router_articles: [], dd: [], router_empty_plan: true,
+      added_masters: [], added_default_mart: ['t-emp-structure'],
+      is_export: false, is_query_help: false, router_raw: '{"domains":[]}',
+    },
+    'Collect articles': { articles_failed: [] },
+    'Build materials': { has_materials: true, masters_only: true,
+                         tables_no_meta: ['urn:dd:tables:greenplum:table:emart.x'] },
+    'Parse answer': { confidence_key: 'medium', confidence_capped: true,
+                      confidence_capped_reason: 'совпадений в реестре нет' },
+  }).trace;
+  console.log(t);
+
+  check('роутер назван промолчавшим', /РОУТЕР НЕ ДАЛ НИЧЕГО: да/.test(t));
+  check('видно, что витрину добрал код', /витрина по умолчанию: t-emp-structure/.test(t));
+  // Главное свойство: узел, который НЕ ВЫПОЛНЯЛСЯ, отличается от отработавшего
+  // пусто. Без этого «проверки не было» и «проверка ничего не нашла»
+  // по отчёту неразличимы — а это разные поломки.
+  check('невыполненные узлы названы невыполненными',
+    /Ask pairs.*НЕ ЗАПУСКАЛСЯ/.test(t) && /Check result.*НЕ ЗАПУСКАЛСЯ/.test(t));
+  check('витрина без инвентаря названа', /ВИТРИНА БЕЗ ИНВЕНТАРЯ ПОЛЕЙ/.test(t));
+  check('итог перечисляет поломки',
+    /ИТОГ: что не отработало/.test(t) &&
+    /роутер не дал ни домена, ни статьи/.test(t) &&
+    /витрина прочитана без инвентаря полей/.test(t));
+}
+
+// ====================================================================== 1а2
+line('1а2. ТРАССИРОВКА: чистый прогон — итог пустой, и это видно');
+{
+  const t = runTrace({
+    'When called by adapter': { question: 'сколько людей в юните', mode: 'channel' },
+    'Plan': { domains: ['headcount'], router_articles: ['t-emp-structure'],
+              dd: [{ urn: 'urn:dd:x' }], router_empty_plan: false,
+              added_masters: ['m-legal-headcount'], added_default_mart: [],
+              is_export: true },
+    'Collect articles': { articles_failed: [] },
+    'Build materials': { has_materials: true, tables_no_meta: [] },
+    'Parse answer': { confidence_key: 'high' },
+    'Check result': { check_rows: 12, check_exact: 3, check_fields: ['x.y'] },
+  }).trace;
+  check('поломок не найдено', /всё отработало штатно/.test(t));
+  check('сверка значений показана', /строк найдено: 12/.test(t));
+}
+
+// Узел не имеет права уронить прогон: диагностика важнее не бывает ответа.
+line('1а3. ТРАССИРОВКА: не падает, когда не выполнялся вообще никто');
+{
+  const t = runTrace({}).trace;
+  check('отчёт всё равно собрался', typeof t === 'string' && t.length > 0);
+  check('и это не аварийный текст', !/Трассировка не собралась/.test(t));
 }
 
 // ====================================================================== 1б

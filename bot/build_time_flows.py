@@ -10,6 +10,11 @@
   Support Bot Core.json      — КОНВЕЙЕР: роутер → чтение статей и DD → автор.
                                Вызывается по id, вход { question, mode },
                                выход — разобранная структура.
+                               Узел «Trace» перед финалом собирает весь прогон
+                               в один markdown: что выбрал роутер, что добрал
+                               код, что реально доехало до автора и какие узлы
+                               не запускались. Для разбора кейса: открыть
+                               Execution → «Trace» → скопировать поле trace.
   Adapter Channel.json       — слушает hr-report-ask, пишет черновик в stonis_hakcs_2.
   Adapter Chat.json          — chatTrigger для ручного тестирования.
   Adapter DM.json            — личка с ботом, ответ в тот же диалог.
@@ -4983,6 +4988,169 @@ core_nodes.append(
 # Адаптеры при этом не упали бы: они читают поля, которых там просто нет,
 # и в канал уехал бы пустой черновик. Ровно тот тихий отказ, от которого
 # защищена вся остальная конструкция.
+# ---------------------------------------------------- трассировка прогона
+#
+# ОДИН ТЕКСТ, КОТОРЫЙ МОЖНО СКОПИРОВАТЬ ЦЕЛИКОМ.
+#
+# Диагностики в ядре и так много: «Plan» отдаёт 38 полей, «Build materials»
+# знает, что реально доехало до автора, «Check result» — чем кончилась
+# проверка значений. Беда в том, что она размазана по узлам: чтобы понять
+# один прогон, нужно открыть шесть нод и сложить их в голове. Разбор кейса
+# упирался не в нехватку данных, а в их сборку.
+#
+# Узел ничего не считает заново — он только собирает уже посчитанное
+# в один markdown. Поэтому он не может разойтись с поведением флоу:
+# разойтись не с чем.
+#
+# ПЕРЕД «Final answer», А НЕ ПОСЛЕ. Сабворкфлоу возвращает данные ПОСЛЕДНЕГО
+# узла: трассировка после финала подменила бы собой ответ ядра, и адаптеры
+# получили бы отчёт вместо черновика. Это тот же довод, по которому Ingest
+# зовёт адаптер, а не ядро. Поэтому узел стоит в разрыве перед финалом
+# и пропускает вход через себя нетронутым.
+#
+# УЗЕЛ НЕ ИМЕЕТ ПРАВА УПАСТЬ. Диагностика, роняющая прогон, хуже её
+# отсутствия: обращение осталось бы без ответа ради красивого отчёта.
+# Поэтому каждое чтение чужого узла обёрнуто, а сам рендер — в try.
+TRACE_JS = r"""
+const stage = (name) => {
+  try {
+    const items = $(name).all();
+    return { ran: true, j: (items[0] && items[0].json) || {}, n: items.length };
+  } catch (e) {
+    // $() бросает у узла, который НЕ ВЫПОЛНЯЛСЯ. Это не ошибка, а сам ответ
+    // на вопрос «что не отработало»: ветка не пошла, IF увёл мимо.
+    return { ran: false, j: {}, n: 0 };
+  }
+};
+const arr = (v) => (Array.isArray(v) ? v : []);
+const list = (v) => (arr(v).length ? arr(v).join(', ') : '—');
+const yn = (v) => (v ? 'да' : 'нет');
+const cut = (v, n) => {
+  const t = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  return !t ? '—' : (t.length > n ? t.slice(0, n) + '… (+' + (t.length - n) + ')' : t);
+};
+
+let text = '';
+try {
+  const trig = stage('When called by adapter');
+  const reg  = stage('Decode registry');
+  const plan = stage('Plan');
+  const coll = stage('Collect articles');
+  const mat  = stage('Build materials');
+  const pa   = stage('Parse answer');
+  const chk  = stage('Check result');
+  const rev  = stage('Parse revised');
+  const ddl  = stage('Call DD Lookup');
+  const lk   = stage('Lookup result');
+  const ask  = stage('Parse pairs');
+
+  const P = plan.j, M = mat.j, A = pa.j, C = chk.j;
+  const L = [];
+  const h = (t) => { L.push(''); L.push('## ' + t); };
+  const kv = (k, v) => L.push('- ' + k + ': ' + v);
+
+  L.push('# Трассировка прогона ядра');
+  L.push('');
+  kv('вопрос', cut(trig.j.question, 300));
+  kv('режим', (trig.j.mode || '—') + ' · тема формы: ' + cut(P.topic_kind_used || trig.j.topic_kind, 80));
+
+  h('1. Роутер — что ОН выбрал сам');
+  if (P.registry_error) kv('РЕЕСТР НЕ ПРОЧИТАН', String(P.registry_error));
+  if (P.router_error) kv('ОШИБКА РОУТЕРА', String(P.router_error));
+  kv('домены', list(P.domains));
+  kv('статьи', list(P.router_articles));
+  kv('метаданные (URN)', list(arr(P.dd).map((d) => (d && d.urn) || d)));
+  kv('реплика без вопроса', yn(P.no_question));
+  kv('РОУТЕР НЕ ДАЛ НИЧЕГО', yn(P.router_empty_plan));
+  if (arr(P.articles_invented).length) kv('придумал путей', list(P.articles_invented));
+  if (arr(P.articles_recovered).length) kv('путь восстановлен по реестру', list(P.articles_recovered));
+  kv('сырой ответ роутера', cut(P.router_raw, 400));
+
+  h('2. Что добрал КОД (роутер об этом не просил)');
+  kv('мастера домена', list(P.added_masters));
+  kv('витрина по умолчанию', list(P.added_default_mart));
+  kv('плейбук выгрузки', list(P.added_export));
+  kv('конвенции SQL', list(P.added_query));
+  kv('активная численность', list(P.added_headcount));
+  kv('словарь синонимов', list(P.added_synonyms));
+  kv('рецепт юнита', list(P.added_unit));
+  kv('ссылка на юнит', list(P.added_unit_link));
+  kv('маршрутизация', list(P.added_access));
+  kv('метаданные добраны кодом', list(P.dd_added_by_code));
+
+  h('3. Гейты — почему код добирал именно это');
+  kv('выгрузка', yn(P.is_export));
+  kv('просьба про запрос', yn(P.is_query_help));
+  kv('вопрос про доступ', yn(P.is_access));
+  kv('вопрос про подразделение', yn(P.is_unit_question));
+  kv('ссылка на юнит', P.unit_link ? (P.unit_link_kind + ' ' + P.unit_link_id) : 'нет');
+
+  h('4. Что РЕАЛЬНО доехало до автора');
+  kv('статей прочитано', arr(M.router_picked).length || arr(P.tables_read).length || '—');
+  kv('только мастера, совпадений нет', yn(M.masters_only));
+  kv('материалы непустые', yn(M.has_materials));
+  if (arr(coll.j.articles_failed).length) kv('НЕ ПРОЧИТАЛОСЬ', list(coll.j.articles_failed));
+  if (arr(P.dropped).length) kv('срезано потолком статей', list(P.dropped));
+  if (arr(P.dd_dropped).length) kv('срезано потолком метаданных', list(P.dd_dropped));
+  if (arr(M.tables_no_meta).length) kv('ВИТРИНА БЕЗ ИНВЕНТАРЯ ПОЛЕЙ', list(M.tables_no_meta));
+
+  h('5. Узлы — что отработало, а что не запускалось');
+  const st = (name, s2) => L.push('- ' + name + ': ' +
+    (s2.ran ? ('отработал, элементов ' + s2.n) : 'НЕ ЗАПУСКАЛСЯ'));
+  st('Call DD Lookup (метаданные)', ddl);
+  st('Lookup result', lk);
+  st('Check values → Check result (сверка значений)', chk);
+  st('Ask pairs → Parse pairs (доспрос)', ask);
+  st('Parse revised (второй проход автора)', rev);
+
+  h('6. Сверка значений в Trino');
+  if (!chk.ran) {
+    kv('не выполнялась', 'проверять было нечего либо гейт не пустил');
+  } else {
+    kv('строк найдено', C.check_rows == null ? '—' : C.check_rows);
+    kv('точных совпадений', C.check_exact == null ? '—' : C.check_exact);
+    kv('поля', list(C.check_fields));
+    if (C.check_failed) kv('ЗАПРОС УПАЛ', cut(C.check_failed, 300));
+  }
+
+  h('7. Ответ');
+  kv('уверенность заявлена', A.confidence_claimed || A.confidence || '—');
+  kv('уверенность действующая', A.confidence_key || '—');
+  if (A.confidence_capped) kv('ПОНИЖЕНА КОДОМ', cut(A.confidence_capped_reason, 300));
+  if (A.parse_error) kv('ОШИБКА РАЗБОРА ОТВЕТА', cut(A.parse_error, 300));
+  if (A.gaps) kv('чего не хватило', cut(A.gaps, 300));
+  kv('второй проход', yn(rev.ran));
+
+  // САМОЕ ЧИТАЕМОЕ — В КОНЕЦ. Всё, что выше, это данные; здесь список того,
+  // что пошло не так, одним взглядом. Пустой список — тоже ответ.
+  h('8. ИТОГ: что не отработало');
+  const bad = [];
+  if (P.registry_error) bad.push('реестр не прочитан');
+  if (P.router_error) bad.push('роутер ответил ошибкой');
+  if (P.router_empty_plan) bad.push('роутер не дал ни домена, ни статьи');
+  if (arr(P.articles_invented).length) bad.push('роутер придумал путь к статье');
+  if (arr(coll.j.articles_failed).length) bad.push('статья не прочиталась');
+  if (arr(P.dropped).length) bad.push('статьи срезаны потолком');
+  if (arr(P.dd_dropped).length) bad.push('метаданные срезаны потолком');
+  if (arr(M.tables_no_meta).length) bad.push('витрина прочитана без инвентаря полей');
+  if (!M.has_materials) bad.push('материалы пустые — автору читать было нечего');
+  if (C.check_failed) bad.push('проверочный запрос упал');
+  if (A.parse_error) bad.push('ответ автора не разобрался');
+  if (A.confidence_capped) bad.push('уверенность понижена кодом');
+  L.push(bad.length ? bad.map((b) => '- ' + b).join('\n') : '- всё отработало штатно');
+
+  text = L.join('\n');
+} catch (e) {
+  // Отчёт не собрался — это не повод ронять ответ на обращение.
+  text = 'Трассировка не собралась: ' + String(e && e.message ? e.message : e);
+}
+
+// Вход проходит НАСКВОЗЬ: «Final answer» стоит следом и читает свои узлы
+// по имени, но подменять ему вход трассировкой всё равно нельзя.
+return [{ json: { ...$json, trace: text } }];
+"""
+
+
 FINAL_ANSWER_JS = DRAFT_PAIRS_JS + r"""
 // Ответ второго прохода, если он был, иначе первого. Обе ветви
 // взаимоисключающие, поэтому узел выполняется один раз.
@@ -5605,7 +5773,8 @@ core_nodes += [
     }),
     llm("Revise model", [2680, 440]),
     node("Parse revised", "n8n-nodes-base.code", 2, [2860, 220], {"jsCode": PARSE_JS}),
-    node("Final answer", "n8n-nodes-base.code", 2, [3040, 300],
+    node("Trace", "n8n-nodes-base.code", 2, [3040, 300], {"jsCode": TRACE_JS}),
+    node("Final answer", "n8n-nodes-base.code", 2, [3220, 300],
          {"jsCode": FINAL_ANSWER_JS}),
 ]
 
@@ -5691,18 +5860,21 @@ core_conn["Need check"] = {"main": [
 # бы счётчик итераций, от которого ушли вместе с tool-loop.
 core_conn["Need retry"] = {"main": [
     [{"node": "Ask pairs", "type": "main", "index": 0}],
-    [{"node": "Final answer", "type": "main", "index": 0}],
+    [{"node": "Trace", "type": "main", "index": 0}],
 ]}
 core_conn.update(chain("Ask pairs", "Parse pairs", "Retry check SQL",
                        "Need check after ask"))
 core_conn["Need check after ask"] = {"main": [
     [{"node": "Check values", "type": "main", "index": 0}],
-    [{"node": "Final answer", "type": "main", "index": 0}],
+    [{"node": "Trace", "type": "main", "index": 0}],
 ]}
 core_conn["Ask model"] = {"ai_languageModel": [
     [{"node": "Ask pairs", "type": "ai_languageModel", "index": 0}]]}
 core_conn.update(chain("Check values", "Check result", "Revise draft",
-                       "Parse revised", "Final answer"))
+                       "Parse revised", "Trace"))
+# Трассировка стоит В РАЗРЫВЕ перед финалом на ВСЕХ трёх путях: сабворкфлоу
+# возвращает данные последнего узла, и «Final answer» обязан остаться им.
+core_conn.update(chain("Trace", "Final answer"))
 core_conn["Revise model"] = {"ai_languageModel": [
     [{"node": "Revise draft", "type": "ai_languageModel", "index": 0}]
 ]}
