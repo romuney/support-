@@ -99,9 +99,13 @@ line('1. МАСТЕРА ДОМЕНА добираются кодом, а не п
   // Роутер назвал домен и одну узкую статью. Мастера headcount —
   // t-emp-structure, m-legal-headcount, rc-structure-choice — код обязан
   // добавить сам, иначе основание неполное.
+  // Статья роутера — та, которую код НЕ добирает сам. `m-active-headcount`
+  // на эту роль больше не годится: с 01.09 она едет на каждом вопросе
+  // как умолчание по фильтру активности, и «пришла от роутера» с «добрал код»
+  // на ней стало неразличимо.
   const p = runPlan(JSON.stringify({
     domains: ['headcount'],
-    articles: ['kb/metrics/active-headcount.md'],
+    articles: ['kb/metrics/turnover.md'],
     dd_urn: '',
     field_hint: '',
     no_question: false,
@@ -112,11 +116,10 @@ line('1. МАСТЕРА ДОМЕНА добираются кодом, а не п
     p.files.includes('kb/metrics/legal-headcount.md'));
   check('мастер rc-structure-choice добавлен',
     p.files.includes('kb/recipes/structure-choice.md'));
-  check('статья роутера сохранена',
-    p.files.includes('kb/metrics/active-headcount.md'));
+  check('статья роутера сохранена', p.files.includes('kb/metrics/turnover.md'));
   check('мастера идут ПЕРЕД статьёй роутера',
     p.files.indexOf('kb/tables/mdm-employee-structure-d.md')
-      < p.files.indexOf('kb/metrics/active-headcount.md'));
+      < p.files.indexOf('kb/metrics/turnover.md'));
   check('добор мастеров виден в отчёте', p.added_masters.length === 3);
 }
 
@@ -136,6 +139,38 @@ line('1а0. ВОЗВРАТ ЯДРА: «Final answer» обязан остать�
   // просто не выполнится и отчёта не будет вовсе.
   check('«Trace» ведёт в «Final answer»',
     core.connections['Trace'].main[0][0].node === 'Final answer');
+}
+
+// ====================================================================== 1а=
+line('1а=. СЛОВАРЬ И ФИЛЬТР АКТИВНОСТИ доезжают до ЛИЧКИ');
+{
+  // Обе статьи добирались кодом на гейте `isQueryHelp || isExport`. В личке
+  // формы нет, тема пустая, isExport ложно — гейт не срабатывал НИ РАЗУ.
+  //
+  // Для словаря это особенно едко: правило написано ПОТОМУ ЧТО «в личке
+  // словаря не оказалось вовсе» и «HQ» ушло искаться среди названий
+  // управленческих подразделений. Починку посадили на гейт, который в личке
+  // не работает, и петля осталась незакрытой.
+  //
+  // Активная численность названа «умолчанием для ЛЮБОГО запроса
+  // по сотрудникам»: витрина хранит и уволенных, запрос без фильтра вернёт
+  // правдоподобное и завышенное число.
+  const p = runPlan(JSON.stringify({
+    domains: [], articles: [], dd_urn: '', field_hint: '', no_question: false,
+  }), REGISTRY, { question: 'все сотрудники с инвалидностью', mode: 'dm' });
+  check('словарь синонимов доехал без формы',
+    p.files.includes('kb/recipes/field-synonyms.md'));
+  check('фильтр активности доехал без формы',
+    p.files.includes('kb/metrics/active-headcount.md'));
+  check('и обе названы добранными кодом',
+    p.added_synonyms.includes('rc-field-synonyms') &&
+    p.added_headcount.includes('m-active-headcount'));
+
+  // На реплике без вопроса — не добираются: отвечать нечего.
+  const q = runPlan(JSON.stringify({
+    domains: [], articles: [], dd_urn: '', field_hint: '', no_question: true,
+  }), REGISTRY, { question: 'спасибо', mode: 'dm' });
+  check('на «спасибо» ничего не добирается', q.files.length === 0);
 }
 
 // ====================================================================== 1а-
