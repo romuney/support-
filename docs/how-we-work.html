@@ -500,7 +500,7 @@
 <div class="wrap">
 
   <header class="hero">
-    <p class="kicker">Инструкция для двоих · 3 августа 2026</p>
+    <p class="kicker">Инструкция для двоих · база знаний поддержки</p>
     <h1>Как мы ведём базу знаний поддержки</h1>
     <p class="lede">
       Что делает Серёга каждый день, что делаешь ты раз в неделю, что собирается само
@@ -519,7 +519,7 @@
         <li><a href="#s6">Запрос на выгрузку</a></li>
         <li><a href="#s7">Пятница, 30 минут</a></li>
         <li><a href="#s8">Где здесь агент</a></li>
-        <li><a href="#s9">Сейчас там примеры</a></li>
+        <li><a href="#s9">С чего начать наполнение</a></li>
         <li><a href="#s10">Первая неделя</a></li>
       </ol>
     </nav>
@@ -605,22 +605,40 @@
             <td>Пару раз в неделю</td>
           </tr>
           <tr>
-            <td><span class="path">kb/curated/</span></td>
+            <td><span class="path">kb/index.md</span></td>
             <td><span class="chip c-lead">Ты</span></td>
-            <td>Проверенные статьи. <strong>Только этим агент и отвечает</strong></td>
+            <td>Реестр всех статей. <strong>Агент читает его первым</strong>. Правится руками</td>
+            <td>С каждой новой статьёй</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/metrics/</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>По файлу на метрику: определение, формула, расхождения</td>
             <td>По пятницам</td>
           </tr>
           <tr>
-            <td><span class="path">kb/derived/</span></td>
-            <td><span class="chip c-bot">Бот</span></td>
-            <td>Каталог отчётов, глоссарий, пробелы, кластеры</td>
-            <td>Каждую ночь, само</td>
+            <td><span class="path">kb/reports/</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>По файлу на отчёт: где открыть, что внутри, ограничения</td>
+            <td>По пятницам</td>
           </tr>
           <tr>
-            <td><span class="path">kb/proposals/</span></td>
-            <td><span class="chip c-bot">Бот</span></td>
-            <td>Черновики статей — бот заметил повтор и предложил</td>
-            <td>Когда заметит</td>
+            <td><span class="path">kb/tables/</span></td>
+            <td><span class="chip c-lead">Владелец витрины</span></td>
+            <td>По файлу на таблицу: гранулярность, ключи, ПДн</td>
+            <td>По пятницам</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/recipes/</span></td>
+            <td><span class="chip c-lead">Владелец витрины</span></td>
+            <td>Как связывать таблицы и считать типовое, чтобы не задвоить</td>
+            <td>По пятницам</td>
+          </tr>
+          <tr>
+            <td><span class="path">kb/process/</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>Плейбуки и регламенты: выгрузка, маршрутизация, ПДн</td>
+            <td>Почти никогда</td>
           </tr>
           <tr>
             <td><span class="path">templates/</span></td>
@@ -641,11 +659,11 @@
     <div class="note note-stop">
       <span class="note-label">Запомнить дословно</span>
       <p>
-        <strong>Руками пишутся ровно три папки:</strong> <span class="path">cases/</span>
-        и <span class="path">exports/</span> — Серёга, <span class="path">kb/curated/</span> — ты.
-        Всё остальное трогать не надо. Особенно <span class="path">kb/derived/</span>:
-        она пересобирается целиком поверх, любая ручная правка там просто исчезнет
-        на следующую ночь.
+        <strong>Одна сущность — один файл.</strong> Одна метрика, один отчёт, одна
+        таблица — отдельный файл в своей папке. Не «статья про численность и текучесть»:
+        агент отдаёт файл целиком, и на вопрос про одну метрику ему приедет определение
+        второй. <strong>Завёл статью — впиши строку в <span class="path">kb/index.md</span></strong>,
+        тем же коммитом. Статьи, которой нет в реестре, для агента не существует.
       </p>
     </div>
   </section>
@@ -679,33 +697,35 @@
       </div>
       <div class="pipe-arrow" aria-hidden="true">↓</div>
 
-      <div class="pipe-row is-auto">
-        <div class="pipe-what">kb/derived/<span class="sub">само, ночью</span></div>
+      <div class="pipe-row is-lead">
+        <div class="pipe-what">Разбор по пятницам<span class="sub">руками, ты</span></div>
         <div class="pipe-desc">
-          Скрипт читает все кейсы и пересобирает пять сводок: какие есть отчёты,
-          какие термины вызывают споры, какие выгрузки уже делали,
-          <strong>чего в базе не хватает</strong> и какие темы повторяются.
-          Никто это не пишет — оно выводится.
-        </div>
-      </div>
-      <div class="pipe-arrow" aria-hidden="true">↓</div>
-
-      <div class="pipe-row is-auto">
-        <div class="pipe-what">kb/proposals/<span class="sub">само, при повторе</span></div>
-        <div class="pipe-desc">
-          Тема всплыла третий раз — бот собирает черновик статьи и складывает сюда.
-          Со ссылками на конкретные кейсы, чтобы было видно, откуда что взято.
-          <strong>Черновик, не статья.</strong>
+          Смотрим, про что спрашивали на этой неделе, и какие <strong>сущности</strong>
+          за этим стоят: метрика, отчёт, таблица, способ связать таблицы.
+          Тема всплыла третий раз — заводим статью. Решение принимается здесь,
+          текст пишется после.
         </div>
       </div>
       <div class="pipe-arrow" aria-hidden="true">↓</div>
 
       <div class="pipe-row is-lead">
-        <div class="pipe-what">kb/curated/<span class="sub">руками, ты, по пятницам</span></div>
+        <div class="pipe-what">kb/metrics/ · reports/ · tables/ · recipes/<span class="sub">руками, ты, по пятницам</span></div>
         <div class="pipe-desc">
-          Ты берёшь черновик, проверяешь определение с методологией и переносишь сюда.
-          <strong>Это и есть «база знаний» в узком смысле — то единственное, чем агент
-          имеет право отвечать.</strong> Всё, что выше, — конвейер для наполнения этой папки.
+          Копируешь болванку своего типа из <span class="path">templates/</span>,
+          проверяешь определение с методологией, заполняешь.
+          <strong>Один файл — одна сущность.</strong> Это и есть «база знаний» в узком
+          смысле — то единственное, чем агент имеет право отвечать.
+        </div>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">↓</div>
+
+      <div class="pipe-row is-lead">
+        <div class="pipe-what">kb/index.md<span class="sub">руками, тем же коммитом</span></div>
+        <div class="pipe-desc">
+          Строка в реестре: <span class="path">id</span>, тип, название, путь,
+          <strong>алиасы</strong> и краткое описание. Алиасы — то, как о сущности
+          спрашивают на самом деле: «текучка», «сколько людей».
+          <strong>Без этой строки статья для агента не существует.</strong>
         </div>
       </div>
       <div class="pipe-arrow" aria-hidden="true">↓</div>
@@ -713,10 +733,10 @@
       <div class="pipe-row is-out">
         <div class="pipe-what">Агент<span class="sub">выход</span></div>
         <div class="pipe-desc">
-          Читает <span class="path">kb/curated/</span> и <span class="path">kb/derived/</span>
-          целиком, кейсы — как примеры. Готовит Серёге черновик ответа.
-          Нет ответа в <span class="path">curated/</span> — говорит «не знаю» и дописывает
-          строку в список пробелов. Круг замкнулся.
+          Читает <span class="path">kb/index.md</span>, по алиасам находит нужные
+          <span class="path">id</span> и подтягивает только эти статьи. Готовит Серёге
+          черновик ответа. Нет статьи — говорит «не знаю» и называет, чего не хватает.
+          Круг замкнулся.
         </div>
       </div>
     </div>
@@ -724,9 +744,9 @@
     <div class="note note-lead">
       <span class="note-label">Если запомнить одно предложение</span>
       <p>
-        <strong>Серёга наполняет сырьё, машина превращает сырьё в сводки, ты превращаешь
-        сводки в статьи, агент отвечает статьями.</strong> Никто не пишет статью сразу —
-        именно поэтому статей мало и они верные.
+        <strong>Серёга наполняет сырьё, ты по пятницам превращаешь сырьё в статьи,
+        агент отвечает статьями.</strong> Никто не пишет статью сразу, с первого
+        обращения — именно поэтому статей мало и они верные.
       </p>
     </div>
 
@@ -734,7 +754,7 @@
     <div class="prose">
       <p>
         Это самый частый вопрос, и ответ не про недоверие. Статья в
-        <span class="path">kb/curated/</span> — это утверждение вида «срок закрытия вакансии
+        <span class="path">kb/</span> — это утверждение вида «срок закрытия вакансии
         считается вот так». Такое утверждение может подтвердить только методология или
         владелец витрины. Джун, написавший статью по итогам одного разговора, зафиксирует
         в базе своё понимание — и агент будет уверенно повторять его всем.
@@ -813,8 +833,8 @@
       <p>Один раз склонировать себе папку:</p>
     </div>
 
-<pre><code>git clone https://github.com/romuney/support-.git
-cd support-</code></pre>
+<pre><code>git clone &lt;адрес репозитория&gt;
+cd &lt;папка репозитория&gt;</code></pre>
 
     <div class="prose"><p>Дальше каждый день — четыре команды, всегда одни и те же:</p></div>
 
@@ -850,14 +870,12 @@ git push origin main</code></pre>
       </p>
     </div>
 
-    <div class="note note-stop">
-      <span class="note-label">Сначала влить то, что уже сделано</span>
+    <div class="note note-lead">
+      <span class="note-label">Самый первый раз</span>
       <p>
-        Готовая структура сейчас лежит в ветке
-        <span class="path">claude/support-kb-repository-b3vl9q</span>, а не в
-        <code>main</code>. Открой её на GitHub, нажми <strong>Compare &amp; pull request</strong>,
-        потом <strong>Merge</strong>. После этого <code>main</code> станет рабочим,
-        и дальше все пишут туда.
+        Если репозиторий только что создан и в нём ещё ничего нет — структуру нужно
+        один раз залить в <code>main</code>. Дальше все пишут прямо туда, и больше
+        к этому возвращаться не придётся.
       </p>
     </div>
 
@@ -1081,11 +1099,21 @@ git push origin main</code></pre>
     </ol>
 
     <div class="prose">
+      <p>Папка выгрузки — всегда четыре файла:</p>
+      <ul class="plain">
+        <li><span class="path">README.md</span> — запрос дословно, гранулярность одним
+          предложением и раздел <strong>«Что выяснилось при уточнении»</strong></li>
+        <li><span class="path">fields.md</span> — таблица полей плюс блок
+          <strong>«что просили, но не включили и почему»</strong></li>
+        <li><span class="path">query.sql</span> — запрос с параметрами периода
+          и тремя проверками внизу</li>
+        <li><span class="path">result.md</span> — прогон проверок, сверка,
+          обратная связь заказчика</li>
+      </ul>
       <p>
-        Живой пример по всем шести шагам уже лежит в репозитории:
-        <span class="path">exports/2026-07-30-recruitment-funnel-q2/</span>. Открой и посмотри,
-        как выглядит заполненный разбор уточнений — там пять пунктов, где формулировка
-        заказчика разошлась с тем, что было нужно.
+        Если в разделе «Что выяснилось» меньше трёх пунктов — уточнения по-настоящему
+        не было. Почти в каждом запросе есть минимум три места, где формулировка
+        заказчика расходится с тем, что ему нужно.
       </p>
     </div>
   </section>
@@ -1108,32 +1136,33 @@ git push origin main</code></pre>
 
     <ol class="steps">
       <li class="step">
-        <p class="step-title">Разобрать черновики — 15 минут</p>
+        <p class="step-title">Решить, какие статьи заводим — 15 минут</p>
         <p>
-          Смотрим <span class="path">kb/proposals/</span>. По каждому черновику одно
-          из трёх: смёржить в <span class="path">kb/curated/</span>, вернуть на доработку,
-          закрыть как неактуальный.
+          Смотрим темы недели по кейсам и раскладываем их на сущности: это метрика,
+          это отчёт, это таблица, это способ их связать. По каждой — кто владелец
+          и кто подтверждает определение.
         </p>
         <p>
-          <strong>Правило: тема, всплывшая третий раз, переносится в статью на этой же
-          встрече.</strong> Не «возьмём в работу» — переносится. Если некому подтвердить
-          определение, переносим с пометкой «черновик» и фамилией ответственного за подтверждение.
+          <strong>Правило: тема, всплывшая третий раз, получает статью на этой же
+          встрече.</strong> Не «возьмём в работу» — заводится файл. Если некому подтвердить
+          определение, заводим со <code>status: draft</code> и фамилией ответственного
+          за подтверждение. Каждая новая статья — строка в <span class="path">kb/index.md</span>.
         </p>
       </li>
       <li class="step">
         <p class="step-title">Посмотреть пробелы — 10 минут</p>
         <p>
-          <span class="path">kb/derived/gaps.md</span>: что закрылось, что накопило обращений,
-          кому напомнить. Сейчас там девять открытых пробелов, и первый уже стоил нам
-          почти четырёх часов.
+          Темы, по которым обращения были, а статьи нет: что закрылось, что накопило
+          обращений, кому напомнить. Первым закрываем тот пробел, который набрал больше
+          одного обращения, — он уже доказал, что стоит нам времени.
         </p>
       </li>
       <li class="step">
         <p class="step-title">Посмотреть метрику — 5 минут</p>
         <p>
-          Покрытие из <span class="path">kb/derived/clusters.md</span> — доля обращений,
-          на которые агент ответил бы сам. Не выросло — разбираемся почему: база
-          не пополнилась или обращения ушли в новые темы.
+          Покрытие — доля обращений, на которые агент ответил бы сам. Считаем по журналу
+          обращений за неделю. Не выросло — разбираемся почему: база не пополнилась
+          или обращения ушли в новые темы.
         </p>
       </li>
     </ol>
@@ -1181,20 +1210,21 @@ git push origin main</code></pre>
         </p>
       </div>
       <div class="card">
-        <p class="card-title"><span class="chip c-bot">Флоу 3</span> Ночная пересборка</p>
+        <p class="card-title"><span class="chip c-bot">Как он ищет</span> Через реестр</p>
         <p>
-          По расписанию читает <span class="path">cases/</span> и
-          <span class="path">exports/</span>, пересобирает все пять сводок в
-          <span class="path">kb/derived/</span>, при третьем повторе создаёт черновик.
-          Коммитит от своего имени.
+          Сначала читает <span class="path">kb/index.md</span> целиком — он для этого
+          и сделан компактным. По алиасам находит нужные <span class="path">id</span>
+          и подтягивает только эти файлы, а не всю базу.
         </p>
+        <p><strong><span class="path">cases/</span> в контекст не подаётся</strong> — это архив.</p>
       </div>
       <div class="card">
         <p class="card-title">Правила, по которым он живёт</p>
         <p>
-          Отвечает <strong>только</strong> из <span class="path">kb/curated/</span>.
-          Нет ответа — говорит «не знаю» и пишет строку в пробелы. Цифры не выдумывает:
-          у каждой должна быть ссылка на файл. ПДн не выдаёт никому и никогда.
+          Отвечает <strong>только</strong> из <span class="path">kb/</span>.
+          Нет статьи — говорит «не знаю» и называет, чего не хватает в реестре.
+          Цифры не выдумывает: у каждой должна быть ссылка на файл.
+          ПДн не выдаёт никому и никогда.
         </p>
       </div>
     </div>
@@ -1212,70 +1242,79 @@ git push origin main</code></pre>
   <section id="s9">
     <div class="sec-head">
       <span class="sec-num">09</span>
-      <h2>Сейчас там примеры</h2>
+      <h2>С чего начать наполнение</h2>
     </div>
 
     <div class="prose">
       <p>
-        Всё, что лежит в репозитории сегодня, — <strong>выдуманное наполнение</strong>:
-        пять кейсов, одна выгрузка и сводки, собранные по ним. Оно нужно было, чтобы стало
-        видно, как формат выглядит заполненным. Данные правдоподобные, но ненастоящие.
+        Репозиторий сейчас <strong>пустой по содержанию и готовый по структуре</strong>.
+        Папки, шаблоны и правила на месте, реальных данных нет ни одного байта —
+        и это правильно: выдуманные кейсы засоряют базу и учат агента отвечать
+        тем, чего не было.
       </p>
-      <p>Что с этим делать:</p>
+      <p>Порядок, в котором это оживает:</p>
     </div>
 
     <div class="scroll">
       <table>
         <thead>
-          <tr><th>Что</th><th>Судьба</th></tr>
+          <tr><th>Что</th><th>Кто</th><th>Когда</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><span class="path">templates/</span>, <span class="path">docs/</span>, <span class="path">README</span>, <span class="path">CLAUDE.md</span></td>
-            <td><strong>Оставляем.</strong> Это правила, они настоящие</td>
+            <td>Заменить плейсхолдеры <code>&lt;…&gt;</code> в <span class="path">CLAUDE.md</span> и <span class="path">kb/process/routing.md</span>: настоящие системы, владельцы, SLA</td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>До первого рабочего дня</td>
           </tr>
           <tr>
-            <td><span class="path">kb/curated/</span> — плейбук и маршрутизация</td>
-            <td><strong>Оставляем, но вычитай.</strong> Проверь, что SLA, роли и владельцы систем названы правильно — я их предположил</td>
+            <td>Вычитать <span class="path">kb/process/export-playbook.md</span> — совпадает ли с тем, как мы реально согласуем выгрузки</td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>До первого рабочего дня</td>
           </tr>
           <tr>
-            <td><span class="path">cases/</span> — 5 штук</td>
-            <td><strong>Удалить, когда наберётся 5 настоящих.</strong> До тех пор пусть лежат как образец</td>
+            <td>Первый кейс в <span class="path">cases/</span></td>
+            <td><span class="chip c-junior">Серёга</span></td>
+            <td>Первое же закрытое обращение</td>
           </tr>
           <tr>
-            <td><span class="path">exports/</span> — 1 папка</td>
-            <td>Удалить вместе с кейсами. SQL написан под выдуманные таблицы</td>
+            <td>Первая папка в <span class="path">exports/</span></td>
+            <td><span class="chip c-junior">Серёга</span></td>
+            <td>Первый же запрос на выгрузку</td>
           </tr>
           <tr>
-            <td><span class="path">kb/derived/</span> — 5 файлов</td>
-            <td>Удалятся сами при первой настоящей пересборке. Руками не трогать</td>
+            <td>Первая статья в <span class="path">kb/metrics/</span> + строка в <span class="path">kb/index.md</span></td>
+            <td><span class="chip c-lead">Ты</span></td>
+            <td>Первая пятница, где пробел набрал повтор</td>
           </tr>
           <tr>
-            <td><span class="path">kb/proposals/</span> — 1 черновик</td>
-            <td>Удалить вместе с кейсами, на которые он ссылается</td>
+            <td>Статьи по таблицам и рецептам связывания</td>
+            <td><span class="chip c-lead">Владелец витрины</span></td>
+            <td>Когда появятся отчёты, которые на них ссылаются</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <div class="prose">
-      <p>Когда придёт время — одна команда, одним коммитом:</p>
+    <div class="note note-stop">
+      <span class="note-label">Что означают угловые скобки</span>
+      <p>
+        В <span class="path">CLAUDE.md</span> и <span class="path">kb/process/routing.md</span>
+        названия систем и сроки записаны как <code>&lt;ATS&gt;</code>, <code>&lt;роль&gt;</code>,
+        <code>&lt;N рабочих дней&gt;</code>. Это места, где нужно подставить наши настоящие
+        значения. <strong>Именно из этих двух файлов агент возьмёт картину мира</strong> —
+        неверное название системы здесь обойдётся дороже, чем кажется.
+      </p>
     </div>
 
-<pre><code>git rm -r cases/2026-07-* cases/2026-08-* \
-          exports/2026-07-30-recruitment-funnel-q2 \
-          kb/proposals/2026-08-03-proposal-time-to-hire.md
-git commit -m "убрать демо-наполнение, дальше только реальные обращения"
-git push origin main</code></pre>
-
-    <div class="note">
-      <span class="note-label">Важная деталь про названия</span>
+    <div class="prose">
+      <h3>Пока папки <span class="path">kb/</span> пустые, а в реестре — примеры</h3>
       <p>
-        В примерах я предположил названия систем и дашбордов: E-Staff, 1С:ЗУП, витрина
-        <code>dwh_hr</code>, отчёты «Воронка подбора» и «Численность и движение».
-        Если у нас они называются иначе — <strong>поправь в
-        <span class="path">CLAUDE.md</span> и в <span class="path">kb/curated/routing.md</span></strong>,
-        именно оттуда агент возьмёт картину мира.
+        В <span class="path">kb/metrics/</span>, <span class="path">reports/</span>,
+        <span class="path">tables/</span> и <span class="path">recipes/</span> нет ни одной
+        статьи: там только <code>.gitkeep</code>, чтобы папка попала в git.
+        В <span class="path">kb/index.md</span> лежат четыре строки-примера — они показывают
+        формат записи, файлов по ним ещё нет. Заводя первую настоящую статью, эти строки
+        замени на свою.
       </p>
     </div>
   </section>
@@ -1291,9 +1330,8 @@ git push origin main</code></pre>
       <div class="card">
         <p class="card-title"><span class="chip c-junior">Серёга</span></p>
         <ul class="check">
-          <li>Влить готовую ветку в <code>main</code></li>
           <li>Открыть репозиторий и прочитать <span class="path">README.md</span> целиком — он короткий</li>
-          <li>Посмотреть два примера: любой кейс и папку выгрузки</li>
+          <li>Посмотреть болванки в <span class="path">templates/</span> — по ним всё и заполняется</li>
           <li>Завести первый настоящий кейс сегодня же, даже если криво</li>
           <li>Дальше — кейс на каждое закрытое обращение, в тот же день</li>
           <li>Первый же запрос на выгрузку провести строго по шести шагам</li>
@@ -1303,12 +1341,12 @@ git push origin main</code></pre>
       <div class="card">
         <p class="card-title"><span class="chip c-lead">Ты</span></p>
         <ul class="check">
-          <li>Вычитать <span class="path">kb/curated/</span>: верны ли SLA, роли, владельцы</li>
-          <li>Поправить названия систем и отчётов, если они другие</li>
+          <li>Вписать в <span class="path">kb/process/routing.md</span> настоящие системы, владельцев и SLA</li>
+          <li>Проверить, что плейбук выгрузки соответствует тому, как мы реально работаем</li>
           <li>В среду посмотреть, пишутся ли кейсы вообще</li>
           <li>В пятницу провести первый разбор — 30 минут</li>
-          <li>Закрыть первый пробел: определение срока закрытия вакансии</li>
-          <li>Запросить у владельца витрины таблицу BI-ролей со скоупами</li>
+          <li>Заменить плейсхолдеры <code>&lt;…&gt;</code> в <span class="path">CLAUDE.md</span> и <span class="path">routing.md</span></li>
+          <li>Посмотреть, какой пробел набрался первым, и начать его закрывать</li>
         </ul>
       </div>
     </div>
@@ -1326,16 +1364,16 @@ git push origin main</code></pre>
 
     <div class="prose">
       <p>
-        Цель на конец августа — 45–55 кейсов и покрытие 45%. Сейчас покрытие 20%:
-        из пяти обращений агент уверенно закрыл бы одно. Это нормальная стартовая точка,
-        и растёт она ровно от того, что мы пишем.
+        Цель на конец первого месяца — 45–55 кейсов и покрытие 45%. Сейчас покрытие
+        нулевое: в базе нет ни одного кейса и ни одной статьи, отвечать агенту нечем.
+        Это нормальная стартовая точка, и растёт она ровно от того, что мы пишем.
       </p>
     </div>
   </section>
 
   <footer class="foot">
-    Репозиторий <span class="path">romuney/support-</span> · инструкция актуальна
-    на 3 августа 2026 · вопросы по механике — в канал поддержки
+    Инструкция лежит в <span class="path">docs/how-we-work.html</span> ·
+    вопросы по механике — в канал поддержки
   </footer>
 
 </div>
