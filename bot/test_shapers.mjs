@@ -67,6 +67,28 @@ function runTable(inputs, card, cols, cards = null, pick = null, entityAttrs = n
           }),
       };
     }
+    // ЧУВСТВИТЕЛЬНОСТЬ ПРИХОДИТ СВЯЗЬЮ, а не атрибутом — измерено фазой I
+    // разведки 2026-09-01. Фикстура пишет её в `sensitivity` карточки
+    // (список ярлыков или строку), а харнесс превращает в форму ответа
+    // `/related/full_column_sensitivity`: элемент — связь, сущность
+    // вложена в `entity`.
+    if (name === 'dd_column_sens') {
+      if (cards === null) throw new Error('node not executed');
+      return {
+        all: () =>
+          cards.map((c) => {
+            const b = (c && c.body) || c || {};
+            if (b.sensCode) return { json: { statusCode: b.sensCode, body: {} } };
+            const raw = b.sensitivity;
+            if (raw === undefined) {
+              return { json: { statusCode: c ? c.statusCode : 200, body: { totalCount: 0, data: [] } } };
+            }
+            const list = Array.isArray(raw) ? raw : String(raw).split(/,\s*/).filter(Boolean);
+            return { json: { statusCode: 200, body: { totalCount: list.length,
+              data: list.map((x) => ({ entity: { displayName: x } })) } } };
+          }),
+      };
+    }
     if (name === 'Build values SQL') {
       if (valuesPlan === null) throw new Error('node not executed');
       return { first: () => ({ json: valuesPlan }) };
@@ -641,27 +663,35 @@ line('11. ГРУППЫ ДОСТУПА');
   });
   const cols = { statusCode: 200,
                  body: { totalCount: 2, data: [colUrn('fio_nm'), colUrn('grade_nm')] } };
-  const mkCard = (n, attrs) => ({
+  const mkCard = (n, attrs, sens, sensCode) => ({
     statusCode: 200,
     body: { fqn: `emart.mdm_employee_structure_d.${n}`,
-            summary: { data: `описание ${n}` }, attributes: attrs },
+            summary: { data: `описание ${n}` }, attributes: attrs,
+            ...(sens === undefined ? {} : { sensitivity: sens }),
+            ...(sensCode === undefined ? {} : { sensCode }) },
   });
 
-  // Атрибут sensitivity ПОДТВЕРЖДЁН владельцем задачи 2026-08-27: заполнен —
-  // поле чувствительное, нужен доступ и согласование. Значение называет
-  // AD-группу, но вывод от неё не зависит.
+  // ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ — ЭТО СВЯЗЬ, А НЕ АТРИБУТ. Измерено фазой I
+  // разведки 2026-09-01: `GET /entity/{col}/related` даёт ключ
+  // `full_column_sensitivity` (RESTRICTS, dest_src), а в `/attribute`
+  // признака нет вовсе. Полтора месяца шейпер искал его среди атрибутов
+  // и писал «признака нет ни у одного из N полей. Считать эти поля
+  // открытыми НЕЛЬЗЯ» — то есть выдавал промах ключа за факт про данные,
+  // и оговорка уезжала в КАЖДЫЙ черновик.
+  //
+  // Фикстура пишет ярлыки в `sensitivity` карточки, а харнесс превращает
+  // их в форму ответа связи: элемент — связь, сущность вложена в `entity`.
   const closed = runTable({ urn: URN, search: 'nm' }, card, cols, [
-    mkCard('fio_nm', { column_type: { type: 'text', data: 'text' },
-                       sensitivity: { type: 'text-list', data: ['HR_PII_READ'] } }),
-    mkCard('grade_nm', { column_type: { type: 'text', data: 'text' },
-                         sensitivity: { type: 'text-list', data: [] } }),
+    mkCard('fio_nm', { column_type: { type: 'text', data: 'text' } }, ['EMP_SENS']),
+    mkCard('grade_nm', { column_type: { type: 'text', data: 'text' } }, []),
   ]);
   checkS('чувствительное поле помечено у самого поля',
-    /fio_nm[\s\S]*ЧУВСТВИТЕЛЬНОЕ ПОЛЕ \(sensitivity: HR_PII_READ\)/.test(closed));
+    /fio_nm[\s\S]*ЧУВСТВИТЕЛЬНОЕ ПОЛЕ \(EMP_SENS\)/.test(closed));
   checkS('сказано, что нужно согласование',
     /нужен доступ и согласование/.test(closed));
   checkS('сводка называет чувствительные', /ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ 1 из 2/.test(closed));
-  checkS('сводка называет имя атрибута', /атрибута «sensitivity»/.test(closed));
+  checkS('источник назван связью, а не атрибутом',
+    /связи «full_column_sensitivity»/.test(closed));
   // Группа называет, КУДА идти, но на вывод не влияет: заполнено = закрыто.
   checkS('группа названа как адрес, а не как условие',
     /называет, КУДА идти за доступом/.test(closed));
@@ -669,41 +699,26 @@ line('11. ГРУППЫ ДОСТУПА');
   // «ПОДОШЛИ ПОЛЯ» выше, и проверка ловит чужую пометку.
   checkS('незакрытое поле не помечено', !/— grade_nm[\s\S]*ЧУВСТВИТЕЛЬНОЕ/.test(closed));
 
-  // sensitivity стоит ПЕРВЫМ в ACCESS_KEYS — значит выигрывает у прежних
-  // кандидатов, даже если карточка несёт оба атрибута сразу.
-  const both = runTable({ urn: URN, search: 'nm' }, card, cols, [
-    mkCard('fio_nm', { sensitivity: { type: 'text-list', data: ['SENS_GRP'] },
-                       access_groups: { type: 'text-list', data: ['OLD_GRP'] } }),
-  ]);
-  checkS('sensitivity выигрывает у прежних кандидатов',
-    /sensitivity: SENS_GRP/.test(both) && !/OLD_GRP/.test(both));
-
-  // Признак есть, групп нет ни у кого → закрытых нет, и это утверждение.
+  // Связь ответила и вернула пусто — это ФАКТ, а не «не спросили»:
+  // запрос сделан, ответ получен.
   const open = runTable({ urn: URN, search: 'nm' }, card, cols, [
-    mkCard('fio_nm', { sensitivity: { type: 'text-list', data: [] } }),
-    mkCard('grade_nm', { sensitivity: { type: 'text-list', data: [] } }),
+    mkCard('fio_nm', {}, []),
+    mkCard('grade_nm', {}, []),
   ]);
-  checkS('признак пуст — сказано прямо',
+  checkS('пустая связь — сказано прямо, что закрытых нет',
     /признак не проставлен\s+ни у одного/.test(open));
 
-  // Признака нет вовсе → НЕИЗВЕСТНО, и молчать об этом нельзя.
-  const unknown = runTable({ urn: URN, search: 'nm' }, card, cols, [
-    mkCard('fio_nm', { column_type: { type: 'text', data: 'text' } }),
-    mkCard('grade_nm', { column_type: { type: 'text', data: 'text' } }),
+  // Ручка отказала → мы НИЧЕГО не узнали. Ни «открыто», ни «закрыто».
+  const failed = runTable({ urn: URN, search: 'nm' }, card, cols, [
+    mkCard('fio_nm', {}, undefined, 500),
+    mkCard('grade_nm', {}, undefined, 500),
   ]);
-  // ПРИЗНАК НЕ НАЙДЕН — НАЗЫВАЕТСЯ ФАКТОМ, А НЕ ТРЕВОГОЙ, и печатает
-  // атрибуты, которые реально пришли. Живой прогон 2026-08-31: в карточке
-  // витрины детей стоит EMP_SENS, а шейпер писал «признака нет ни у одного
-  // из 25 полей» — то есть ключ мы читаем не тот, и по строке этого
-  // не видно. Плюс сама формулировка требовала оговорки в КАЖДОМ черновике.
-  checkS('признак не найден — сказано без тревоги',
-    /признак в ответе каталога не найден/.test(unknown));
-  checkS('и перечислены атрибуты, которые пришли',
-    /в карточках пришли атрибуты: .*column_type/.test(unknown));
+  checkS('отказ ручки — «спросить не удалось», а не «признака нет»',
+    /ЧУВСТВИТЕЛЬНОСТЬ: спросить не удалось/.test(failed));
   checkS('и «поля открыты» из этого не следует',
-    /Это не значит «поля открыты»/.test(unknown));
+    /Это не значит «поля открыты»/.test(failed));
   checkS('а запрет на ПДн держится по смыслу поля, а не по каталогу',
-    /персональное — ФИО, телефон, почта/.test(unknown.replace(/\n/g, ' ')));
+    /персональное — ФИО, телефон, почта/.test(failed.replace(/\n/g, ' ')));
 
   // can_be_accessed: {boolean, true} есть на НАСТОЯЩЕЙ карточке колонки.
   // Свободный поиск по /access/ находил его и печатал «закрыто группами true»
@@ -711,8 +726,10 @@ line('11. ГРУППЫ ДОСТУПА');
   const real = runTable({ urn: URN, search: 'business_dt' }, card,
     { statusCode: 200, body: { totalCount: 267, data: REAL_COLS } }, [REAL_CARD_BUSINESS_DT]);
   checkS('can_be_accessed не выдан за группы доступа', !/ЗАКРЫТО группами true/i.test(real));
-  checkS('на настоящей карточке признак признан отсутствующим',
-    /признак в ответе каталога не найден/.test(real));
+  // На настоящей карточке связь чувствительности пустая — значит закрытых
+  // полей нет по данным каталога. Это утверждение, а не «не спросили».
+  checkS('на настоящей карточке закрытых полей нет',
+    /признак не проставлен\s+ни у одного/.test(real));
 
   // Инвентарь без фильтра: карточек не запрашивали, значит про закрытость
   // не знаем ничего. Молчание здесь прочиталось бы как «поля открыты».

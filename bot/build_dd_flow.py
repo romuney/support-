@@ -116,34 +116,6 @@ DD_OPTS = {
 
 EF = ["displayName", "summary", "attributes"]
 
-# Атрибут карточки колонки, в котором лежит признак чувствительности.
-#
-# ИМЯ ПОДТВЕРЖДЕНО ВЛАДЕЛЬЦЕМ ЗАДАЧИ 2026-08-27: это `sensitivity`. Правило,
-# которое из него следует, простое и не требует разбора значения:
-#
-#   поле заполнено  → данные чувствительные, нужен доступ и согласование;
-#   поле пустое     → признака нет;
-#   атрибута нет    → НЕ «поле открыто», а «признак не пришёл».
-#
-# Конкретное значение называет AD-группу, и групп разных много, но решение
-# для бота от группы не зависит: любое непустое значение означает, что поле
-# просто так не выгружается. Поэтому шейпер печатает значение как есть,
-# а вывод делает по факту заполненности — разбирать список групп ему незачем
-# и не по чему.
-#
-# Остальные ключи — прежние кандидаты, оставлены запасом: имя атрибута может
-# отличаться у других систем каталога, а промах здесь дорогой. При промахе
-# всех явных ключей шейпер ищет по смыслу и ПЕЧАТАЕТ найденное имя, чтобы
-# угадывание было видно, а не выдавало себя за факт.
-ACCESS_KEYS = [
-    "sensitivity",
-    "access_groups",
-    "access_group",
-    "ad_groups",
-    "ad_group",
-    "security_groups",
-    "access",
-]
 
 
 # ------------------------------------------------------- Trino для значений
@@ -292,6 +264,32 @@ column_attrs = http(
     "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent($('Pick columns').item.json.column_urn) + '/attribute' }}",
     [],
     [1140, 220],
+)
+
+# ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ — ЭТО СВЯЗЬ, А НЕ АТРИБУТ. Измерено фазой I
+# разведки 2026-09-01, а не выведено:
+#
+#   GET /entity/{column_urn}/related → ключи связей колонки:
+#     jira_issues, master_column, physical_colums, foreign_key_columns,
+#     full_column_sensitivity
+#   full_column_sensitivity: {relation: {type: "RESTRICTS",
+#                             direction: "dest_src"}, limit: 10}
+#
+# А /attribute у той же колонки отдаёт can_be_accessed, column_type,
+# data_contract_*, ordinal_position, systems, to_delete — и ничего про
+# чувствительность. Полтора месяца шейпер искал признак ровно там и писал
+# «признака нет ни у одного из N полей. Считать эти поля открытыми НЕЛЬЗЯ» —
+# то есть выдавал промах ключа за факт про данные, и оговорка уезжала
+# в КАЖДЫЙ черновик.
+#
+# Цена — третий запрос на колонку там, где карточки и так читаются.
+# Оптовый путь (POST /entity/batch/related) в проекте не подтверждён,
+# и строить на нём то, что должно работать, нельзя: замер заведён фазой J.
+column_sens = http(
+    "dd_column_sens",
+    "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent($('Pick columns').item.json.column_urn) + '/related/full_column_sensitivity' }}",
+    [],
+    [1140, 380],
 )
 
 # entityFields на самой карточке /entity/{urn} для REPORT игнорируются —
@@ -485,41 +483,18 @@ function oneLine(s) {
 // Третье молча приравнять к «не закрыто» — самая дорогая ошибка из трёх:
 // бот уверенно скажет, что согласование не нужно, и ошибётся именно на ПДн.
 //
-// Точное имя атрибута в DD живым запросом не подтверждено, поэтому сначала
-// проверяются явные ключи ACCESS_KEYS, а потом — любой ключ, похожий на
-// признак доступа. Найденное имя ПЕЧАТАЕТСЯ в блоке метаданных: первый же
-// живой прогон покажет настоящее имя, и его надо будет вписать в ACCESS_KEYS
-// в build_dd_flow.py. Угадывание с печатью имени лучше молчания: промах
-// виден, а не выдаёт себя за факт.
-const ACCESS_KEYS = __ACCESS_KEYS__;
-const ACCESS_RE = /(access|permission|_group|group_|rls|warden|sensitiv|pii|confiden|secur|дост|груп|конфиденц|чувствит)/i;
+// ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ РАЗБИРАЕТСЯ В `sensOf()` НИЖЕ, А НЕ ЗДЕСЬ.
+//
+// Полтора месяца он искался среди АТРИБУТОВ колонки — по списку явных
+// ключей плюс эвристике по имени. Фаза I разведки 2026-09-01 показала, что
+// в `/attribute` его нет вовсе: там can_be_accessed, column_type,
+// data_contract_*, ordinal_position, systems, to_delete. Признак приходит
+// СВЯЗЬЮ `full_column_sensitivity` (RESTRICTS, dest_src).
+//
+// Перебор ключей и эвристика удалены целиком, а не оставлены «запасом»:
+// второй источник признака — это второй ответ на один вопрос, и разъехаться
+// им нечем только так. Правило проекта про копии знания действует и здесь.
 
-function accessOf(attrs) {
-  const none = { known: false, key: '', groups: '' };
-  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return none;
-  for (const k of ACCESS_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(attrs, k)) {
-      return { known: true, key: k, groups: attrData(attrs, k) };
-    }
-  }
-  // Эвристика жёстко ограничена, и вот почему. На настоящей карточке колонки
-  // (business_dt, 2026-08-06) есть атрибут can_be_accessed: {boolean, true} —
-  // свободный поиск по /access/ находил ИМЕННО ЕГО и печатал «закрыто
-  // группами true» у открытого поля. Ровно та же ошибка, из-за которой
-  // versioning_type когда-то выдавался за тип данных: пустой признак честнее
-  // неверного. Поэтому флаги вида can_/is_/has_ и булевы значения отброшены —
-  // группы доступа это список имён, а не «да».
-  for (const k of Object.keys(attrs)) {
-    if (!ACCESS_RE.test(k) || /^(can|is|has)_/i.test(k)) continue;
-    const a = attrs[k];
-    const declared = a && typeof a === 'object' ? String(a.type || '') : '';
-    if (/bool/i.test(declared)) continue;
-    const v = attrData(attrs, k);
-    if (/^(true|false)$/i.test(v)) continue;
-    return { known: true, key: k, groups: v };
-  }
-  return none;
-}
 
 function httpFail(res, label) {
   const code = res && res.statusCode;
@@ -612,6 +587,15 @@ try {
 } catch (e) {
   attrsResList = [];
 }
+// Чувствительность приходит СВЯЗЬЮ `full_column_sensitivity`, а не атрибутом
+// (измерено фазой I разведки 2026-09-01). Ноды может не быть в прогоне —
+// тогда $() бросает, и это нормальный путь, как у соседей.
+let sensResList = [];
+try {
+  sensResList = $('dd_column_sens').all().map((i) => i.json);
+} catch (e) {
+  sensResList = [];
+}
 
 const details = targets
   .map((t, i) => {
@@ -628,11 +612,16 @@ const details = targets
       // именно там описаны границы генерации business_dt и подобные ловушки.
       comment: oneLine(attrData(attrs, 'comment')),
       keys: attrData(attrs, 'keys'),
-      access: accessOf(attrs),
-      // Какие атрибуты каталог реально прислал по этой колонке. Нужны ровно
-      // на случай, когда признак чувствительности не нашёлся: без них имя
-      // атрибута приходится угадывать, а угадывание тут уже дорого стоило.
-      attrKeys: attrs && typeof attrs === 'object' ? attrs : {},
+      // ПРИЗНАК ЧУВСТВИТЕЛЬНОСТИ — ИЗ СВЯЗИ, А НЕ ИЗ АТРИБУТОВ.
+      //
+      // Связанные сущности приходят в той же форме, что колонки таблицы:
+      // элемент — это СВЯЗЬ, сама сущность вложена в `entity`. Распаковку
+      // делает `nodesOf()` — тот же промах на колонках однажды дал пустой
+      // инвентарь при живом ответе.
+      //
+      // Ярлык берём тем, что есть: displayName, иначе хвост fqn, иначе
+      // хвост urn. Угадывать структуру нельзя — печатаем то, что пришло.
+      access: sensOf(sensResList[i]),
       failed,
     };
   })
@@ -746,7 +735,7 @@ function detailBlock(list) {
       // значит чувствительное, значит нужен доступ и согласование. Разбирать
       // список групп боту незачем и не по чему.
       out.push(
-        `  ЧУВСТВИТЕЛЬНОЕ ПОЛЕ (${d.access.key}: ${d.access.groups}) — просто так ` +
+        `  ЧУВСТВИТЕЛЬНОЕ ПОЛЕ (${d.access.groups}) — просто так ` +
           'не выгружается, нужен доступ и согласование',
       );
     }
@@ -788,37 +777,50 @@ function isTech(name) {
     /^(processed_dttm|__src_processed_dttm__|etl_|dl_|kafka_)/.test(f);
 }
 
+// Разбор ответа `/related/full_column_sensitivity`.
+//
+// Пусто — значит признака у поля нет, и это ФАКТ, а не «не спросили»:
+// запрос сделан, ответ получен. Отказ ручки — третье состояние, и его
+// нельзя выдавать за «поле открыто».
+function sensOf(res) {
+  if (res === undefined || res === null) return { known: false, groups: '' };
+  const code = res && res.statusCode;
+  if (code !== undefined && code >= 400) {
+    return { known: false, groups: '', failed: `HTTP ${code}` };
+  }
+  const body = (res && res.body) || res || {};
+  const items = nodesOf(body);
+  const labels = items
+    .map((e) => {
+      const dn = String((e && e.displayName) || '').trim();
+      if (dn) return dn;
+      const fqn = String((e && e.fqn) || '').trim();
+      if (fqn) return fqn.split('.').pop();
+      const urn = String((e && e.urn) || '').trim();
+      return urn ? urn.split(':').pop() : '';
+    })
+    .filter(Boolean);
+  return { known: true, groups: labels.join(', '), key: 'full_column_sensitivity' };
+}
+
 function accessBlock(list) {
   const answered = list.filter((d) => !d.failed && d.access && d.access.known);
   const closed = answered.filter((d) => d.access.groups);
   out.push('');
   if (!answered.length) {
-    // ПРИЗНАК НЕ НАЙДЕН — И ЭТО МОЖЕТ БЫТЬ НАШ ПРОМАХ, А НЕ ПУСТОЙ КАТАЛОГ.
+    // Запрос признака НЕ ПРОШЁЛ ни по одной колонке: ручка отказала либо
+    // узел не выполнялся. Это НЕ «поля открыты» и НЕ «признака нет» —
+    // мы про них просто ничего не узнали.
     //
-    // Живой прогон 2026-08-31: в карточке витрины детей у девяти полей стоит
-    // `EMP_SENS`, а шейпер написал «признака нет ни у одного из 25 полей».
-    // Значит ключ атрибута мы читаем не тот. Печатаем ключи, которые реально
-    // пришли: угадывать имя атрибута по этому же отказу уже приходилось,
-    // и каждый раз это стоило суток.
-    //
-    // Формулировка при этом БЕЗ ТРЕВОГИ: строка, которая горит на каждом
-    // ответе, перестаёт читаться. Запрет на персональные данные действует
-    // независимо от каталога — он по именам полей, и его достаточно.
-    const seen = [];
-    for (const d of list) {
-      for (const k of Object.keys((d && d.attrKeys) || {})) {
-        if (!seen.includes(k)) seen.push(k);
-      }
-    }
+    // Формулировка без тревоги: строка, которая горит на каждом ответе,
+    // перестаёт читаться. Запрет на персональные данные держится сам
+    // по себе — по смыслу поля, а не по признаку каталога.
+    const why = list.map((d) => d.access && d.access.failed).filter(Boolean)[0];
     out.push(
-      'ЧУВСТВИТЕЛЬНОСТЬ: признак в ответе каталога не найден' +
-        (seen.length
-          ? ` (в карточках пришли атрибуты: ${seen.slice(0, 12).join(', ')})`
-          : '') +
+      'ЧУВСТВИТЕЛЬНОСТЬ: спросить не удалось' + (why ? ` (${why})` : '') +
         '. Это не значит «поля открыты»: если поле по смыслу персональное — ' +
         'ФИО, телефон, почта, документы, дата рождения, — помечай его ' +
-        'как требующее согласования доступа по имени и смыслу, не дожидаясь ' +
-        'признака из каталога.',
+        'как требующее согласования доступа по имени и смыслу.',
     );
     return;
   }
@@ -840,7 +842,7 @@ function accessBlock(list) {
     );
   }
   out.push(
-    `  Признак взят из атрибута «${key}». Поля, не названные здесь, по данным ` +
+    `  Признак взят из связи «${key}» (RESTRICTS). Поля, не названные здесь, по данным ` +
       'каталога не закрыты — но запрет на персональные данные действует ' +
       'независимо от каталога: ФИО, телефоны и почты не выгружаются, даже ' +
       'если признак у них пуст.',
@@ -1400,9 +1402,7 @@ return [{ json: { dd_meta: out.join('\n') } }];
 def code(name, js, pos):
     return {
         "parameters": {
-            "jsCode": js.replace(
-                "__ACCESS_KEYS__", json.dumps(ACCESS_KEYS, ensure_ascii=False)
-            )
+            "jsCode": js,
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -1460,6 +1460,7 @@ sub = {
         need_cards,
         column_summary,
         column_attrs,
+        column_sens,
 
         shape_table,
         report_markdown,
@@ -1499,6 +1500,9 @@ sub = {
             "main": [[{"node": "dd_column_attrs", "type": "main", "index": 0}]]
         },
         "dd_column_attrs": {
+            "main": [[{"node": "dd_column_sens", "type": "main", "index": 0}]]
+        },
+        "dd_column_sens": {
             "main": [[{"node": "Shape table meta", "type": "main", "index": 0}]]
         },
         # Три независимых запроса цепочкой — просто ради порядка выполнения,
