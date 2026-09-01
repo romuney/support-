@@ -350,6 +350,14 @@ bot AS (
            -- держится ли правило.
            max_by(CAST(json_extract_scalar(payload, '$.sens_fields') AS integer),
                   event_ts) AS sens_fields,
+           -- Поля, закрытые КАТАЛОГОМ: их нет ни в одной прочитанной статье,
+           -- и понижение уверенности за пустой реестр по ним не выписывается
+           -- (решение 01.09: средняя — это задача на правку базы, а состав
+           -- полей в базе жить не должен). В витрине нужны для сверки: если
+           -- правило начнёт срабатывать слишком часто, это видно числом,
+           -- а не по ощущению «бот стал самоувереннее».
+           max_by(CAST(json_extract_scalar(payload, '$.catalog_only_fields') AS integer),
+                  event_ts) AS catalog_only_fields,
            max_by(CAST(json_extract_scalar(payload, '$.sens_unmarked') AS boolean),
                   event_ts) AS sens_unmarked,
            -- Название своей компании, поставленное значением фильтра.
@@ -719,6 +727,7 @@ SELECT
     COALESCE(b.draft_own_tools, 0)                          AS draft_own_tools,
     COALESCE(b.draft_fire_by_date, false)                   AS draft_fire_by_date,
     COALESCE(b.sens_fields, 0)                              AS sens_fields,
+    COALESCE(b.catalog_only_fields, 0)                      AS catalog_only_fields,
     COALESCE(b.sens_unmarked, false)                        AS sens_unmarked,
     COALESCE(b.draft_company_filter, 0)                     AS draft_company_filter,
     COALESCE(b.draft_invented_fields, 0)                    AS draft_invented_fields,
