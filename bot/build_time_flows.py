@@ -120,6 +120,15 @@ BOT_USER_ID = os.environ.get("BOT_USER_ID", "")
 # в Mattermost, а не с соглашением пака. Переименуют эмодзи — править здесь.
 WORK_EMOJI = "bully_work"
 
+# Логин бота для распознавания @упоминания. Пусто — путь по тегу выключен,
+# и сборщик говорит об этом вслух: молча не отвечать на тег хуже, чем
+# не уметь, — человек видит, что бота позвали, и ждёт ответа.
+BOT_USERNAME = os.environ.get("BOT_USERNAME", "")
+
+# База Mattermost для догоняющего чтения треда. Совпадает с телеметрией:
+# одно значение на два сборщика, переменная окружения одна.
+MM_BASE = os.environ.get("MM_BASE_URL", "https://time.tbank.ru")
+
 # id воркфлоу «Telemetry · Ingest» — единственной точки записи в лог.
 # Значение по умолчанию совпадает с telemetry/build_telemetry_flows.py и там же
 # подтверждено импортом; переменная окружения одна на два сборщика.
@@ -271,6 +280,15 @@ CORE_INPUTS = (
     # адаптера, по той же причине, что и остальные поля формы: ядро зовут
     # из трёх мест, и в двух из них формы нет вовсе.
     "external_transfer",
+    # Переписка треда, в котором продолжается разговор: «кто — что сказал»
+    # по строке на реплику, в порядке времени. Пусто у нового обращения.
+    #
+    # Отдельным входом, а не приклеенное к question, потому что читают их
+    # по-разному: вопрос — то, на что отвечаем СЕЙЧАС; переписка — то,
+    # о чём уже договорились. Склеив их, мы бы заставили автора отвечать
+    # на собственную реплику из середины треда: этот класс в проекте уже
+    # ловили на мастерах домена, приехавших на вопрос не про них.
+    "thread",
 )
 
 core_trigger = node(
@@ -2295,6 +2313,28 @@ try {
 }
 
 const parts = [];
+
+// ПЕРЕПИСКА ТРЕДА — ПЕРВЫМ БЛОКОМ, ДО СТАТЕЙ.
+//
+// Бот задаёт уточняющие вопросы, и ответ на них до этой правки не читался
+// вовсе. Теперь читается — но переписка это УСЛОВИЕ ЗАДАЧИ, а не справка:
+// «по дням» без вопроса «какая гранулярность?» не значит ничего. Условие
+// задачи идёт перед материалами, по которым её решают, — автор читает
+// сверху вниз, тем же порядком, что мастера домена перед частностями.
+//
+// Пусто у нового обращения — блока тогда нет вовсе, а не пустой заголовок.
+const threadText = String(
+  $('When called by adapter').first().json.thread || '').trim();
+if (threadText) {
+  parts.push('=== ПЕРЕПИСКА В ТРЕДЕ ===\n' +
+    'Разговор уже идёт. Ниже — что было сказано, по строке на реплику,\n' +
+    'в порядке времени. Реплики с пометкой «бот» — ТВОИ прошлые ответы:\n' +
+    'отвечать на них как на вопрос заказчика нельзя.\n' +
+    'Отвечай на ПОСЛЕДНЮЮ реплику человека, держа в уме всё остальное:\n' +
+    'что просили изначально, что ты уточнил и что человек ответил.\n' +
+    'Уже согласованное второй раз не переспрашивай.\n\n' + threadText);
+}
+
 const failed = [];
 const paths = Array.isArray(plan.files) ? plan.files : [];
 const invented = Array.isArray(plan.articles_invented) ? plan.articles_invented : [];
@@ -6253,7 +6293,7 @@ core = wf("Support Bot Core", core_nodes, core_conn)
 
 
 # ------------------------------------------- общее для адаптеров: вызов ядра
-def call_core(pos, question_expr, mode, guard_node=None):
+def call_core(pos, question_expr, mode, guard_node=None, thread_node=None):
     """Вызов ядра. guard_node — имя Code-ноды разбора формы, если она есть.
 
     Чат формы не знает вовсе, поэтому поля уезжают пустыми строками. Схему
@@ -6276,6 +6316,14 @@ def call_core(pos, question_expr, mode, guard_node=None):
 
     values = {"question": question_expr, "mode": mode}
     values.update(form)
+    # Переписка треда: пусто у нового обращения, непусто у продолжения.
+    # Отдельным входом, а не приклеенная к question: роутер и автор читают
+    # их по-разному — вопрос это то, на что отвечаем, переписка это то,
+    # о чём уже договорились.
+    values["thread"] = (
+        f"={{{{ $('{thread_node}').first().json.thread ?? '' }}}}"
+        if thread_node else ""
+    )
 
     return node(
         "Call core",
@@ -6562,6 +6610,13 @@ GUARD_JS = r"""
 // не падают, а ПРОХОДЯТ — фильтр молча пропускает всё.
 const PREFIXES     = __PREFIXES__;
 const REQUIRE_ROOT = __REQUIRE_ROOT__;
+// Логин бота: по нему распознаётся @упоминание. Пусто — путь по тегу выключен.
+const MENTION      = __MENTION__;
+// Личка: ответ в треде бота — продолжение разговора, тег там не нужен,
+// потому что в диалоге, кроме двоих, никого нет. В канале иначе: там тред
+// живёт своей жизнью — дежурный, согласование, обсуждение, — и бот, отвечающий
+// на всё подряд, стал бы шумом. Отсюда разные значения флага, а не одно.
+const ALLOW_THREAD = __ALLOW_THREAD__;
 const DROP_BOT     = __DROP_BOT__;
 const REQUIRE_DM   = __REQUIRE_DM__;
 const ALLOWLIST    = __ALLOWLIST__;
@@ -6579,6 +6634,27 @@ const post = asObj(src.post ?? data.post ?? {});
 const message = String(post.message ?? '');
 const rootId  = String(post.root_id ?? '');
 const postId  = String(post.id ?? '');
+
+// Реплика в треде. Mattermost у КОРНЕВОГО поста иногда проставляет root_id
+// равным его же id — это всё ещё корень, а не ответ.
+const isReply = Boolean(rootId && rootId !== postId);
+
+// Упоминание бота. Без \b намеренно, и не только из-за кириллицы: `\b` после
+// логина совпал бы и с `@bully_bot`, то есть бот отзывался бы на чужое имя,
+// начинающееся так же. Ограничитель — «дальше не символ логина».
+const mentioned = MENTION
+  ? new RegExp('@' + MENTION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+               '(?![a-z0-9_.\\-])', 'i').test(message)
+  : false;
+
+// ПРОДОЛЖЕНИЕ РАЗГОВОРА, а не новое обращение. Бот задаёт уточняющие вопросы
+// («какая нужна гранулярность?»), и до этой правки ответ на них не читался
+// вовсе: реплика в треде отсеивалась как «не обращение», а человек ждал.
+// Для такого поста нужен ВЕСЬ тред: без него ответ «по дням» не значит ничего.
+const isFollowUp = mentioned || (ALLOW_THREAD && isReply);
+// Корень треда для догоняющего чтения. У реплики это root_id, у корневого
+// поста — он сам: тегнуть бота могут и под первым сообщением.
+const threadRoot = isReply ? rootId : postId;
 
 // Первая строка без markdown-обвязки: intake-воркфлоу может выделять тему
 // жирным, и тогда сообщение начинается со звёздочек, а не с «Cross Data».
@@ -6766,11 +6842,14 @@ if (!message.trim()) {
   reason = 'системное сообщение: ' + post.type;
 } else if (DROP_BOT && String(post.props?.from_bot ?? '') === 'true') {
   reason = 'сообщение бота';
-} else if (REQUIRE_ROOT && rootId && rootId !== postId) {
-  // Реплика в треде обращением не является. Mattermost у КОРНЕВОГО поста
-  // иногда проставляет root_id равным его же id — это всё ещё корень.
+} else if (REQUIRE_ROOT && isReply && !isFollowUp) {
+  // Реплика в треде обращением не является — если только это не продолжение
+  // разговора: ответ на уточнение бота или прямое упоминание.
   reason = 'реплика в треде';
-} else if (PREFIXES.length && !topic) {
+} else if (PREFIXES.length && !topic && !isFollowUp) {
+  // Префикс формы требуется только от НОВОГО обращения. Продолжение разговора
+  // приходит обычным текстом: человек отвечает на вопрос бота или зовёт его
+  // тегом — требовать от такой реплики шапку intake-формы бессмысленно.
   // Обращения приходят из intake-воркфлоу с префиксом темы. Всё остальное —
   // обсуждение вокруг обращения либо вопрос к чужой команде HC Data.
   reason = 'не наша тема: ' + (head.slice(0, 60) || '(пусто)');
@@ -6808,6 +6887,10 @@ return [{ json: {
   // по этому полю видно, подпись не нашлась или не разобрался ответ.
   external_transfer_raw: externalTransferRaw,
   form_parsed: Boolean(formDomain || reportUrl.length || sections.length),
+  // Продолжение разговора: по нему адаптер решает, дочитывать ли тред.
+  is_follow_up: isFollowUp,
+  mentioned,
+  thread_root: threadRoot,
   channel_id: post.channel_id ?? data.channel_id ?? '',
   channel_name: src.channel_name ?? data.channel_name ?? '',
   sender_name: String(src.sender_name ?? '').replace(/^@/, ''),
@@ -6817,13 +6900,129 @@ return [{ json: {
 """
 
 
+# ------------------------------------------- чтение треда для продолжения
+#
+# Бот задаёт уточняющие вопросы, и до этой правки ответ на них не читался
+# вовсе: реплика в треде отсеивалась guard'ом, а человек ждал. Теперь ответ
+# доезжает — но одного его мало: «по дням» без вопроса «какая гранулярность?»
+# не значит ничего. Нужен ВЕСЬ тред.
+#
+# HTTP-нодой, а не нодой Mattermost: у неё нет операции «получить тред».
+# Тот же приём и тот же credential, что у вебхука кнопок в телеметрии.
+#
+# onError НЕ ставим: тред не дочитался — это не украшение, как реакция,
+# а условие задачи. Ответить на «по дням», не зная вопроса, хуже, чем
+# не ответить: получится уверенный ответ не на тот вопрос.
+def get_thread(name, pos, guard_node):
+    return node(
+        name,
+        "n8n-nodes-base.httpRequest",
+        4.4,
+        pos,
+        {
+            "method": "GET",
+            "url": "={{ '" + MM_BASE.rstrip("/") + "/api/v4/posts/' + "
+                   "$('" + guard_node + "').first().json.thread_root + '/thread' }}",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "mattermostApi",
+            "options": {},
+        },
+        credentials=copy.deepcopy(MM_CRED),
+    )
+
+
+THREAD_JS = r"""
+// Переписка одной строкой на реплику, в порядке времени.
+//
+// ЧИТАЕТСЯ КАК ДИАЛОГ, А НЕ КАК JSON. Автору нужно понять, о чём договорились:
+// кто спросил, что бот уточнил, что человек ответил. Роли подписаны словами —
+// «бот» и логин человека, — потому что по id участника модель не отличит
+// своё сообщение от чужого и начнёт отвечать на собственный вопрос.
+const MAX_POSTS = 40;
+const MAX_CHARS = 6000;
+
+let posts = [];
+try {
+  const r = $('__GET_NODE__').first().json;
+  const order = Array.isArray(r.order) ? r.order : [];
+  const byId = r.posts || {};
+  posts = (order.length ? order.map((id) => byId[id]) : Object.values(byId))
+    .filter(Boolean)
+    .sort((a, b) => (a.create_at || 0) - (b.create_at || 0));
+} catch (e) {
+  // Узел чтения не выполнялся — обычное новое обращение, переписки нет.
+  // Это НОРМАЛЬНЫЙ путь, а не отказ.
+  return [{ json: { thread: '', thread_posts: 0, thread_state: 'not_asked' } }];
+}
+
+if (!posts.length) {
+  // Ответ пришёл, а постов в нём нет — это НЕ «переписки не было».
+  // Молча отдать пустую строку значит выдать отказ ручки за отсутствие
+  // контекста, и автор ответит на реплику, не зная вопроса.
+  return [{ json: { thread: '', thread_posts: 0, thread_state: 'empty' } }];
+}
+
+const lines = [];
+for (const p of posts.slice(-MAX_POSTS)) {
+  const who = String((p.props || {}).from_bot || '') === 'true' ? 'бот' :
+    ('@' + String((p.props || {}).override_username || p.user_id || 'человек'));
+  const text = String(p.message || '').trim();
+  if (text) lines.push(who + ': ' + text);
+}
+let thread = lines.join('\n\n');
+let cut = 0;
+if (thread.length > MAX_CHARS) {
+  // Режем НАЧАЛО, а не хвост: последние реплики — это то, на что отвечаем.
+  cut = thread.length - MAX_CHARS;
+  thread = '…(начало переписки обрезано, ' + cut + ' символов)\n\n' +
+           thread.slice(-MAX_CHARS);
+}
+return [{ json: {
+  thread,
+  thread_posts: lines.length,
+  thread_state: cut ? 'trimmed' : 'ok',
+} }];
+"""
+
+
+def need_thread(name, pos, guard_node):
+    """Гейт: дочитывать ли тред. Читает признак у guard'а ПО ИМЕНИ УЗЛА.
+
+    Не из $json — по тому же доводу, что и остальные гейты ядра: $json зависит
+    от всей цепочки перед гейтом, и выключенный или вставленный узел молча
+    сделал бы условие ложным навсегда. Этот класс в проекте стоил двух
+    итераций разбора 01.09.
+    """
+    return node(name, "n8n-nodes-base.if", 2.2, pos, {
+        "conditions": {
+            "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
+            "conditions": [{
+                "id": "follow-up",
+                "leftValue": "={{ $('" + guard_node + "').first().json.is_follow_up }}",
+                "rightValue": True,
+                "operator": {"type": "boolean", "operation": "true", "singleValue": True},
+            }],
+            "combinator": "and",
+        },
+        "looseTypeValidation": True,
+        "options": {},
+    })
+
+
+def build_thread(name, pos, get_node):
+    return node(name, "n8n-nodes-base.code", 2, pos,
+                {"jsCode": THREAD_JS.replace("__GET_NODE__", get_node)})
+
+
 def guard(name, pos, prefixes=(), require_root=False, require_dm=False,
-          allowlist=(), bot_echo=True):
+          allowlist=(), bot_echo=True, allow_thread=False):
     """Code-нода нормализации и отсева. Возвращает элемент ВСЕГДА, решение — в pass."""
     js = (
         GUARD_JS
         .replace("__PREFIXES__", json.dumps(list(prefixes), ensure_ascii=False))
         .replace("__REQUIRE_ROOT__", "true" if require_root else "false")
+        .replace("__MENTION__", json.dumps(BOT_USERNAME, ensure_ascii=False))
+        .replace("__ALLOW_THREAD__", "true" if allow_thread else "false")
         .replace("__DROP_BOT__", "true" if bot_echo else "false")
         .replace("__REQUIRE_DM__", "true" if require_dm else "false")
         .replace("__ALLOWLIST__", json.dumps(list(allowlist), ensure_ascii=False))
@@ -7682,14 +7881,23 @@ return mmSections([
 """
 
 channel_nodes = [
-    mm_trigger("Time Trigger", [-260, 300], [CHANNEL_LISTEN]),
+    # Слушаем и канал черновиков: там работает джун, и позвать бота тегом
+    # прямо под черновиком — самый естественный способ попросить переделать.
+    mm_trigger("Time Trigger", [-260, 300], [CHANNEL_LISTEN, CHANNEL_DRAFTS]),
     # Триггер posted срабатывает на КАЖДОЕ сообщение канала, включая реплики
     # в тредах. Отсев целиком здесь: только корневые посты и только темы формы
     # с префиксом Cross Data — обращения к чужой команде HC Data не наши.
+    # allow_thread=False намеренно: в канале тред живёт своей жизнью —
+    # дежурный, согласование, обсуждение, — и бот, отвечающий на всё подряд,
+    # стал бы шумом. Позвать его можно тегом, и тогда он читает весь тред.
     guard("Guard channel", [-20, 300], prefixes=CHANNEL_PREFIXES,
-          require_root=True, bot_echo=False),
+          require_root=True, bot_echo=False, allow_thread=False),
     guard_gate("Our request", [200, 300]),
-    call_core([440, 300], POST_MSG, "channel", guard_node="Guard channel"),
+    need_thread("Need thread", [320, 300], "Guard channel"),
+    get_thread("Get thread", [440, 160], "Guard channel"),
+    build_thread("Build thread ch", [560, 300], "Get thread"),
+    call_core([700, 300], POST_MSG, "channel", guard_node="Guard channel",
+              thread_node="Build thread ch"),
     node("Build header", "n8n-nodes-base.code", 2, [680, 300], {"jsCode": CHANNEL_HEAD_JS}),
     mm_post(
         "Post header",
@@ -7723,9 +7931,14 @@ channel_conn = chain("Time Trigger", "Guard channel", "Our request")
 # Ложная ветка «Our request» никуда не ведёт: отсеянное сообщение просто
 # не идёт дальше, а причина отсева видна в данных ноды Guard channel.
 channel_conn["Our request"] = {"main": [
-    [{"node": "Call core", "type": "main", "index": 0}],
+    [{"node": "Need thread", "type": "main", "index": 0}],
     [],
 ]}
+channel_conn["Need thread"] = {"main": [
+    [{"node": "Get thread", "type": "main", "index": 0}],
+    [{"node": "Build thread ch", "type": "main", "index": 0}],
+]}
+channel_conn.update(chain("Get thread", "Build thread ch", "Call core"))
 channel_conn.update(chain("Call core", "Build header", "Post header",
                           "Build thread", "Post in thread"))
 # Вторая ветвь от шапки: запись в лог. Веер НА ВЫХОДЕ здесь безопасен —
@@ -7945,9 +8158,17 @@ dm_nodes = [
     # В личке префикса темы нет — человек пишет обычным текстом. Зато
     # обязателен фильтр эха: бот слушает и пишет один и тот же канал.
     # Реплики в треде здесь тоже не обращения, поэтому require_root тот же.
+    # allow_thread: в личке ответ в треде бота — продолжение разговора, и тег
+    # там не нужен: кроме двоих, в диалоге никого нет.
     guard("Guard DM", [-20, 300], require_dm=True, require_root=True,
-          allowlist=DM_ALLOWLIST, bot_echo=True),
+          allowlist=DM_ALLOWLIST, bot_echo=True, allow_thread=True),
     guard_gate("DM allowed", [200, 300]),
+    # Продолжение разговора — дочитываем тред. Новое обращение идёт мимо:
+    # лишний HTTP-запрос на каждый вопрос не нужен, а пустая переписка
+    # у «Build thread» получится сама, когда узел чтения не выполнялся.
+    need_thread("Need thread DM", [320, 300], "Guard DM"),
+    get_thread("Get thread DM", [440, 160], "Guard DM"),
+    build_thread("Build thread DM", [560, 300], "Get thread DM"),
     # В личке формы нет: человек пишет обычным текстом. Guard там всё равно
     # прогоняет разбор — если человек пришлёт ссылку на отчёт, правило про
     # непокрытые отчёты сработает и в личке.
@@ -7961,7 +8182,8 @@ dm_nodes = [
     # проверочный запрос. Без отметки человек не отличает «бот думает»
     # от «бот не услышал» и пишет второй раз.
     mm_reaction("React work in DM", [440, 160], "create", DM_POST_ID, WORK_EMOJI),
-    call_core([440, 300], POST_MSG, "dm", guard_node="Guard DM"),
+    call_core([700, 300], POST_MSG, "dm", guard_node="Guard DM",
+              thread_node="Build thread DM"),
     node("Build DM reply", "n8n-nodes-base.code", 2, [680, 220], {"jsCode": DM_MSG_JS}),
     # Снятие — после того, как ответ УЖЕ отправлен: реакция обязана пережить
     # ровно то ожидание, ради которого ставилась, и ни секундой меньше.
@@ -7971,6 +8193,10 @@ dm_nodes = [
         [920, 220],
         {"__rl": True, "mode": "id", "value": "={{ $('Guard DM').first().json.post.channel_id }}"},
         "={{ $json.text }}",
+        # ОТВЕТ В ТРЕД, а не отдельным сообщением. Иначе разговора не выходит:
+        # человек отвечает на уточнение бота, реплика висит сама по себе,
+        # и связать её с вопросом нечем — ни человеку, ни боту.
+        root_id_expr="={{ $('Guard DM').first().json.thread_root }}",
     ),
     node("Build DM log", "n8n-nodes-base.code", 2, [680, 400], {"jsCode": DM_LOG_JS}),
     mm_post(
@@ -8011,10 +8237,17 @@ dm_conn = chain("Time Trigger DM", "Guard DM", "DM allowed")
 dm_conn["DM allowed"] = {"main": [
     [
         {"node": "React work in DM", "type": "main", "index": 0},
-        {"node": "Call core", "type": "main", "index": 0},
+        {"node": "Need thread DM", "type": "main", "index": 0},
     ],
     [],
 ]}
+# Продолжение разговора идёт через чтение треда, новое обращение — мимо него.
+# Ветви взаимоисключающие, «Build thread DM» выполняется один раз.
+dm_conn["Need thread DM"] = {"main": [
+    [{"node": "Get thread DM", "type": "main", "index": 0}],
+    [{"node": "Build thread DM", "type": "main", "index": 0}],
+]}
+dm_conn.update(chain("Get thread DM", "Build thread DM", "Call core"))
 # Три ветви от ядра: ответ человеку, копия в канал джуна и запись в лог.
 #
 # Веер НА ВЫХОДЕ здесь безопасен — ветви не сходятся ни в одном узле, и ни
@@ -8069,6 +8302,15 @@ if not DM_FILTER_FROM_FILE:
     print("стоять «Is Direct Message». Пусто — имя значения угадано неверно;")
     print("скопируйте настроенную ноду из n8n (Ctrl+C) в bot/dm_trigger_filter.json,")
     print("и сборщик будет брать фильтр оттуда, а не из догадки.")
+if not BOT_USERNAME:
+    print()
+    print("ВНИМАНИЕ: BOT_USERNAME пуст — путь по @упоминанию ВЫКЛЮЧЕН.")
+    print("В канале бот отвечает только на новые обращения с шапкой формы;")
+    print("позвать его тегом под тредом не получится, и по виду флоу это")
+    print("неотличимо от «бот не захотел отвечать». В личке продолжение")
+    print("разговора тредом работает и без логина.")
+    print("Взять логин: профиль бота в Time, поле username (без @). Затем:")
+    print("  BOT_USERNAME=<логин> python3 build_time_flows.py")
 if not BOT_USER_ID:
     print()
     print(f"ВНИМАНИЕ: BOT_USER_ID пуст — реакция :{WORK_EMOJI}: в личке не встанет.")
