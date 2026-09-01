@@ -38,6 +38,18 @@ gaps & islands (см. `rc-attribute-tenure`) — без него расчёт с
 | `mdm_employee_education` | только `mdm_employee_rk` — образование не подневное |
 | change-таблицы | `mdm_employee_rk` + `change_dt = business_dt` |
 
+**С версионными DDS-таблицами (`dds.*`, `dds_dic.*`) — сдвиг на один день.**
+У подневной витрины `business_dt` = день, у версионной таблицы интервал версии
+`valid_from_dttm`–`valid_to_dttm`, где `valid_to_dttm` — исключающая граница:
+
+```sql
+on emart.business_dt + interval '1 day'
+   between dds.valid_from_dttm and dds.valid_to_dttm
+```
+
+Правило — из summary витрины в каталоге; подробнее
+`kb/process/sql-conventions.md`, «Джойн подневной витрины с версионной таблицей».
+
 **Связывать только по ключам `*_rk`.** Джойн по текстовым полям `*_nm` запрещён:
 названия дублируются, меняются, отличаются регистром и пробелами. Ключи есть
 для всех уровней структуры (`lvl{N}_mapped_management_unit_rk`, `lvl{N}_legal_unit_rk`)

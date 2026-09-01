@@ -54,7 +54,7 @@ const EVENTS = [
   // Ответ бота: единственное событие с непустым domains.
   { event: 'bot_answered', thread_id: 'sample-thread', event_ts: TS + 120000,
     actor: 'core', source: 'core',
-    payload: { domains: ['movement', 'headcount-structure'], confidence_key: 'high' } },
+    payload: { domains: ['movement', 'headcount'], confidence_key: 'high' } },
 ];
 
 const rows = EVENTS.flatMap(run).map((r) => ({

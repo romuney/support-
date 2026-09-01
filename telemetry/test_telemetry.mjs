@@ -342,10 +342,10 @@ line('19. Домены роутера бота едут в колонку — к
   // LLM для кластеризации платила бы вторым вызовом модели за готовое.
   const e = run({
     event: 'bot_answered', thread_id: 'p1', event_ts: TS,
-    payload: { domains: ['movement', 'headcount-structure'], confidence_key: 'high' },
+    payload: { domains: ['movement', 'headcount'], confidence_key: 'high' },
   })[0];
   check('домены склеены через запятую',
-    e.domains === 'movement,headcount-structure');
+    e.domains === 'movement,headcount');
   check('confidence_key остался в payload', e.payload.confidence_key === 'high');
 
   const none = run({ event: 'bot_answered', thread_id: 'p1', event_ts: TS, payload: {} })[0];
@@ -1042,11 +1042,11 @@ line('28. Колонки kind и domains: кто их заполняет и по
   //    bot_answered, колонка стояла пустой на всех строках.
   const answered = one({
     event: 'bot_answered', thread_id: 'p1', event_ts: TS, actor: 'core', source: 'core',
-    payload: { domains: ['headcount-structure', 'legal'], confidence_key: 'medium',
+    payload: { domains: ['headcount', 'legal'], confidence_key: 'medium',
                confidence_claimed: 'high', prompt_version: 'a04eed84' },
   });
   check('domains попали в колонку',
-    answered.domains === 'headcount-structure,legal');
+    answered.domains === 'headcount,legal');
   check('пара «заявлено / действует» доехала',
     answered.payload.confidence_claimed === 'high' &&
     answered.payload.confidence_key === 'medium');

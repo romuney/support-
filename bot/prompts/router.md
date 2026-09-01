@@ -117,17 +117,17 @@ domains: [] и articles: []. Пустой ответ здесь честнее �
 ФОРМАТ ВЫВОДА
 Только JSON, без пояснений, без markdown-заборов, без текста до и после:
 
-{"domains": ["headcount-structure"], "articles": ["t-emp-structure"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "грейд"}], "no_question": false}
+{"domains": ["headcount"], "articles": ["t-emp-structure"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "грейд"}], "no_question": false}
 
 Пример с двумя объектами — вопрос про отчёт и витрину под ним. У строки
 отчёта в реестре стоит прочерк в колонке «путь» — статьи нет, поэтому в
 articles его id не идёт, а метаданные по нему нужны и dd_urn возвращается:
 
-{"domains": ["headcount-structure"], "articles": ["t-emp-structure"], "dd": [{"urn": "urn:dd:reports:reports:report:1728", "hint": ""}, {"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "численность"}], "no_question": false}
+{"domains": ["headcount"], "articles": ["t-emp-structure"], "dd": [{"urn": "urn:dd:reports:reports:report:1728", "hint": ""}, {"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "численность"}], "no_question": false}
 
 Пример со словом заказчика — «сколько сотрудников по покраске HQ и BigOps»:
 
-{"domains": ["headcount-structure"], "articles": ["rc-field-synonyms", "t-emp-structure"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "специализация, операционная"}], "no_question": false}
+{"domains": ["headcount"], "articles": ["rc-field-synonyms", "t-emp-structure"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "специализация, операционная"}], "no_question": false}
 
 Все четыре поля обязательны. Нечего вернуть — пустой массив.
 Максимум 6 элементов в articles, максимум 4 объекта в dd.
