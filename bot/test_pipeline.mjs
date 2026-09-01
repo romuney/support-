@@ -1644,14 +1644,42 @@ line('33. ПРОВЕРКА ЗНАЧЕНИЙ: пять исходов звуча�
   // что связка режима записи и условия фильтра в телеметрии (тест 33).
   const sqlCap = Number((js('Build check SQL').match(/MAX_ROWS\s*=\s*(\d+)/) || [])[1]);
   const printCap = Number(
-    (js('Check result').match(/\?\s*6\s*:\s*(\d+)\s*\)\)/) || [])[1]);
+    (js('Check result').match(/MAX_ROWS\s*=\s*(\d+)/) || [])[1]);
   check('потолок словаря найден в обеих нодах',
     Number.isFinite(sqlCap) && Number.isFinite(printCap));
   check('и он один и тот же: ' + sqlCap + ' / ' + printCap, sqlCap === printCap);
+  // Потолок печати обязан БРАТЬСЯ ИЗ КОНСТАНТЫ, а не стоять литералом рядом
+  // с ней: литерал разъедется с константой в той же ноде, и сверка выше
+  // останется зелёной. Тот же приём, что «проверять надо и сам детектор».
+  check('и печать режется константой, а не литералом',
+    !/rest\.slice\(0,\s*\d/.test(js('Check result')));
   // Про emp_specialization_desc известно только «не меньше 200» — прогон
   // 2026-08-27 упёрся в LIMIT и измерил сам потолок, а не кардинальность.
   // Ставить потолком то самое число значит гарантированно резать хвост.
   check('и он выше единственного известного замера (200)', sqlCap > 200);
+
+  // УПЁРЛИСЬ В ПОТОЛОК — И ЭТО МЕНЯЕТ СМЫСЛ ПЕРЕЧНЯ. Пришло ровно столько,
+  // сколько разрешено, значит хвост отрезан: называть такой перечень «всеми
+  // значениями поля» — это гарантия, которой у нас нет. А вслед за ней
+  // разваливается и вывод «поле выбрано неверно»: искомое редкое, сортировка
+  // по частоте, и оно как раз и остаётся за срезом. Тот же класс, что
+  // ALL_CARDS_CAP на 289 колонках и MAX_ROWS = 60 на широком справочнике.
+  const full = runRes(Array.from({ length: sqlCap }, (_, i) => (
+    { fld: 'emp_specialization_desc', val: 'v' + i, cnt: 1, matched: false })));
+  check('обрезка перечня НАЗВАНА, а не молчит',
+    /ПЕРЕЧЕНЬ ОБРЕЗАН ЛИМИТОМ/.test(full.check_block));
+  check('и «ниже все значения» при этом не пишется',
+    !/Ниже все значения/.test(full.check_block));
+  check('и вывод «поле выбрано неверно» не делается',
+    !/ВЫБРАНО НЕВЕРНО/.test(full.check_block));
+  check('и прямо запрещено утверждать отсутствие значения',
+    /НЕ утверждай, что такого\n?\s*значения нет/.test(full.check_block));
+  check('потолок доехал до телеметрии числом', full.check_rows_capped === 1);
+  // А на строку меньше — перечень полный, и прежний вывод остаётся верным.
+  const under = runRes(Array.from({ length: sqlCap - 1 }, (_, i) => (
+    { fld: 'emp_specialization_desc', val: 'v' + i, cnt: 1, matched: false })));
+  check('под потолком перечень по-прежнему называется полным',
+    /Ниже все значения/.test(under.check_block) && under.check_rows_capped === 0);
 
   // 3. Запрос отказал — это НЕ «значений нет».
   const failed = runRes([{ error: "mismatched input 'ILIKE'" }]);
@@ -3567,6 +3595,150 @@ line('57. ДИАГНОЗ КАТАЛОГА — ПО СТАТУСУ, А НЕ ПО 
     check(`HTTP ${code}: код доехал до телеметрии`, r.dd_failed_http.length === 1 &&
       Number(r.dd_failed_http[0].status) === code);
   }
+}
+
+// ===================================================================== 58
+line('58. ЛИШНИЙ ВОПРОС ПРО ДАТУ ЛОВИТСЯ СТРУКТУРОЙ, А НЕ ПЕРЕЧНЕМ ФРАЗ');
+{
+  // Прежняя версия перечисляла шесть формулировок — и была МЁРТВОЙ против
+  // образца ИЗ СОБСТВЕННОГО промпта: «актуальный срез или срез за период?»
+  // стоит в prompts/export.md как пример правильной формы вопроса,
+  // а регулярка требовала «актуальный срез ИЛИ ЗА ПЕРИОД». Тот же класс,
+  // что три кириллических промаха на \w: регулярка читается как верная.
+  const finalJs = js('Final answer');
+  const runFinal = (draft, questionOwn) =>
+    new Function('$', '$json', finalJs)(
+      (name) => {
+        if (name === 'Parse answer') {
+          return { first: () => ({ json: {
+            draft, tech_spec: '', sources: '', confidence_key: 'high',
+            confidence_claimed: 'high', question: questionOwn } }) };
+        }
+        if (name === 'Plan') {
+          return { first: () => ({ json: { question_own: questionOwn } }) };
+        }
+        throw new Error('node not executed: ' + name);
+      }, {})[0].json;
+
+  // 1. Образцы вопроса ИЗ СОБСТВЕННОГО ПРОМПТА: на них детектор обязан
+  // срабатывать, иначе мы учим модель формулировке, которую сами не ловим.
+  const own = fs.readFileSync(new URL('./prompts/export.md', import.meta.url), 'utf8');
+  check('образец вопроса про дату в export.md ещё на месте',
+    /актуальный срез или срез\s*\n?\s*за период/i.test(own));
+  const SAMPLES = [
+    'Актуальный срез или срез за период?',
+    'На какую дату нужны данные?',
+    'За какой период считаем?',
+    'Уточните, пожалуйста, период выгрузки.',
+    'Нужен актуальный срез или история за квартал?',
+  ];
+  for (const q of SAMPLES) {
+    check('ловится: ' + q,
+      runFinal('Черновик.\n' + q, 'сколько сотрудников в юните').draft_asks_date === true);
+  }
+
+  // 2. «Срок:» ОТДЕЛЬНОЙ СТРОКОЙ — это когда файл нужен заказчику,
+  // а не за какой период считать. Значение под этой подписью выбрасывается
+  // из question_own в `Plan`, иначе дата «14.07» гасила бы тревогу ровно
+  // там, где бот переспрашивает зря.
+  const planJs = js('Plan');
+  const runPlan = (question) => new Function('$', '$json', planJs)(
+    (name) => {
+      if (name === 'Decode registry') return { first: () => ({ json: { full: REGISTRY } }) };
+      if (name === 'When called by adapter') {
+        return { first: () => ({ json: { question, mode: '', topic_kind: '' } }) };
+      }
+      throw new Error('node not executed: ' + name);
+    },
+    { output: '{"domains":[],"articles":[],"dd":[]}' },
+  )[0].json;
+  const withDeadline = runPlan(
+    'Cross Data | Выгрузка данных от пользователя @X\n' +
+    'Напиши свой вопрос:\nнужны логины сотрудников юнита\nСрок:\n14.07');
+  check('значение под подписью «Срок» выброшено из своего текста',
+    !/14\.07/.test(withDeadline.question_own));
+  check('а сам вопрос заказчика остался',
+    /логин/.test(withDeadline.question_own));
+  check('и «Срок:» + дата не гасят тревогу',
+    runFinal('Черновик.\nНа какую дату нужны данные?',
+             withDeadline.question_own).draft_asks_date === true);
+
+  // 3. Заказчик период НАЗВАЛ — тревоги нет. Обе формулировки прежнюю
+  // версию проходили молча: она знала «за месяц» и «полугод», но не
+  // «прошлый месяц» и не «полгода».
+  for (const q of [
+    'уволенные за 2 квартал',
+    'сколько ушло за прошлый месяц',
+    'динамика за последние полгода',
+    'численность на 01.07',
+  ]) {
+    check('молчит, когда период назван: ' + q,
+      runFinal('Черновик.\nЗа какой период считаем?', q).draft_asks_date === false);
+  }
+
+  // 4. «Сейчас» — это НЕ названный период, а умолчание, произнесённое
+  // вслух. Самый частый вопрос канала, и переспрашивать про дату на нём
+  // как раз и есть тот лишний круг, ради которого проверка заведена.
+  check('«сколько сейчас» тревогу не гасит',
+    runFinal('Черновик.\nНа какую дату нужны данные?',
+             'сколько сейчас сотрудников').draft_asks_date === true);
+
+  // 5. Верный черновик тревоги не даёт: требование «в ОДНОМ предложении»
+  // существенно — иначе «данные на текущую дату» рядом с любым вопросом
+  // давало бы ложную тревогу.
+  check('верный черновик молчит',
+    runFinal('Данные на текущую дату. Нужны строки по сотрудникам ' +
+             'или сводные цифры?', 'логины юнита').draft_asks_date === false);
+}
+
+// ===================================================================== 59
+line('59. ВЫДУМАННОЕ ИМЯ ПОЛЯ: СВОИ ПСЕВДОНИМЫ ЗАПРОСА НЕ СЧИТАЮТСЯ');
+{
+  // С тех пор как ТЗ стало готовым SQL, в проверяемый текст приехали имена,
+  // которых в материалах нет и быть не может: их придумал синтаксис,
+  // а не автор. Все они горели бы на ВЕРНОМ запросе — то есть ровно на том
+  // черновике, ради которого проверка и заведена.
+  const parseJs = js('Parse answer');
+  const runP = (spec, materials) => new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'Build materials') return { first: () => ({ json: { materials } }) };
+      if (name === 'When called by adapter') {
+        return { first: () => ({ json: { question: 'вопрос', mode: '' } }) };
+      }
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      throw new Error('node not executed: ' + name);
+    },
+    { output: 'ЧЕРНОВИК ОТВЕТА: черновик\nТЗ ДЛЯ АНАЛИТИКА:\n' + spec +
+              '\nУВЕРЕННОСТЬ: высокая' },
+  )[0].json;
+
+  const MAT = 'МЕТАДАННЫЕ ОБЪЕКТА urn:dd:tables:greenplum:table:' +
+    'emart.mdm_employee_structure_d\nПОЛЯ: mdm_employee_rk, last_day_flg, ' +
+    'active_employee_flg, company_fire_flg, mapped_management_unit_rk';
+  const SQL = [
+    '```sql',
+    'WITH active_emp AS (',
+    '  SELECT mdm_employee_rk, mapped_management_unit_rk',
+    '  FROM prod_v_emart.mdm_employee_structure_d e',
+    '  WHERE e.last_day_flg = 1 AND e.active_employee_flg = 1',
+    ')',
+    'SELECT date_trunc(\'month\', current_date) AS month_start,',
+    '       count(a.mdm_employee_rk) AS emp_cnt',
+    'FROM active_emp a',
+    '-- 7232d114… — Human Capital Origination',
+    'GROUP BY 1',
+    '```',
+  ].join('\n');
+  const okRun = runP(SQL, MAT);
+  check('псевдонимы, CTE, схема prod_v_ и функции выдуманными не считаются',
+    okRun.draft_invented_fields.length === 0);
+
+  // И проверка НЕ ослепла: настоящее выдуманное имя всё ещё ловится,
+  // в том числе спрятанное в комментарии `--`.
+  const badRun = runP(SQL.replace('GROUP BY 1',
+    '-- дальше берём child_age из витрины детей\nGROUP BY 1'), MAT);
+  check('а выдуманное имя ловится и в комментарии',
+    badRun.draft_invented_fields.includes('child_age'));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

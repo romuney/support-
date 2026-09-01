@@ -398,6 +398,14 @@ bot AS (
            -- угадывает написание с первого раза.
            max_by(CAST(json_extract_scalar(payload, '$.check_exact') AS integer),
                   event_ts) AS check_exact,
+           -- ПОТОЛОК ДОСТИГНУТ: по скольким полям пришло ровно столько
+           -- строк, сколько разрешает LIMIT запроса. Это измерение НАШЕГО
+           -- лимита, а не кардинальности поля — путать их дорого: прогон
+           -- разведки 2026-08-27 так «намерил» 800 специализаций, которые
+           -- были 200 × 4. Доля растёт — значит потолок пора поднимать,
+           -- и до тех пор перечень значений автору приходит обрезанным.
+           max_by(CAST(json_extract_scalar(payload, '$.check_rows_capped') AS integer),
+                  event_ts) AS check_rows_capped,
            -- По скольким «витрина.поле» поднимался словарь значений.
            -- Отдельно от check_rows: строки — это размер словаря, а не
            -- число проверенных полей, и путать их в дашборде дорого.
@@ -677,6 +685,7 @@ SELECT
     COALESCE(b.check_skipped, 0)                            AS check_skipped,
     COALESCE(b.check_rows, 0)                               AS check_rows,
     COALESCE(b.check_exact, 0)                              AS check_exact,
+    COALESCE(b.check_rows_capped, 0)                        AS check_rows_capped,
     COALESCE(b.check_fields, 0)                             AS check_fields,
     b.unit_link,
     b.unit_state,
