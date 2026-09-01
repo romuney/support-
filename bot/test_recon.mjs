@@ -460,24 +460,32 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
   const COL = 'urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.business_dt';
   // Элемент /related — это СВЯЗЬ, сущность вложена в entity. На этой
   // распаковке уже один раз молча получился пустой инвентарь колонок.
-  const col = (name, summary) => ({
+  const col = (name, summary, attrs) => ({
     relationId: 'r-' + name,
     entity: {
       urn: `urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.${name}`,
       fqn: `emart.mdm_employee_structure_d.${name}`,
       type: 'COLUMN',
       ...(summary === undefined ? {} : { summary: { data: summary } }),
+      ...(attrs === undefined ? {} : { attributes: attrs }),
     },
   });
+  const ATTRS = {
+    column_type: { type: 'text', data: 'date' },
+    keys: { type: 'text-list', data: ['PK'] },
+    comment: { type: 'text', data: 'business_dt генерируется от даты найма' },
+  };
   const batch = (items, total) => OK({ [TBL]: { totalCount: total ?? items.length, data: items } });
   const REF = OK({ data: 'Дата среза' });
   const EMPTY_SENS = OK({ [COL]: { totalCount: 0, data: [] } });
+  const ASKED = (n) => ({ asked: n, total_urns: n, body: '{}' });
 
   // 1. ОПТОВЫЙ ПУТЬ РАБОТАЕТ: описание эталонной колонки совпало.
   const works = run({
     'J ref summary': REF,
     'J batch columns': batch([col('business_dt', 'Дата среза'), col('grade', 'Грейд')]),
     'J batch query': batch([col('business_dt', 'Дата среза')]),
+    'J sens urns': ASKED(1),
     'J batch sens': EMPTY_SENS,
   });
   check('совпадение с эталоном названо прямо', /ОПИСАНИЕ СОВПАЛО С ЭТАЛОНОМ/.test(works));
@@ -489,6 +497,7 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
     'J ref summary': REF,
     'J batch columns': batch([col('business_dt'), col('grade')]),
     'J batch query': batch([col('business_dt')]),
+    'J sens urns': ASKED(1),
     'J batch sens': EMPTY_SENS,
   });
   check('игнор поля назван игнором, а не отказом', /ПРОИГНОРИРОВАНО/.test(ignored));
@@ -504,6 +513,7 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
     'J ref summary': { statusCode: 404 },
     'J batch columns': batch([col('business_dt')]),
     'J batch query': batch([col('business_dt')]),
+    'J sens urns': ASKED(1),
     'J batch sens': EMPTY_SENS,
   });
   check('без эталона прогон объявлен бесполезным', /ЭТАЛОН НЕ ПОЛУЧЕН/.test(noRef));
@@ -516,6 +526,7 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
     'J ref summary': REF,
     'J batch columns': batch([col('business_dt', 'Дата среза')], 289),
     'J batch query': batch([col('business_dt', 'Дата среза')], 289),
+    'J sens urns': ASKED(1),
     'J batch sens': EMPTY_SENS,
   });
   check('неполный список назван неполным', /СПИСОК НЕПОЛНЫЙ: 1 из 289/.test(capped));
@@ -525,6 +536,7 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
     'J ref summary': REF,
     'J batch columns': { statusCode: 400, body: { message: 'bad body' } },
     'J batch query': batch([col('business_dt', 'Дата среза')]),
+    'J sens urns': ASKED(1),
     'J batch sens': EMPTY_SENS,
   });
   check('отказ назван кодом', /HTTP 400/.test(failed));
@@ -537,6 +549,7 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
     'J ref summary': REF,
     'J batch columns': OK([{ entity: {} }]),
     'J batch query': batch([col('business_dt', 'Дата среза')]),
+    'J sens urns': ASKED(1),
     'J batch sens': EMPTY_SENS,
   });
   check('чужая форма ответа названа, а не разобрана в ноль',
@@ -545,6 +558,68 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
   // 7. Невыполнившийся узел прогон переживает.
   check('невыполнившийся узел шейпер переживает',
     /ФАЗА J/.test(run({ 'J ref summary': REF })));
+
+  // 8. ОПИСАНИЕ — НЕ ВСЁ, ЧТО НУЖНО ПОИСКУ ПО СМЫСЛУ. Прогон 2026-09-01
+  // ответил «289 из 289 с описанием», и на этом вывод «оптовый путь
+  // настоящий» был бы правдой про ОДНО поле и догадкой про три остальных:
+  // by_meaning читает карточку ради `comment` (в проекте прямо записано,
+  // что он важнее summary), типа данных и ключей.
+  const withAttrs = run({
+    'J ref summary': REF,
+    'J batch columns': batch([col('business_dt', 'Дата среза', ATTRS),
+                              col('grade', 'Грейд', ATTRS)]),
+    'J batch query': batch([col('business_dt', 'Дата среза', ATTRS)]),
+    'J sens urns': ASKED(2),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('атрибуты посчитаны отдельно от описаний',
+    /с непустыми атрибутами: 2 из 2/.test(withAttrs));
+  check('и названы поимённо, а не числом',
+    /comment: ЕСТЬ/.test(withAttrs) && /column_type: ЕСТЬ/.test(withAttrs));
+  const noAttrs = run({
+    'J ref summary': REF,
+    'J batch columns': batch([col('business_dt', 'Дата среза')]),
+    'J batch query': batch([col('business_dt', 'Дата среза')]),
+    'J sens urns': ASKED(1),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('описание без атрибутов НЕ выдаётся за полный оптовый путь',
+    /с непустыми атрибутами: 0 из 1/.test(noAttrs) && /comment: НЕТ/.test(noAttrs));
+
+  // 9. ЧУВСТВИТЕЛЬНОСТЬ: ноль сущностей на ОДНОМ URN — не измерение.
+  // Ровно в это упёрся прогон 2026-09-01: отправили один URN, получили
+  // ноль, и это одинаково согласуется с «ручка работает, поле открыто»
+  // и с «оптом не отвечает». Шейпер обязан сказать, что вывода нет.
+  check('ноль признаков названо НЕизмерением, а не «работает»',
+    /признака нет НИ У ОДНОЙ/.test(noAttrs) &&
+    /из этого прогона не следует/.test(noAttrs));
+  const sensOK = run({
+    'J ref summary': REF,
+    'J batch columns': batch([col('business_dt', 'Дата среза', ATTRS)]),
+    'J batch query': batch([col('business_dt', 'Дата среза', ATTRS)]),
+    'J sens urns': ASKED(2),
+    'J batch sens': OK({
+      [COL]: { totalCount: 1, data: [{ entity: { displayName: 'EMP_SENS', urn: 'u1' } }] },
+      'urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.grade':
+        { totalCount: 0, data: [] },
+    }),
+  });
+  check('признак оптом — только когда он реально пришёл',
+    /ПРИЗНАК ОПТОМ ПРИХОДИТ/.test(sensOK) && /EMP_SENS/.test(sensOK));
+  check('и ответ по каждому URN сверен числом ключей',
+    /ключей столько же, сколько URN/.test(sensOK));
+  // Ключей меньше, чем URN, — молчание по части колонок неотличимо
+  // от «поле открыто», и на такую ручку отсев ПДн переводить нельзя.
+  const sensPartial = run({
+    'J ref summary': REF,
+    'J batch columns': batch([col('business_dt', 'Дата среза', ATTRS)]),
+    'J batch query': batch([col('business_dt', 'Дата среза', ATTRS)]),
+    'J sens urns': ASKED(120),
+    'J batch sens': OK({ [COL]: { totalCount: 0, data: [] } }),
+  });
+  check('неполный оптовый ответ назван опасным, а не «нет признака»',
+    /ключей МЕНЬШЕ, чем URN \(1 против 120\)/.test(sensPartial) &&
+    /переводить нельзя/.test(sensPartial));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

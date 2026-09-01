@@ -1656,15 +1656,15 @@ PHASE_J_POST = [
     # Тот же вопрос условием, а не ключом. `RelationsConditional` требует
     # `type` и `direction`; значения — те, что отдаёт `/related` у таблицы
     # для ключа `columns`: CONTAINS / src_dest, сущность COLUMN.
+    # Прогон 2026-09-01 ответил сюда HTTP 400, и причина нашлась
+    # в спецификации: `EntityFilter.type` — это СТРОКА, а не массив.
+    # Массив там у `SearchFilters` в /search/query, и я перенёс форму
+    # оттуда по аналогии — то есть ровно то, от чего защищает правило
+    # «ключи связей не угадываются». Схема правит догадку.
     ("J batch query", "/entity/batch/related-by-query",
      {"urns": [PROBE_TABLE_URN], "type": "CONTAINS", "direction": "src_dest",
-      "entity": {"type": ["COLUMN"]},
+      "entity": {"type": "COLUMN"},
       "entityFields": _BATCH_FIELDS, "limit": 500}),
-    # Чувствительность оптом. Ключ подтверждён фазой I живым прогоном.
-    # Колонки здесь заданы явно: если оптовый путь работает, его вход —
-    # список URN колонок, а не URN таблицы.
-    ("J batch sens", "/entity/batch/related",
-     {"urns": [PROBE_REF_COL], "key": "full_column_sensitivity", "limit": 100}),
 ]
 for _i, (_nm, _path, _body) in enumerate(PHASE_J_POST):
     _n = node(
@@ -1687,6 +1687,63 @@ for _i, (_nm, _path, _body) in enumerate(PHASE_J_POST):
     # «намерила» 800 строк, которых не было.
     _n["executeOnce"] = True
     nodes.append(_n)
+
+# ЧУВСТВИТЕЛЬНОСТЬ ОПТОМ — ПО ВСЕМ КОЛОНКАМ ВИТРИНЫ, А НЕ ПО ОДНОЙ.
+#
+# Прогон 2026-09-01 отправил ОДИН URN и получил ноль сущностей. Это
+# не измерение: у той колонки признака может не быть вовсе, и ноль
+# одинаково согласуется с «ручка работает, поле открыто» и с «ручка
+# оптом не отвечает». Отличить можно только спросив разом много колонок
+# и увидев НЕНУЛЕВОЙ ответ хоть у одной — а у витрины сотрудников
+# закрытые поля точно есть (ФИО, телефон).
+#
+# Список URN берётся из ответа предыдущей пробы, а не выписывается руками:
+# выписанный разъехался бы с витриной молча.
+SENS_URNS_JS = r"""
+const TABLE = '__PROBE_TABLE_URN__';
+let bucket = {};
+try {
+  const r = $('J batch columns').first().json;
+  const body = (r && (r.body ?? r)) || {};
+  bucket = body[TABLE] || body[Object.keys(body)[0]] || {};
+} catch (e) { bucket = {}; }
+const urns = (Array.isArray(bucket.data) ? bucket.data : [])
+  .map((x) => (x && x.entity ? x.entity : x))
+  .map((e) => String((e && e.urn) || ''))
+  .filter(Boolean);
+// Потолок запроса, а не потолок ручки: 289 URN в теле — это уже проба
+// на размер тела, и провал по нему читался бы как «оптом не работает».
+// Меряем сначала то, что меряем: отвечает ли ручка списком.
+const SEND = urns.slice(0, 120);
+return [{ json: {
+  asked: SEND.length,
+  total_urns: urns.length,
+  body: JSON.stringify({ urns: SEND, key: 'full_column_sensitivity', limit: 500 }),
+} }];
+"""
+
+nodes.append(
+    node("J sens urns", "n8n-nodes-base.code", 2, [150 + 2 * 200, 2260],
+         {"mode": "runOnceForAllItems",
+          "jsCode": SENS_URNS_JS.replace("__PROBE_TABLE_URN__", PROBE_TABLE_URN)})
+)
+_sens = node(
+    "J batch sens", "n8n-nodes-base.httpRequest", 4.4, [150 + 3 * 200, 2260],
+    {
+        "method": "POST",
+        "url": f"{BASE}/entity/batch/related",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": True,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": copy.deepcopy(DD_OPTS),
+    },
+    DP_CRED,
+)
+_sens["onError"] = "continueRegularOutput"
+_sens["executeOnce"] = True
+nodes.append(_sens)
 
 SHAPE_BULK_JS = r"""
 // Фаза J: есть ли оптовый путь за описаниями полей.
@@ -1791,6 +1848,35 @@ for (const nm of ['J batch columns', 'J batch query']) {
         ' иначе измеряется потолок, а не ручка.');
   }
   say(`    с непустым описанием: ${withDesc.length} из ${items.length}`);
+  // ОПИСАНИЕ — ЭТО НЕ ВСЁ, ЧТО НУЖНО ПОИСКУ ПО СМЫСЛУ.
+  //
+  // Прогон 2026-09-01 показал, что summary приходит оптом по всем 289
+  // колонкам. Но `by_meaning` читает карточку не ради summary: в проекте
+  // прямо записано, что `comment` ВАЖНЕЕ — там границы генерации поля,
+  // развёртка витрины, поведение по уволенным, то есть то, из-за чего
+  // считают неверно. Плюс тип данных и ключи.
+  //
+  // Мерить надо и это, иначе «оптовый путь работает» окажется правдой
+  // про одно поле и догадкой про три остальных — а переводить на него
+  // ветку каталога придётся целиком.
+  const withAttrs = items.filter(
+    (e) => e && e.attributes && typeof e.attributes === 'object' &&
+           Object.keys(e.attributes).length);
+  say(`    с непустыми атрибутами: ${withAttrs.length} из ${items.length}`);
+  const attrKeys = new Set();
+  for (const e of withAttrs) for (const k of Object.keys(e.attributes)) attrKeys.add(k);
+  say('    ключи атрибутов: ' +
+      (attrKeys.size ? [...attrKeys].sort().slice(0, 20).join(', ') : '(ни одного)'));
+  for (const need of ['comment', 'column_type', 'keys']) {
+    say(`      ${need}: ${attrKeys.has(need) ? 'ЕСТЬ' : 'НЕТ'}`);
+  }
+  // Один элемент целиком: форма атрибута — обёртка {type, data}, и значение
+  // живёт в .data. Печатаем её, чтобы разбор писался по факту, а не по
+  // памяти о том, как это выглядело в августе.
+  if (refItem) {
+    say('    эталонный элемент целиком:');
+    say('      ' + JSON.stringify(refItem).slice(0, 500));
+  }
   // ВОТ ЭТА СТРОКА И ЕСТЬ ОТВЕТ ФАЗЫ.
   if (!refItem) {
     say(`    эталонной колонки ${REF_NAME} в ответе НЕТ — сравнивать нечего`);
@@ -1815,19 +1901,49 @@ for (const nm of ['J batch columns', 'J batch query']) {
 
 const sens = resp('J batch sens');
 say('— J batch sens (чувствительность оптом)');
+let asked = 0;
+try { asked = Number($('J sens urns').first().json.asked) || 0; } catch (e) { asked = 0; }
 if (sens.miss) {
   say('    ' + sens.miss);
   if (sens.body) say('    ' + JSON.stringify(sens.body).slice(0, 300));
+} else if (!asked) {
+  say('    URN не собрались — спрашивать было нечего. Это НЕ ответ про ручку:');
+  say('    смотрите пробу по колонкам выше, она и не дала списка.');
 } else {
   const b = sens.body || {};
   const keys = b && typeof b === 'object' && !Array.isArray(b) ? Object.keys(b) : [];
-  say(`    ключей в ответе: ${keys.length}`);
-  const bucket = b[REF_COL] || b[keys[0]] || {};
-  const items = nodesOf(bucket.data);
-  say(`    totalCount: ${bucket.totalCount ?? '—'}, сущностей: ${items.length}`);
-  say('    Пусто — это НЕ отказ: у колонки может не быть признака вовсе.');
-  say('    Отвечает ли ручка оптом, видно по числу ключей: их должно быть');
-  say('    столько же, сколько URN отправлено.');
+  say(`    отправлено URN: ${asked}, ключей в ответе: ${keys.length}`);
+  // ПЕРВЫЙ ВОПРОС — ОТВЕЧАЕТ ЛИ РУЧКА ОПТОМ ВООБЩЕ. Ключей столько же,
+  // сколько URN, — отвечает; меньше — отвечает не по всем, и это надо
+  // знать до того, как на неё переводить отсев ПДн.
+  if (keys.length === asked) {
+    say('    ✔ ключей столько же, сколько URN: ручка отвечает по каждому');
+  } else {
+    say(`    ключей МЕНЬШЕ, чем URN (${keys.length} против ${asked}):`);
+    say('    по части колонок ответа нет вовсе, и молчание тут неотличимо');
+    say('    от «поле открыто». На такую ручку отсев ПДн переводить нельзя.');
+  }
+  let closed = 0;
+  const labels = [];
+  for (const k of keys) {
+    const items = nodesOf((b[k] || {}).data);
+    if (!items.length) continue;
+    closed += 1;
+    for (const e of items.slice(0, 2)) {
+      const l = String((e && (e.displayName || e.fqn || e.urn)) || '');
+      if (l && !labels.includes(l)) labels.push(l);
+    }
+  }
+  say(`    колонок с признаком: ${closed} из ${keys.length}`);
+  if (closed) {
+    say('    ✔ ПРИЗНАК ОПТОМ ПРИХОДИТ. Ярлыки: ' + labels.slice(0, 5).join(', '));
+  } else {
+    say('    признака нет НИ У ОДНОЙ из спрошенных колонок. Это НЕ значит,');
+    say('    что ручка не работает: у витрины могло не оказаться закрытых');
+    say('    полей среди спрошенных. Но и «оптовая чувствительность');
+    say('    работает» из этого прогона не следует — нужен объект,');
+    say('    у которого признак ТОЧНО есть (витрина детей, фаза I).');
+  }
 }
 
 say('');
@@ -1868,7 +1984,7 @@ CHAIN = (
     + ["Shape sensitivity"]
     + ["J ref summary"]
     + [n for n, _, _ in PHASE_J_POST]
-    + ["Shape bulk"]
+    + ["J sens urns", "J batch sens", "Shape bulk"]
 )
 conn = {
     a: {"main": [[{"node": b, "type": "main", "index": 0}]]}
