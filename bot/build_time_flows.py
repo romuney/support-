@@ -1615,7 +1615,7 @@ core_nodes.append(
                 "conditions": [
                     {
                         "id": "has-files",
-                        "leftValue": "={{ $json.files.length }}",
+                        "leftValue": "={{ $('Plan').first().json.files.length }}",
                         "rightValue": 0,
                         "operator": {"type": "number", "operation": "gt"},
                     }
@@ -1660,7 +1660,7 @@ core_nodes += [
                 "conditions": [
                     {
                         "id": "has-urn",
-                        "leftValue": "={{ $json.dd_count }}",
+                        "leftValue": "={{ $('Plan').first().json.dd_count }}",
                         "rightValue": 0,
                         "operator": {"type": "number", "operation": "gt"},
                     }
@@ -2164,7 +2164,7 @@ core_nodes += [
                 "conditions": [
                     {
                         "id": "has-lookup",
-                        "leftValue": "={{ $json.lookup_needed }}",
+                        "leftValue": "={{ $('Build lookups').first().json.lookup_needed }}",
                         "rightValue": True,
                         "operator": {"type": "boolean", "operation": "true", "singleValue": True},
                     }
@@ -5134,7 +5134,23 @@ try {
   kv('маршрутизация', list(P.added_access));
   kv('метаданные добраны кодом', list(P.dd_added_by_code));
 
-  h('3. Гейты — почему код добирал именно это');
+  // РЕШЕНИЯ ГЕЙТОВ, А НЕ ТОЛЬКО ФАКТ ЗАПУСКА УЗЛА.
+  //
+  // Прогон 01.09: отчёт честно сказал «Call DD Lookup НЕ ЗАПУСКАЛСЯ», но
+  // не сказал ПОЧЕМУ — а причина была в гейте, читавшем $json вместо плана.
+  // Разбор упёрся ровно в этот зазор: видно, что узел не пошёл, и не видно,
+  // какое условие его не пустило.
+  h('3а. Гейты конвейера — что решил каждый');
+  kv('статей в плане (Any articles)', arr(P.files).length);
+  kv('объектов метаданных в плане (Need DD)', P.dd_count == null ? '—' : P.dd_count);
+  if (arr(P.dd).length && !ddl.ran) {
+    L.push('- ⚠️ МЕТАДАННЫЕ ЗАПЛАНИРОВАНЫ, А УЗЕЛ НЕ ПОШЁЛ — смотреть гейт «Need DD»');
+  }
+  kv('справочник юнита (Need lookup)', yn(stage('Run lookups').ran));
+  kv('сверка значений (Need check)', yn(chk.ran));
+  kv('доспрос (Need retry)', yn(ask.ran));
+
+  h('3. Гейты режима — почему код добирал именно это');
   kv('выгрузка', yn(P.is_export));
   kv('просьба про запрос', yn(P.is_query_help));
   kv('вопрос про доступ', yn(P.is_access));
@@ -5705,6 +5721,23 @@ return [{ json: { check_values: lines.join('\n'), ask_pairs_found: lines.length 
 check_sql = node("Build check SQL", "n8n-nodes-base.code", 2, [1960, 300],
                  {"jsCode": CHECK_SQL_JS})
 
+# ГЕЙТЫ ЧИТАЮТ ПОЛЕ У ТОГО УЗЛА, КОТОРЫЙ ЕГО ПРОИЗВЁЛ, А НЕ ИЗ $json.
+#
+# $json — это то, что ПРИТЕКЛО по проводу, и оно зависит от всей цепочки перед
+# гейтом. Любой узел, вставленный или выключенный между производителем поля
+# и гейтом, молча меняет условие: поля в элементе нет, `undefined > 0` ложно,
+# ветка не идёт никогда. Отказ тихий — флоу зелёный, узел просто не выполняется.
+#
+# Этот класс уже стоил проекту дважды. Живой прогон: в ядре руками выключили
+# «Collect articles»; выключенная нода в n8n пропускает данные НАСКВОЗЬ, и
+# в «Need DD» вместо плана приходил ответ GitLab по статье — `Call DD Lookup`
+# не выполнялся НИ РАЗУ, а по виду флоу это неотличимо от «метаданные
+# не понадобились».
+#
+# Чтение через $('Имя узла') от цепочки не зависит вовсе: n8n отдаёт данные
+# узла независимо от того, по какой ветке пришло управление. Это тот же
+# приём, которым в проекте добираются мастера домена и материалы автора,
+# и та же причина: свойство конструкции вместо дисциплины.
 # Гейт: пустой SQL — автор не просил проверки, или ни одна пара не прошла
 # сверку с инвентарём. Тогда цикла нет и ответ первого прохода окончателен.
 need_check = {
@@ -5713,7 +5746,7 @@ need_check = {
             "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
             "conditions": [{
                 "id": "has-check",
-                "leftValue": "={{ $json.check_sql }}",
+                "leftValue": "={{ $('Build check SQL').first().json.check_sql }}",
                 "rightValue": "",
                 "operator": {"type": "string", "operation": "notEmpty", "singleValue": True},
             }],
@@ -5780,7 +5813,7 @@ need_retry = {
             "options": {"caseSensitive": True, "typeValidation": "loose", "version": 2},
             "conditions": [{
                 "id": "want-retry",
-                "leftValue": "={{ $json.check_retry }}",
+                "leftValue": "={{ $('Build check SQL').first().json.check_retry }}",
                 "rightValue": "true",
                 "operator": {"type": "boolean", "operation": "true", "singleValue": True},
             }],
@@ -5803,6 +5836,11 @@ need_check2["id"] = "need-check-2"
 need_check2["name"] = "Need check after ask"
 need_check2["position"] = [2680, 600]
 need_check2["parameters"]["conditions"]["conditions"][0]["id"] = "has-check-2"
+# ИСТОЧНИК У КОПИИ СВОЙ. Первый гейт читает SQL у «Build check SQL», второй —
+# у «Retry check SQL»: узлы разные, поле одноимённое, и копия, оставленная
+# с чужим источником, проверяла бы первый SQL вместо второго после доспроса.
+need_check2["parameters"]["conditions"]["conditions"][0]["leftValue"] = (
+    "={{ $('Retry check SQL').first().json.check_sql }}")
 
 core_nodes += [
     check_sql,
