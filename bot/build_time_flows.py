@@ -1629,7 +1629,11 @@ FIELDS_JS = r"""
 // отдаёт «ВСЕ ПОЛЯ ТАБЛИЦЫ: id, individualid, birthdate, …», ровно
 // 25 имён, — а разбиралось из них НОЛЬ, и ядро объявляло, что каталог
 // состава не дал. Бьёт по любой витрине с полем `id`, `dt`, `rk`.
-const IDENT = /^[a-z][a-z0-9_]+$/;
+// Регистр и ведущее подчёркивание допускаются: у витрин из внешних систем
+// встречаются `CommonAddressId`, `Email`, `__contract__`. Строгий вариант
+// `[a-z][a-z0-9_]+` требовал соответствия от КАЖДОГО элемента перечня, и одно
+// такое имя роняло разбор всей строки в ноль — измерено на витрине детей.
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // СКОЛЬКО ПОЛЕЙ ШЕЙПЕР ОБЕЩАЛ. Нужно не для красоты: разбор идёт по формату,
 // который пишет другая нода, и промах формата обязан быть громким. Обещано
@@ -1658,7 +1662,7 @@ function fieldsOf(body) {
   for (const raw of String(body || '').split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    const bullet = line.match(/^[—–-]\s*([a-z][a-z0-9_]+)\b/);
+    const bullet = line.match(/^[—–-]\s*([A-Za-z_][A-Za-z0-9_]*)\b/);
     if (bullet) { set.add(bullet[1]); continue; }
     const list = line.replace(/^[^:]{0,60}:\s*/, '');
     if (!list.includes(',')) continue;
@@ -1668,6 +1672,53 @@ function fieldsOf(body) {
     }
   }
   return set;
+}
+
+// ЕДИНСТВЕННЫЙ РАЗБОР ОТВЕТА КАТАЛОГА — ЗДЕСЬ, И ЧИТАЮТ ЕГО ВСЕ.
+//
+// «Build lookups» и «Build materials» отвечали на один и тот же вопрос —
+// дал ли каталог состав полей — КАЖДЫЙ СВОИМ разбором текста. Расхождение
+// достижимо не «при следующем дрейфе», а прямо сейчас: `fieldsOf` требует
+// соответствия IDENT от КАЖДОГО элемента перечня, и одно имя вида
+// `CommonAddressId` или `__contract__` роняло разбор в ноль. Тогда одна
+// нода уходила за составом в `information_schema`, а вторая уверенно
+// печатала автору «Каталог состава этой витрины не дал» — два
+// противоречащих утверждения в одних материалах.
+//
+// Теперь порядок один: СТРУКТУРА, потом текст запасным путём.
+function ddFieldsOf(res) {
+  const st = res && res.dd;
+  // Основной путь: шейпер отдал структуру. Разбирать нечего.
+  if (st && Array.isArray(st.fields) && st.fields.length) {
+    return {
+      names: st.fields.map((f) => String(f.name || '')).filter(Boolean),
+      declared: Number.isFinite(st.total) ? st.total : st.fields.length,
+      sensitive: st.fields.filter((f) => f.sensitive)
+        .map((f) => String(f.name || '')).filter(Boolean),
+      from: 'struct',
+    };
+  }
+  // Совместимость: `DD Lookup` мог быть не переимпортирован.
+  const flat = Array.isArray(res && res.dd_fields)
+    ? res.dd_fields.map((f) => String(f || '').trim()).filter(Boolean)
+    : [];
+  if (flat.length) {
+    return {
+      names: flat,
+      declared: Number.isFinite(res.dd_total) ? res.dd_total : flat.length,
+      sensitive: [],
+      from: 'legacy_fields',
+    };
+  }
+  // Последний рубеж: старый субворкфлоу, только текст.
+  const meta = String((res && res.dd_meta) || '');
+  const set = fieldsOf(meta);
+  return {
+    names: [...set],
+    declared: declaredOf(meta),
+    sensitive: [],
+    from: set.size ? 'legacy_text' : 'none',
+  };
 }
 """
 
@@ -1815,8 +1866,10 @@ planned.forEach((obj, idx) => {
   const name = m[2].toLowerCase();
   const full = schema + '.' + name;
   if (seen.has(full)) return;
-  // Каталог дал состав — спрашивать данные незачем.
-  if (fieldsOf(String(ddResults[idx]?.dd_meta ?? '')).size) return;
+  // Каталог дал состав — спрашивать данные незачем. Разбор ОБЩИЙ
+  // с «Build materials»: раньше каждая нода отвечала на этот вопрос своим
+  // способом, и на одном и том же ответе они расходились.
+  if (ddFieldsOf(ddResults[idx] || {}).names.length) return;
   seen.add(full);
   jobs.push({
     lookup_kind: 'columns',
@@ -2094,6 +2147,9 @@ const ddNoColumns = [];
 // Шейпер объявил число полей, а разбор не увидел ни одного: формат перечня
 // разъехался с разбором. Поломка БОТА, и чинится она в коде.
 const ddParseFailed = [];
+// Витрины с разобранным составом полей — структурой, а не прозой.
+// Потребители в ядре читают этот список, а не разгадывают текст.
+const ddTables = [];
 ddResults.forEach((res, idx) => {
   // Порядок сохраняется Split Out, поэтому объект берём из плана по индексу.
   const urn = planned[idx]?.urn ?? '(объект ' + (idx + 1) + ')';
@@ -2130,12 +2186,17 @@ ddResults.forEach((res, idx) => {
     // остался запасным путём для старой версии субворкфлоу: пока она
     // не переимпортирована, ядро не должно ослепнуть. Но основной путь
     // теперь не парсит ничего, и разъезжаться формату не с чем.
-    const listed = Array.isArray(res?.dd_fields)
-      ? res.dd_fields.map((f) => String(f || '').trim()).filter(Boolean)
-      : null;
-    const inv = listed && listed.length ? new Set(listed) : fieldsOf(meta);
-    const declared = Number.isFinite(res?.dd_total) && res.dd_total > 0
-      ? res.dd_total : declaredOf(meta);
+    const parsed = ddFieldsOf(res || {});
+    const inv = new Set(parsed.names);
+    const declared = parsed.declared;
+    // Состав полей и закрытые поля кладём В ВЫВОД, а не выбрасываем:
+    // «Build check SQL» и «Parse answer» читают ЭТО, а не выковыривают
+    // из склеенного текста своими регулярками.
+    const tblName = (urn.match(/table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
+    if (tblName && inv.size) {
+      ddTables.push({ name: tblName, urn, fields: [...inv],
+                      sens: parsed.sensitive, from: 'catalog' });
+    }
     if (!inv.size) {
       ddNoFields.push(urn);
       if (/ОШИБКИ DD/.test(meta)) ddBadUrn.push(urn);
@@ -2789,6 +2850,18 @@ return [{
     // пробелом БЫТЬ ПЕРЕСТАЛО, и понижать уверенность за него нельзя.
     cols_from_data: Object.keys(dataCols),
     cols_unknown: Object.keys(dataColsFailed),
+    // ЕДИНЫЙ СПИСОК ВИТРИН СО СОСТАВОМ ПОЛЕЙ. Каталог и данные в одном
+    // формате; при совпадении имени приоритет у КАТАЛОГА — у него есть
+    // описания и признак чувствительности, у данных только имена.
+    tables: (() => {
+      const byName = new Map();
+      for (const t of ddTables) byName.set(t.name, t);
+      for (const [name, names] of Object.entries(dataCols)) {
+        if (byName.has(name)) continue;
+        byName.set(name, { name, urn: '', fields: names, sens: [], from: 'data' });
+      }
+      return [...byName.values()];
+    })(),
     // Каталог ответил, а состава полей не дал: URN в реестре не тот либо
     // витрины в каталоге нет. Отдельно от dd_failed — чинится строкой
     // реестра, а не доступом.
@@ -3997,71 +4070,73 @@ const meta = String(mat.materials || '');
 // Правило то же, по которому каждый блок метаданных подписан своим URN:
 // два инвентаря без подписи — это приглашение приписать поле не той витрине.
 // Для автора это сделали 2026-08-26, а сборщик SQL остался на общем множестве.
+// СОСТАВ ПОЛЕЙ БЕРЁТСЯ ИЗ СТРУКТУРЫ, А НЕ ВЫКОВЫРИВАЕТСЯ ИЗ ТЕКСТА.
+//
+// «Build materials» уже разобрал ответ каталога и сложил витрины списком
+// `tables[{name, urn, fields, sens, from}]`. Раньше эта нода разбирала
+// склеенный текст материалов заново — своей регуляркой по блокам
+// «=== МЕТАДАННЫЕ КАТАЛОГА: … ===», — и из этого росли три отдельные
+// поломки: блок «СОСТАВ ПОЛЕЙ ИЗ ДАННЫХ» она не знала вовсе (на витрине
+// без каталога проверка значений выключалась целиком с неверной причиной
+// «нет в инвентаре»); при двух витринах `sensLine` читала только ПЕРВЫЙ
+// блок, и закрытые поля второй не отсеивались; а поле из ОПИСАНИЯ соседа
+// приписывалось витрине как своё.
+//
+// Текстовый разбор остаётся ЗАПАСНЫМ путём — на случай, если ядро
+// переимпортировано, а порядок нод в прогоне другой.
 const tables = [];
 {
-  // Блоки в материалах: «=== МЕТАДАННЫЕ КАТАЛОГА: <urn> ===» и текст до
-  // следующего «=== ». Имя витрины — хвост урна после последнего двоеточия.
+  const listed = Array.isArray(mat.tables) ? mat.tables : [];
+  for (const t of listed) {
+    if (!t || !t.name || !Array.isArray(t.fields) || !t.fields.length) continue;
+    tables.push({
+      name: String(t.name),
+      fields: new Set(t.fields.map((f) => String(f))),
+      sens: new Set((Array.isArray(t.sens) ? t.sens : []).map((f) => String(f))),
+      // Набор из ДАННЫХ полон по именам, но у него нет описаний: фильтры
+      // по нему ставить можно — это настоящий состав витрины.
+      fromProse: false,
+      from: String(t.from || 'catalog'),
+    });
+  }
+}
+if (!tables.length) {
+  // Запасной путь: структуры нет, разбираем текст как раньше.
   const RE = /=== МЕТАДАННЫЕ КАТАЛОГА: (\S+) ===/g;
   const marks = [];
   let m;
   while ((m = RE.exec(meta)) !== null) marks.push({ urn: m[1], at: m.index, end: RE.lastIndex });
-  // ГРАНИЦА БЛОКА — СЛЕДУЮЩИЙ «=== » ЛЮБОГО ВИДА, а не следующие метаданные.
-  //
-  // Между блоками каталога и после них лежат другие блоки: «ПОЗВАТЬ ЭКСПЕРТА
-  // ПО ТЕМЕ», «В ОБРАЩЕНИИ ССЫЛКА НА ЮНИТ», «СЛУЖЕБНЫЕ ЗАМЕТКИ О ПОЛНОТЕ»,
-  // и в них полно имён полей. Режь до следующих МЕТАДАННЫХ — и весь этот
-  // текст припишется полям предыдущей витрины, после чего пара уйдёт
-  // в запрос к таблице, где такого поля нет: «Column … cannot be resolved».
-  // Тот же класс, что границы секций реестра, которые в проекте уже
-  // разъезжались дважды: соседа по имени вписывать нельзя, границей должен
-  // быть ЛЮБОЙ следующий заголовок.
   const nextBlock = (from) => {
     const at = meta.indexOf('\n=== ', from);
     return at === -1 ? meta.length : at;
   };
-  // СОСТАВ ПОЛЕЙ — ЭТО СПИСОК, А НЕ ТЕКСТ БЛОКА.
-  //
-  // Раньше поля выскребались регуляркой по ВСЕЙ прозе блока, и любое слово
-  // из описания становилось «полем этой витрины». Живой прогон 2026-08-31:
-  // у колонки `lvl13_mapped_management_unit_rk` в комментарии владельца
-  // упомянут `valid_to_dttm` — и `whereFor` добавил витрине сотрудников
-  // фильтр версии, которого у неё нет и быть не может:
-  //
-  //     line 7:12: Column 'valid_to_dttm' cannot be resolved
-  //
-  // Тот же класс, что граница блока, которую чинили абзацем выше, только
-  // на уровень глубже: там витрине приписывался текст СОСЕДНЕГО блока,
-  // здесь — текст её собственных описаний. Проза про поле полем не является.
-  //
-  // Шейпер DD печатает состав в двух разборных формах, и читаем мы ровно их:
-  //   — строка-перечень «a, b, c» после заголовка «ВСЕ ПОЛЯ ТАБЛИЦЫ»;
-  //   — маркер подробностей «— имя_поля (тип) [PK]».
-  // Всё остальное — описания, комментарии, заметки о доступе — проза,
-  // и в инвентарь она не попадает.
   for (let i = 0; i < marks.length; i++) {
     const body = meta.slice(marks[i].end, nextBlock(marks[i].end));
     const name = (marks[i].urn.match(/table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1] || '';
-    if (!name) continue;   // отчёты и ноутбуки таблицами не являются
+    if (!name) continue;
     const fields = fieldsOf(body);
-    // Запасной путь ВНУТРИ блока: формат перечня изменился и не разобралось
-    // ни одного поля. Молча оставить пустой набор нельзя — тогда каждая пара
-    // отсеется с причиной «нет в инвентаре», то есть проверка выключится
-    // целиком, а выглядеть будет как нормальная работа. Берём прозу, как
-    // раньше, но помечаем: по такому набору фильтры не ставятся.
-    if (fields.size) tables.push({ name, fields, fromProse: false });
+    if (fields.size) tables.push({ name, fields, sens: new Set(), fromProse: false });
     else tables.push({
       name,
       fields: new Set(body.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []),
+      sens: new Set(),
       fromProse: true,
     });
   }
 }
-// Запасной путь: формат блоков изменился и ни одной витрины не разобралось.
-// Тогда работаем как раньше — по всему тексту и первому урну. Хуже, чем
-// по блокам, но лучше, чем не проверить вовсе.
+// Последний рубеж: ни структуры, ни блоков — берём первый урн из текста
+// и весь текст за инвентарь. Хуже, чем по блокам, но лучше, чем выключить
+// проверку целиком, объявив «в материалах нет витрины».
 if (!tables.length) {
-  const one = (meta.match(/urn:dd:tables:greenplum:table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1];
-  if (one) tables.push({ name: one, fields: new Set(meta.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []) });
+  const one = (meta.match(/table:([a-z0-9_]+\.[a-z0-9_]+)/i) || [])[1];
+  if (one) {
+    tables.push({
+      name: one,
+      fields: new Set(meta.match(/\b[a-z][a-z0-9_]{2,}\b/g) || []),
+      sens: new Set(),
+      fromProse: true,
+    });
+  }
 }
 const known = new Set();
 for (const t of tables) for (const f of t.fields) known.add(f);
@@ -4158,11 +4233,29 @@ const PII_RE = new RegExp(
   '(full_nm|first_nm|last_nm|middle_nm|patronymic|fio|birth|phone|' +
   'email|e_mail|passport|\\binn\\b|snils|address|addr|login)', 'i');
 
-// Второй фильтр — признак из каталога: он может стоять на поле, которого
-// в списке имён нет. Строку печатает шейпер DD, здесь она только читается.
-const sensLine = (meta.match(/ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ[^:]*:([^.]*)\./) || [])[1] || '';
-const sensitive = new Set(
-  (sensLine.match(/[a-z][a-z0-9_]{2,}/gi) || []).map((w) => w.toLowerCase()));
+// Второй фильтр — признак из каталога, и он берётся ИЗ СТРУКТУРЫ по каждой
+// витрине, а не одной регуляркой по всему тексту материалов.
+//
+// Прежняя `sensLine` была НЕглобальной: при двух витринах она читала только
+// ПЕРВЫЙ блок «ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ», и закрытые поля второй не отсеивались
+// вовсе — то есть в запрос уезжали именно те поля, ради которых фильтр
+// и заведён. Тот же класс per-table, что уже чинили в срезе и в привязке
+// пары к витрине.
+const sensitive = new Set();
+for (const t of tables) {
+  for (const f of (t.sens || [])) sensitive.add(String(f).toLowerCase());
+}
+if (!sensitive.size) {
+  // Запасной путь: структуры нет (старый субворкфлоу) — читаем ВСЕ блоки
+  // текста, а не первый.
+  const RE_SENS = /ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ[^:]*:([^.]*)\./g;
+  let m;
+  while ((m = RE_SENS.exec(meta)) !== null) {
+    for (const w of (m[1].match(/[a-z][a-z0-9_]{2,}/gi) || [])) {
+      sensitive.add(w.toLowerCase());
+    }
+  }
+}
 
 const skipped = [];
 const use = [];

@@ -3421,6 +3421,96 @@ line('55. «КАК СОБРАН ЗАПРОС»: ТРАССА ИЗ ФАКТОВ �
     /шаг 1: получить ключ/.test(exp));
 }
 
+// ===================================================================== 56
+line('56. ОДИН ИСТОЧНИК ИСТИНЫ: ДВЕ НОДЫ НЕ МОГУТ РАЗОЙТИСЬ');
+{
+  const URN_K = 'urn:dd:tables:greenplum:table:' +
+    'chrono_peoplehub_masterid.individualchildren_public';
+  // В фикстуре ЕСТЬ имя, не проходящее строгий IDENT (`CommonAddressId`),
+  // и служебное в подчёркиваниях — иначе тест закрепит случай, а не класс.
+  const NAMES = ['id', 'individualid', 'birthdate', 'CommonAddressId', '__contract__'];
+  const DD = { dd_meta: 'ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ: 5\n' + NAMES.join(' | '),
+               dd_fields: NAMES, dd_total: NAMES.length,
+               dd: { ok: true, object_type: 'table', urn: URN_K,
+                     http: [{ req: 'колонки', status: 200 }], total: NAMES.length,
+                     mode: 'by_meaning', cards_requested: 5, cards_received: 4,
+                     fields: NAMES.map((n) => ({ name: n, type: 'text',
+                       desc: 'описание ' + n, comment: '', keys: '',
+                       sensitive: n === 'birthdate',
+                       sensitivity: n === 'birthdate' ? 'EMP_SENS' : '',
+                       card: n === '__contract__' ? 'failed' : 'ok' })) } };
+  const PLAN = { files: [], domains: [], dd: [{ urn: URN_K, hint: '' }],
+                 dd_count: 1, unit_link_kind: '', unit_link_id: '' };
+
+  // (а) «Build lookups» и «Build materials» обязаны СОВПАСТЬ в ответе
+  //     «каталог дал состав?». Раньше каждая отвечала своим разбором,
+  //     и на одном ответе они расходились: одна шла в information_schema,
+  //     вторая печатала автору «каталог состава не дал».
+  const jobs = new Function('$', '$json', js('Build lookups'))(
+    (n) => {
+      if (n === 'Plan') return { first: () => ({ json: PLAN }) };
+      if (n === 'Call DD Lookup') return { all: () => [{ json: DD }] };
+      throw new Error('node not executed: ' + n);
+    }, {}).map((i) => i.json);
+  const mat = new Function('$', '$json', js('Build materials'))(
+    (n) => {
+      if (n === 'Plan') return { first: () => ({ json: PLAN }) };
+      if (n === 'When called by adapter') return { first: () => ({ json: {} }) };
+      if (n === 'Call DD Lookup') return { all: () => [{ json: DD }] };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+
+  const lookupsSaysNoFields = jobs.some((j) => j.lookup_kind === 'columns');
+  const materialsSaysNoFields = mat.dd_no_fields.length > 0;
+  check('обе ноды согласны: каталог состав ДАЛ',
+    lookupsSaysNoFields === false && materialsSaysNoFields === false);
+  check('и состав уехал структурой, а не только текстом',
+    Array.isArray(mat.tables) && mat.tables.length === 1 &&
+    mat.tables[0].fields.length === NAMES.length);
+  check('закрытые поля названы отдельно',
+    mat.tables[0].sens.length === 1 && mat.tables[0].sens[0] === 'birthdate');
+
+  // (б) ДВЕ витрины, у второй закрытое поле: отсев обязан работать по ОБЕИМ.
+  //     Прежняя регулярка была неглобальной и читала только первый блок —
+  //     то есть в запрос уезжали именно те поля, ради которых фильтр заведён.
+  const TWO = {
+    materials: 'x',
+    tables: [
+      { name: 'emart.mdm_employee_structure_d', urn: '', from: 'catalog',
+        fields: ['last_day_flg', 'active_employee_flg', 'company_fire_flg', 'grade'],
+        sens: [] },
+      { name: 'hrmart.summary_evaluation', urn: '', from: 'catalog',
+        fields: ['score_nm', 'period_nm'], sens: ['score_nm'] },
+    ],
+  };
+  const runChk = (draft, m = TWO) => new Function('$', '$json', js('Build check SQL'))(
+    (n) => ({ first: () => ({ json: n === 'Parse answer' ? { draft, tech_spec: '' } : m }) }),
+    { draft, check_values: '' }).map((i) => i.json);
+
+  const two = runChk("where score_nm = 'A' and grade = '15'");
+  check('закрытое поле ВТОРОЙ витрины отсеяно',
+    two[0].check_skipped.some((x) => /score_nm .*закрыто по признаку каталога/.test(x)));
+  check('а открытое поле первой проверяется',
+    two.some((r) => /GROUP BY grade/.test(String(r.check_sql || ''))));
+  check('и срез собран по составу СВОЕЙ витрины',
+    two.some((r) => /FROM prod_v_emart\.mdm_employee_structure_d/.test(String(r.check_sql || '')) &&
+      /last_day_flg = 1/.test(String(r.check_sql || ''))));
+
+  // (в) Есть ТОЛЬКО состав из данных — проверка обязана работать и брать
+  //     канонический срез, а не выключаться с причиной «нет в инвентаре».
+  const ONLY_DATA = { materials: 'y', tables: [
+    { name: 'emart.mdm_employee_structure_d', urn: '', from: 'data',
+      fields: ['last_day_flg', 'active_employee_flg', 'company_fire_flg',
+               'emp_specialization_desc'], sens: [] },
+  ] };
+  const data = runChk("where emp_specialization_desc = 'Аналитик'", ONLY_DATA);
+  check('состав из данных не выключает проверку',
+    data[0].check_sql && /emp_specialization_desc/.test(data[0].check_sql));
+  check('и срез по нему ставится, а не пропускается',
+    /last_day_flg = 1/.test(data[0].check_sql) &&
+    /company_fire_flg = 0/.test(data[0].check_sql));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
