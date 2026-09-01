@@ -155,6 +155,8 @@ line('1а. ТРАССИРОВКА: один текст вместо шести �
       dd_count: 1,
       dd_added_by_code: ['urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d'],
       files: ['kb/tables/mdm-employee-structure-d.md'],
+      tables_read: [{ id: 't-emp-structure', title: 'Ультраширокая витрина',
+                      urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d' }],
     },
     'Collect articles': { articles_failed: [] },
     'Build materials': { has_materials: true, masters_only: true,
@@ -164,6 +166,19 @@ line('1а. ТРАССИРОВКА: один текст вместо шести �
   }).trace;
   console.log(t);
 
+  // Отпечаток сборки — первой строкой. Без него разбор упирается
+  // в «а вы импортировали?»: prompt_version правку Code-ноды не ловит.
+  check('сборка ядра названа', /сборка ядра: [0-9a-f]{8}/.test(t));
+  // URN, добранный КОДОМ, не приписывается роутеру: в разделе «что выбрал
+  // ОН сам» его быть не должно, а в разделе кода — обязан.
+  const own = t.split('## 2.')[0];
+  check('чужой URN не приписан роутеру', !/emart\.mdm_employee_structure_d/.test(own));
+  check('и он назван в разделе кода',
+    /метаданные добраны кодом: urn:dd:.*emart\.mdm_employee_structure_d/.test(t));
+  // Статьи и витрины — разное: подстановка одного вместо другого давала
+  // случайно совпадающее число.
+  check('витрины считаются отдельно от статей',
+    /витрин прочитано: 1/.test(t) && /статей всего в материалах: 1/.test(t));
   check('роутер назван промолчавшим', /РОУТЕР НЕ ДАЛ НИЧЕГО: да/.test(t));
   check('видно, что витрину добрал код', /витрина по умолчанию: t-emp-structure/.test(t));
   // Главное свойство: узел, который НЕ ВЫПОЛНЯЛСЯ, отличается от отработавшего
