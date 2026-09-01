@@ -358,6 +358,12 @@ bot AS (
            -- а не по ощущению «бот стал самоувереннее».
            max_by(CAST(json_extract_scalar(payload, '$.catalog_only_fields') AS integer),
                   event_ts) AS catalog_only_fields,
+           -- Сколько полей, закрытых каталогом, названо в ответе БЕЗ замка.
+           -- Промах 01.09: ФИО и почта помечены, disability_flg (EMP_SENS) —
+           -- нет, и запрос ушёл заказчику без оговорки. Число нужно, чтобы
+           -- видеть, держится правило промпта или роняется молча.
+           max_by(CAST(json_extract_scalar(payload, '$.sens_unmarked_fields') AS integer),
+                  event_ts) AS sens_unmarked_fields,
            max_by(CAST(json_extract_scalar(payload, '$.sens_unmarked') AS boolean),
                   event_ts) AS sens_unmarked,
            -- Название своей компании, поставленное значением фильтра.
@@ -728,6 +734,7 @@ SELECT
     COALESCE(b.draft_fire_by_date, false)                   AS draft_fire_by_date,
     COALESCE(b.sens_fields, 0)                              AS sens_fields,
     COALESCE(b.catalog_only_fields, 0)                      AS catalog_only_fields,
+    COALESCE(b.sens_unmarked_fields, 0)                     AS sens_unmarked_fields,
     COALESCE(b.sens_unmarked, false)                        AS sens_unmarked,
     COALESCE(b.draft_company_filter, 0)                     AS draft_company_filter,
     COALESCE(b.draft_invented_fields, 0)                    AS draft_invented_fields,
