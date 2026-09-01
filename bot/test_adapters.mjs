@@ -2379,16 +2379,25 @@ line('48. ЦИКЛ ПОСЛЕ АВТОРА: проводка и общий фи�
   const backEdges = Object.entries(conn).filter(([n, c]) => /after ask|Retry|Ask pairs|Parse pairs/.test(n)
     && (c.main || []).some((b) => b.some((e) => /^Build check SQL$|^Author$|^Parse answer$/.test(e.node))));
   check('обратной связи в первый сборщик нет', backEdges.length === 0);
-  check('ветвь проверки заканчивается тем же финалом',
-    out('Parse revised')[0].includes('Final answer'));
+  check('ветвь проверки сходится там же, где остальные',
+    out('Parse revised')[0].includes('Trace'));
 
-  // Ветви взаимоисключающие (выходы одного IF), поэтому финал выполняется
-  // один раз — это НЕ веер, за которым следит проверка схождения.
+  // ТОЧКА СХОЖДЕНИЯ ПЕРЕЕХАЛА НА «Trace», и это не ослабление проверки.
+  // Трассировка стоит В РАЗРЫВЕ перед финалом: сабворкфлоу возвращает данные
+  // последнего узла, поэтому «Final answer» обязан остаться последним, а
+  // собрать отчёт по всем трём путям надо до него. Смысл проверки прежний:
+  // сходятся только взаимоисключающие ветви одного IF, поэтому узел
+  // выполняется ОДИН раз — это не веер.
+  const toTrace = Object.entries(conn)
+    .filter(([, c]) => (c.main || []).some((b) => b.some((e) => e.node === 'Trace')))
+    .map(([n]) => n).sort();
+  check('в трассировку ведут только взаимоисключающие ветви: ' + toTrace.join(', '),
+    toTrace.join() === 'Need check after ask,Need retry,Parse revised');
   const toFinal = Object.entries(conn)
     .filter(([, c]) => (c.main || []).some((b) => b.some((e) => e.node === 'Final answer')))
     .map(([n]) => n).sort();
-  check('в финал ведут только взаимоисключающие ветви: ' + toFinal.join(', '),
-    toFinal.join() === 'Need check after ask,Need retry,Parse revised');
+  check('в финал ведёт ровно одна ветвь — трассировка: ' + toFinal.join(', '),
+    toFinal.join() === 'Trace');
   // Два входа у «Check values» — тоже сходящиеся ветви разных IF,
   // а не веер: обычный путь и путь после доспроса исключают друг друга.
   const toCheck = Object.entries(conn)
