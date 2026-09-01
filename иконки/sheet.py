@@ -41,21 +41,46 @@ def key_background(cell, thresh=FLOOD_THRESH):
 
     Разница принципиальная: клавиатура в анимации тоже серая, и глобальное
     сравнение с цветом фона проело бы её насквозь. Заливка от края снимает
-    только то, что с краем связано, — а связь разорвана белой обводкой.
+    только то, что с краем связано.
+
+    Сеятели берутся не по углам и серединам сторон, а по ВСЕМУ периметру —
+    и только те, что похожи на преобладающий цвет рамки. Фиксированный набор
+    точек ломается, как только персонаж доходит до края кадра: сеятель
+    попадает в лапу, и заливка выедает персонажа изнутри. По виду это
+    неотличимо от «фон вырезался хорошо, просто модель так нарисовала» —
+    в PNG остаётся кусок собаки с дырой.
     """
     rgb = cell.convert("RGB")
     w, h = rgb.size
-    seeds = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1),
-             (w // 2, 0), (w // 2, h - 1), (0, h // 2), (w - 1, h // 2)]
-    for xy in seeds:
-        ImageDraw.floodfill(rgb, xy, KEY, thresh=thresh)
+    px = rgb.load()
+
+    border = [(x, 0) for x in range(w)] + [(x, h - 1) for x in range(w)] \
+        + [(0, y) for y in range(h)] + [(w - 1, y) for y in range(h)]
+
+    # Преобладающий цвет рамки. Огрубление до 8 уровней на канал гасит шум
+    # и лёгкую фактуру, из-за которой точное сравнение дало бы столько же
+    # «цветов фона», сколько пикселей.
+    tally = {}
+    for xy in border:
+        c = px[xy]
+        k = (c[0] // 8, c[1] // 8, c[2] // 8)
+        tally[k] = tally.get(k, 0) + 1
+    dom = max(tally, key=tally.get)
+    dom = (dom[0] * 8 + 4, dom[1] * 8 + 4, dom[2] * 8 + 4)
+
+    for xy in border:
+        c = px[xy]
+        if abs(c[0] - dom[0]) + abs(c[1] - dom[1]) + abs(c[2] - dom[2]) <= thresh:
+            # Уже залитая точка стоит копейки: floodfill выходит сразу,
+            # увидев на сеятеле цвет заливки.
+            ImageDraw.floodfill(rgb, xy, KEY, thresh=thresh)
 
     out = cell.convert("RGBA")
-    px, kp = out.load(), rgb.load()
+    op, kp = out.load(), rgb.load()
     for y in range(h):
         for x in range(w):
             if kp[x, y] == KEY:
-                px[x, y] = (0, 0, 0, 0)
+                op[x, y] = (0, 0, 0, 0)
     return out
 
 

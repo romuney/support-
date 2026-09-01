@@ -51,7 +51,9 @@ anywhere in the whole image is the word "CROSS" on the cap.
 
 BACKGROUND: one flat uniform medium grey (#808080) filling the entire canvas
 including the gaps between the cells. No gradient, no vignette, no ground
-shadow, no reflections.
+shadow, no reflections. Leave a clear empty margin of background around the
+character inside every cell: neither the dog, nor his ears or raised paws, nor
+the keyboard may touch or run off the edges of their cell, in any frame.
 
 THE CAMERA IS LOCKED. THIS IS THE MOST IMPORTANT RULE. Across all nine frames
 the framing, the crop, the camera distance, the camera angle, the lighting and

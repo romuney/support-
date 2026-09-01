@@ -63,6 +63,10 @@ Background: one flat uniform medium grey (#808080), completely empty. No
 gradient, no vignette, no shadow on the background, no ground plane, no
 reflections, no extra objects apart from the one described above.
 
+Leave a clear empty margin of background on all four sides: the character, his
+ears, his paws and the prop must not touch, overlap or run off the edges of the
+frame.
+
 Square image, 1:1 aspect ratio, at the highest resolution available. The only
 text anywhere in the image is the word "CROSS" on the cap. No caption, no
 label, no watermark, no border, no frame.
