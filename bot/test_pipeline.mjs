@@ -149,6 +149,12 @@ line('1а. ТРАССИРОВКА: один текст вместо шести �
       domains: [], router_articles: [], dd: [], router_empty_plan: true,
       added_masters: [], added_default_mart: ['t-emp-structure'],
       is_export: false, is_query_help: false, router_raw: '{"domains":[]}',
+      // Ровно прогон 01.09: код запросил инвентарь витрины, а «Call DD Lookup»
+      // не запустился — гейт читал $json вместо плана.
+      dd: [{ urn: 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d' }],
+      dd_count: 1,
+      dd_added_by_code: ['urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d'],
+      files: ['kb/tables/mdm-employee-structure-d.md'],
     },
     'Collect articles': { articles_failed: [] },
     'Build materials': { has_materials: true, masters_only: true,
@@ -166,6 +172,12 @@ line('1а. ТРАССИРОВКА: один текст вместо шести �
   check('невыполненные узлы названы невыполненными',
     /Ask pairs.*НЕ ЗАПУСКАЛСЯ/.test(t) && /Check result.*НЕ ЗАПУСКАЛСЯ/.test(t));
   check('витрина без инвентаря названа', /ВИТРИНА БЕЗ ИНВЕНТАРЯ ПОЛЕЙ/.test(t));
+  // Зазор, в который упёрся разбор 01.09: видно, что узел не пошёл,
+  // и не видно, какое условие его не пустило.
+  check('план метаданных показан числом', /объектов метаданных в плане \(Need DD\): 1/.test(t));
+  check('расхождение «запланировано, но не пошло» названо прямо',
+    /МЕТАДАННЫЕ ЗАПЛАНИРОВАНЫ, А УЗЕЛ НЕ ПОШЁЛ/.test(t));
+
   check('итог перечисляет поломки',
     /ИТОГ: что не отработало/.test(t) &&
     /роутер не дал ни домена, ни статьи/.test(t) &&

@@ -2401,6 +2401,34 @@ line('48. ЦИКЛ ПОСЛЕ АВТОРА: проводка и общий фи�
     .filter((n) => !(conn[n.name]?.main || []).some((b) => b.length))
     .map((n) => n.name)
     .filter((n) => !/model$/i.test(n));
+  // ГЕЙТЫ НЕ ЧИТАЮТ $json — ТОЛЬКО ПОЛЕ У ЕГО ПРОИЗВОДИТЕЛЯ.
+  //
+  // $json — это то, что притекло по проводу, и зависит оно от всей цепочки
+  // перед гейтом. Узел, вставленный или ВЫКЛЮЧЕННЫЙ между производителем поля
+  // и гейтом, молча делает условие ложным навсегда: поля в элементе нет,
+  // ветка не идёт никогда, флоу при этом зелёный.
+  //
+  // Живой прогон 01.09: «Need DD» не пустил метаданные, хотя код их запросил
+  // и dd_count в плане стоял. До этого — тот же класс на выключенной вручную
+  // «Collect articles». Проверка держит конструкцию, а не дисциплину.
+  const gates = core.nodes.filter((n) => n.type.endsWith('.if'));
+  check('гейты в ядре есть', gates.length >= 6);
+  const fragile = [];
+  for (const g of gates) {
+    for (const c of g.parameters.conditions.conditions) {
+      if (/\$json\./.test(String(c.leftValue))) fragile.push(g.name);
+    }
+  }
+  check(`ни один гейт не читает $json${fragile.length ? ': ' + fragile.join(', ') : ''}`,
+    fragile.length === 0);
+  // И источник обязан быть РАЗНЫМ у двух гейтов проверки: поле одноимённое,
+  // а SQL у них разный — первый до доспроса, второй после.
+  const lv = (name) => String(core.nodes.find((n) => n.name === name)
+    .parameters.conditions.conditions[0].leftValue);
+  check('гейты проверки смотрят каждый на свой сборщик',
+    /Build check SQL/.test(lv('Need check')) &&
+    /Retry check SQL/.test(lv('Need check after ask')));
+
   check('терминальный узел ядра ровно один', terminal.length === 1);
   check('и это общий финал', terminal[0] === 'Final answer');
 
