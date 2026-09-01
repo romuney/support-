@@ -1576,6 +1576,282 @@ nodes.append(
 )
 
 
+# ---------------------------------------------------------------- ФАЗА J
+#
+# ЕСТЬ ЛИ ОПТОВЫЙ ПУТЬ ЗА ОПИСАНИЯМИ ПОЛЕЙ.
+#
+# Сегодня поиск по смыслу читает карточки ВСЕХ колонок витрины, по ТРИ
+# запроса на колонку: /summary, /attribute и /related/full_column_sensitivity.
+# На `mdm_employee_structure_d` это 289 × 3 ≈ 870 запросов на один вопрос
+# пользователя. Если оптовая ручка отдаёт то же самое одним вызовом, цена
+# поиска по смыслу падает на три порядка.
+#
+# Тело НЕ УГАДАНО — взято из спецификации OpenAPI (файл `openapi` в корне),
+# схема `BatchRelatedEntitiesByKey`: обязательные `urns` и `key`,
+# необязательные `search`, `limit` (по умолчанию 100), `entityFields`,
+# `relationFields`. Ответ — `BatchRelatedEntitiesResponse`: словарь
+# «urn → {totalCount, data}», то есть та же форма, что у одиночной ручки,
+# но по каждому запрошенному объекту.
+#
+# ГЛАВНОЕ ЗДЕСЬ — КРИТЕРИЙ УСПЕХА, И ЭТО НЕ HTTP 200.
+#
+# Одиночная `/related/columns` параметр `entityFields` ИГНОРИРУЕТ: передан,
+# а описания не приходят (измерено 2026-08-06 на 267 колонках). Сервер при
+# этом отвечает 200 и о проигнорированном поле молчит — ровно так проба
+# с `searchText` вернула выдачу по умолчанию и выглядела успешной. Значит
+# «оптовая ручка ответила 200» не значит ничего вовсе.
+#
+# Отличить «поле сработало» от «поле проигнорировано» можно только
+# СРАВНЕНИЕМ с известным ответом, и известный ответ берётся ЖИВЫМ ЗАПРОСОМ
+# В ЭТОМ ЖЕ ПРОГОНЕ, а не из записи в AGENTS.md: живой прогон, подтверждённый
+# в одну дату, не остаётся верным навсегда — `entityFields` на `/entity/{urn}`
+# работал 2026-08-06 и перестал 2026-08-24, без единой правки у нас.
+#
+# Отсюда три пробы и один эталон:
+#
+#   J ref summary   GET  /entity/{col}/summary          — ЭТАЛОН: описание
+#                                                         одной колонки,
+#                                                         полученное путём,
+#                                                         который работает
+#   J batch columns POST /entity/batch/related          — то же оптом:
+#                                                         key=columns,
+#                                                         entityFields=summary
+#   J batch query   POST /entity/batch/related-by-query — тот же вопрос через
+#                                                         условие, на случай
+#                                                         если ключ ведёт себя
+#                                                         иначе
+#   J batch sens    POST /entity/batch/related          — оптовая
+#                                                         чувствительность:
+#                                                         key=full_column_sensitivity
+#                                                         сразу по многим
+#                                                         колонкам
+#
+# Шейпер сверяет три числа и одну строку: сколько объектов в словаре ответа,
+# сколько колонок пришло против `totalCount`, у скольких есть непустое
+# описание, и совпало ли описание эталонной колонки с эталоном. Ни одно
+# из них по отдельности ничего не доказывает — доказывает совпадение.
+PROBE_TABLE_URN = os.environ.get(
+    "PROBE_TABLE_URN",
+    "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d",
+)
+# Колонка-эталон. Берётся у той же витрины: описание, полученное одиночной
+# ручкой, и есть та правда, с которой сверяется оптовый ответ.
+PROBE_REF_COL = os.environ.get(
+    "PROBE_REF_COL",
+    f"{PROBE_TABLE_URN.replace(':table:', ':column:')}.business_dt",
+)
+_ENC_REF = f"encodeURIComponent('{PROBE_REF_COL}')"
+nodes.append(get("J ref summary",
+                 f"={{{{ '{BASE}/entity/' + {_ENC_REF} + '/summary' }}}}",
+                 [-40, 2100]))
+
+# Лимит 500, а не 100 по умолчанию: у витрины 289 колонок, и потолок,
+# срабатывающий на измерении, измерил бы сам себя — ровно так прогон
+# 2026-08-27 «намерил» 800 специализаций, которые были 200 × 4.
+_BATCH_FIELDS = ["displayName", "summary", "attributes"]
+PHASE_J_POST = [
+    ("J batch columns", "/entity/batch/related",
+     {"urns": [PROBE_TABLE_URN], "key": "columns",
+      "entityFields": _BATCH_FIELDS, "limit": 500}),
+    # Тот же вопрос условием, а не ключом. `RelationsConditional` требует
+    # `type` и `direction`; значения — те, что отдаёт `/related` у таблицы
+    # для ключа `columns`: CONTAINS / src_dest, сущность COLUMN.
+    ("J batch query", "/entity/batch/related-by-query",
+     {"urns": [PROBE_TABLE_URN], "type": "CONTAINS", "direction": "src_dest",
+      "entity": {"type": ["COLUMN"]},
+      "entityFields": _BATCH_FIELDS, "limit": 500}),
+    # Чувствительность оптом. Ключ подтверждён фазой I живым прогоном.
+    # Колонки здесь заданы явно: если оптовый путь работает, его вход —
+    # список URN колонок, а не URN таблицы.
+    ("J batch sens", "/entity/batch/related",
+     {"urns": [PROBE_REF_COL], "key": "full_column_sensitivity", "limit": 100}),
+]
+for _i, (_nm, _path, _body) in enumerate(PHASE_J_POST):
+    _n = node(
+        _nm, "n8n-nodes-base.httpRequest", 4.4, [150 + _i * 200, 2100],
+        {
+            "method": "POST",
+            "url": f"{BASE}{_path}",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "devplatformApi",
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": json.dumps(_body, ensure_ascii=False),
+            "options": copy.deepcopy(DD_OPTS),
+        },
+        DP_CRED,
+    )
+    _n["onError"] = "continueRegularOutput"
+    # executeOnce обязателен: пробы стоят цепочкой, и без него узел
+    # выполнился бы по разу на каждый входной элемент — так фаза D
+    # «намерила» 800 строк, которых не было.
+    _n["executeOnce"] = True
+    nodes.append(_n)
+
+SHAPE_BULK_JS = r"""
+// Фаза J: есть ли оптовый путь за описаниями полей.
+//
+// Критерий успеха — СРАВНЕНИЕ, а не HTTP 200: одиночная /related/columns
+// параметр entityFields игнорирует молча, и оптовая может делать то же
+// самое. Поэтому эталон берётся живым запросом в этом же прогоне.
+const out = [];
+const say = (s) => out.push(s);
+const REF_COL = '__PROBE_REF_COL__';
+const TABLE = '__PROBE_TABLE_URN__';
+const REF_NAME = REF_COL.split('.').pop();
+
+const resp = (name) => {
+  let it;
+  try { it = $(name).first().json; } catch (e) { return { miss: 'узел не выполнялся' }; }
+  if (!it) return { miss: 'пусто' };
+  const code = it.statusCode;
+  if (code !== undefined && code >= 400) {
+    return { miss: `HTTP ${code}`, body: it.body };
+  }
+  return { body: it.body ?? it };
+};
+
+// Распаковка: элемент /related — это СВЯЗЬ, сама сущность вложена в entity.
+// На этом уже один раз молча получился пустой инвентарь колонок.
+const nodesOf = (list) => (Array.isArray(list) ? list : [])
+  .map((x) => (x && x.entity ? x.entity : x))
+  .filter(Boolean);
+const nameOf = (e) => {
+  const fqn = String((e && e.fqn) || '');
+  if (fqn.includes('.')) return fqn.split('.').pop();
+  const urn = String((e && e.urn) || '');
+  return urn.includes('.') ? urn.split('.').pop() : urn;
+};
+// Описание может лежать и строкой, и обёрткой {type, data} — значение
+// любого атрибута DD живёт в .data.
+const descOf = (e) => {
+  const s = e && e.summary;
+  if (!s) return '';
+  if (typeof s === 'string') return s;
+  if (typeof s.data === 'string') return s.data;
+  return '';
+};
+
+say('ФАЗА J. ОПТОВЫЙ ПУТЬ ЗА ОПИСАНИЯМИ ПОЛЕЙ');
+say('');
+say('Витрина: ' + TABLE);
+say('Эталонная колонка: ' + REF_NAME);
+say('');
+
+// ЭТАЛОН. Без него ни одна проба ниже ничего не доказывает.
+const ref = resp('J ref summary');
+let refDesc = '';
+if (ref.miss) {
+  say('ЭТАЛОН НЕ ПОЛУЧЕН: ' + ref.miss + '.');
+  say('Сравнивать не с чем — прогон бесполезен, чините эталон и повторяйте.');
+  say('Записывать «оптовый путь не работает» по этому прогону НЕЛЬЗЯ:');
+  say('мы не измерили ни одну из двух сторон сравнения.');
+} else {
+  const b = ref.body || {};
+  refDesc = typeof b === 'string' ? b
+    : (typeof b.data === 'string' ? b.data : (typeof b.summary === 'string' ? b.summary : ''));
+  say(refDesc
+    ? `ЭТАЛОН: одиночная ручка отдаёт описание «${refDesc}».`
+    : 'ЭТАЛОН ПУСТ: одиночная ручка описания не дала. Тогда «оптом описаний ' +
+      'нет» ничего не значит — у этой колонки его может не быть вовсе. ' +
+      'Смените PROBE_REF_COL на колонку с заполненным описанием.');
+}
+say('');
+
+for (const nm of ['J batch columns', 'J batch query']) {
+  const r = resp(nm);
+  say(`— ${nm}`);
+  if (r.miss) {
+    say('    ' + r.miss);
+    if (r.body) say('    ' + JSON.stringify(r.body).slice(0, 300));
+    say('');
+    continue;
+  }
+  const body = r.body || {};
+  // Ответ — словарь «urn → {totalCount, data}». Печатаем ключи: если пришёл
+  // не словарь, форма ответа другая, и разбор ниже неверен.
+  const keys = body && typeof body === 'object' && !Array.isArray(body)
+    ? Object.keys(body) : [];
+  say(`    ключей в ответе: ${keys.length}` +
+      (keys.length ? ' — ' + keys.slice(0, 3).join(', ') : ''));
+  if (!keys.length) {
+    say('    форма ответа не словарь: ' + JSON.stringify(body).slice(0, 300));
+    say('');
+    continue;
+  }
+  const bucket = body[TABLE] || body[keys[0]] || {};
+  const total = Number(bucket.totalCount);
+  const items = nodesOf(bucket.data);
+  const withDesc = items.filter((e) => descOf(e));
+  const refItem = items.find((e) => nameOf(e) === REF_NAME);
+  say(`    totalCount: ${Number.isFinite(total) ? total : '—'}, ` +
+      `пришло колонок: ${items.length}`);
+  if (Number.isFinite(total) && items.length < total) {
+    say(`    СПИСОК НЕПОЛНЫЙ: ${items.length} из ${total}. Поднимайте limit,` +
+        ' иначе измеряется потолок, а не ручка.');
+  }
+  say(`    с непустым описанием: ${withDesc.length} из ${items.length}`);
+  // ВОТ ЭТА СТРОКА И ЕСТЬ ОТВЕТ ФАЗЫ.
+  if (!refItem) {
+    say(`    эталонной колонки ${REF_NAME} в ответе НЕТ — сравнивать нечего`);
+  } else if (!refDesc) {
+    say('    эталон пуст, сравнение невозможно (см. выше)');
+  } else if (descOf(refItem) === refDesc) {
+    say(`    ✔ ОПИСАНИЕ СОВПАЛО С ЭТАЛОНОМ: «${descOf(refItem)}»`);
+    say('    ЗНАЧИТ entityFields ЗДЕСЬ РАБОТАЕТ, и оптовый путь настоящий.');
+  } else if (descOf(refItem)) {
+    say(`    описание пришло, но ДРУГОЕ: «${descOf(refItem)}» против эталона`);
+    say('    «' + refDesc + '». Это не отказ, но и не то же самое —');
+    say('    разбираться, что именно отдаёт ручка, до того как на неё');
+    say('    переводить поиск по смыслу.');
+  } else {
+    say('    ✘ ОПИСАНИЯ НЕТ, хотя entityFields передан и одиночная ручка');
+    say('    его отдаёт. Значит поле ПРОИГНОРИРОВАНО — ровно как у');
+    say('    одиночной /related/columns. Оптового пути за описаниями нет,');
+    say('    и три запроса на колонку остаются ценой поиска по смыслу.');
+  }
+  say('');
+}
+
+const sens = resp('J batch sens');
+say('— J batch sens (чувствительность оптом)');
+if (sens.miss) {
+  say('    ' + sens.miss);
+  if (sens.body) say('    ' + JSON.stringify(sens.body).slice(0, 300));
+} else {
+  const b = sens.body || {};
+  const keys = b && typeof b === 'object' && !Array.isArray(b) ? Object.keys(b) : [];
+  say(`    ключей в ответе: ${keys.length}`);
+  const bucket = b[REF_COL] || b[keys[0]] || {};
+  const items = nodesOf(bucket.data);
+  say(`    totalCount: ${bucket.totalCount ?? '—'}, сущностей: ${items.length}`);
+  say('    Пусто — это НЕ отказ: у колонки может не быть признака вовсе.');
+  say('    Отвечает ли ручка оптом, видно по числу ключей: их должно быть');
+  say('    столько же, сколько URN отправлено.');
+}
+
+say('');
+say('ЧТО С ЭТИМ ДЕЛАТЬ');
+say('  Совпало описание — переводить by_meaning на оптовую ручку: вместо');
+say('  трёх запросов на колонку один-два на всю витрину. Тогда снимаются');
+say('  и разговоры про время ответа: мерить будет нечего.');
+say('  Не совпало — записать ИЗМЕРЕНИЕ, а не догадку: «оптовая ручка');
+say('  entityFields игнорирует так же, как одиночная, проверено ' +
+    new Date().toISOString().slice(0, 10) + '».');
+
+return [{ json: { report: out.join('\n') } }];
+"""
+
+nodes.append(
+    node("Shape bulk", "n8n-nodes-base.code", 2,
+         [150 + len(PHASE_J_POST) * 200, 2100],
+         {"mode": "runOnceForAllItems",
+          "jsCode": SHAPE_BULK_JS
+          .replace("__PROBE_REF_COL__", PROBE_REF_COL)
+          .replace("__PROBE_TABLE_URN__", PROBE_TABLE_URN)})
+)
+
+
 CHAIN = (
     ["Run recon"]
     + [n for n, _ in PHASE_A]
@@ -1590,6 +1866,9 @@ CHAIN = (
     + ["Shape probe table"]
     + [n for n, _ in PHASE_I]
     + ["Shape sensitivity"]
+    + ["J ref summary"]
+    + [n for n, _, _ in PHASE_J_POST]
+    + ["Shape bulk"]
 )
 conn = {
     a: {"main": [[{"node": b, "type": "main", "index": 0}]]}
@@ -1617,10 +1896,11 @@ print(f"  разведка отчёта: {RECON_URN}")
 print(f"  витрин из реестра: {len(TABLE_URNS)}")
 print(f"  ключей эталона:   {len(FEEDBACK_KEYS)}")
 print()
-print("РАЗВЕДКА ЗАКОНЧЕНА: все вопросы, ради которых она писалась, отвечены")
-print("живыми прогонами 2026-08-27. Воркфлоу можно удалять — он одноразовый")
-print("по конструкции. Перезапуск нужен только если менять VALUES_TABLE")
-print("в фазе D под другую витрину.")
+print("ОТКРЫТ ОДИН ВОПРОС — ФАЗА J: есть ли оптовый путь за описаниями полей.")
+print("Пока он не измерен, поиск по смыслу стоит ТРИ запроса на колонку")
+print("(289 колонок × 3 ≈ 870 на один вопрос), и любые слова про то, что это")
+print("«наверняка долго», остаются догадкой. Фазы A, C, D, E, G, H, I")
+print("отвечены живыми прогонами и повторного прогона не требуют.")
 print()
 print("Что читать, если всё-таки прогоняете:")
 print("  «Shape recon»  — где у отчёта владелец")
@@ -1629,6 +1909,9 @@ print("  «Shape probes» — связи таблицы, источники от
 print("  «Shape urns»   — НАСТОЯЩИЕ URN витрин, готовая колонка для реестра")
 print("  «Shape probe table» — почему по верному URN нет состава полей")
 print("  «Shape sensitivity» — ГДЕ лежит признак чувствительности")
+print("  «Shape bulk»   — есть ли ОПТОВЫЙ путь за описаниями полей:")
+print("                   сверка оптового ответа с эталоном, взятым")
+print("                   одиночной ручкой в этом же прогоне")
 print("  «Shape values» — видит ли Trino витрины, кардинальность поля")
 print("                   и чем отказ по недоступной таблице отличается")
 print("                   от пустого результата")

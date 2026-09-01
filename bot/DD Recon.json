@@ -1324,6 +1324,175 @@
       ],
       "id": "recon-shape-sensitivity",
       "name": "Shape sensitivity"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.business_dt') + '/summary' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -40,
+        2100
+      ],
+      "id": "recon-j-ref-summary",
+      "name": "J ref summary",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/entity/batch/related",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"urns\": [\"urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d\"], \"key\": \"columns\", \"entityFields\": [\"displayName\", \"summary\", \"attributes\"], \"limit\": 500}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        150,
+        2100
+      ],
+      "id": "recon-j-batch-columns",
+      "name": "J batch columns",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/entity/batch/related-by-query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"urns\": [\"urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d\"], \"type\": \"CONTAINS\", \"direction\": \"src_dest\", \"entity\": {\"type\": [\"COLUMN\"]}, \"entityFields\": [\"displayName\", \"summary\", \"attributes\"], \"limit\": 500}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        350,
+        2100
+      ],
+      "id": "recon-j-batch-query",
+      "name": "J batch query",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dd.t-tech.team/api/v3/entity/batch/related",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"urns\": [\"urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.business_dt\"], \"key\": \"full_column_sensitivity\", \"limit\": 100}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        550,
+        2100
+      ],
+      "id": "recon-j-batch-sens",
+      "name": "J batch sens",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// Фаза J: есть ли оптовый путь за описаниями полей.\n//\n// Критерий успеха — СРАВНЕНИЕ, а не HTTP 200: одиночная /related/columns\n// параметр entityFields игнорирует молча, и оптовая может делать то же\n// самое. Поэтому эталон берётся живым запросом в этом же прогоне.\nconst out = [];\nconst say = (s) => out.push(s);\nconst REF_COL = 'urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.business_dt';\nconst TABLE = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d';\nconst REF_NAME = REF_COL.split('.').pop();\n\nconst resp = (name) => {\n  let it;\n  try { it = $(name).first().json; } catch (e) { return { miss: 'узел не выполнялся' }; }\n  if (!it) return { miss: 'пусто' };\n  const code = it.statusCode;\n  if (code !== undefined && code >= 400) {\n    return { miss: `HTTP ${code}`, body: it.body };\n  }\n  return { body: it.body ?? it };\n};\n\n// Распаковка: элемент /related — это СВЯЗЬ, сама сущность вложена в entity.\n// На этом уже один раз молча получился пустой инвентарь колонок.\nconst nodesOf = (list) => (Array.isArray(list) ? list : [])\n  .map((x) => (x && x.entity ? x.entity : x))\n  .filter(Boolean);\nconst nameOf = (e) => {\n  const fqn = String((e && e.fqn) || '');\n  if (fqn.includes('.')) return fqn.split('.').pop();\n  const urn = String((e && e.urn) || '');\n  return urn.includes('.') ? urn.split('.').pop() : urn;\n};\n// Описание может лежать и строкой, и обёрткой {type, data} — значение\n// любого атрибута DD живёт в .data.\nconst descOf = (e) => {\n  const s = e && e.summary;\n  if (!s) return '';\n  if (typeof s === 'string') return s;\n  if (typeof s.data === 'string') return s.data;\n  return '';\n};\n\nsay('ФАЗА J. ОПТОВЫЙ ПУТЬ ЗА ОПИСАНИЯМИ ПОЛЕЙ');\nsay('');\nsay('Витрина: ' + TABLE);\nsay('Эталонная колонка: ' + REF_NAME);\nsay('');\n\n// ЭТАЛОН. Без него ни одна проба ниже ничего не доказывает.\nconst ref = resp('J ref summary');\nlet refDesc = '';\nif (ref.miss) {\n  say('ЭТАЛОН НЕ ПОЛУЧЕН: ' + ref.miss + '.');\n  say('Сравнивать не с чем — прогон бесполезен, чините эталон и повторяйте.');\n  say('Записывать «оптовый путь не работает» по этому прогону НЕЛЬЗЯ:');\n  say('мы не измерили ни одну из двух сторон сравнения.');\n} else {\n  const b = ref.body || {};\n  refDesc = typeof b === 'string' ? b\n    : (typeof b.data === 'string' ? b.data : (typeof b.summary === 'string' ? b.summary : ''));\n  say(refDesc\n    ? `ЭТАЛОН: одиночная ручка отдаёт описание «${refDesc}».`\n    : 'ЭТАЛОН ПУСТ: одиночная ручка описания не дала. Тогда «оптом описаний ' +\n      'нет» ничего не значит — у этой колонки его может не быть вовсе. ' +\n      'Смените PROBE_REF_COL на колонку с заполненным описанием.');\n}\nsay('');\n\nfor (const nm of ['J batch columns', 'J batch query']) {\n  const r = resp(nm);\n  say(`— ${nm}`);\n  if (r.miss) {\n    say('    ' + r.miss);\n    if (r.body) say('    ' + JSON.stringify(r.body).slice(0, 300));\n    say('');\n    continue;\n  }\n  const body = r.body || {};\n  // Ответ — словарь «urn → {totalCount, data}». Печатаем ключи: если пришёл\n  // не словарь, форма ответа другая, и разбор ниже неверен.\n  const keys = body && typeof body === 'object' && !Array.isArray(body)\n    ? Object.keys(body) : [];\n  say(`    ключей в ответе: ${keys.length}` +\n      (keys.length ? ' — ' + keys.slice(0, 3).join(', ') : ''));\n  if (!keys.length) {\n    say('    форма ответа не словарь: ' + JSON.stringify(body).slice(0, 300));\n    say('');\n    continue;\n  }\n  const bucket = body[TABLE] || body[keys[0]] || {};\n  const total = Number(bucket.totalCount);\n  const items = nodesOf(bucket.data);\n  const withDesc = items.filter((e) => descOf(e));\n  const refItem = items.find((e) => nameOf(e) === REF_NAME);\n  say(`    totalCount: ${Number.isFinite(total) ? total : '—'}, ` +\n      `пришло колонок: ${items.length}`);\n  if (Number.isFinite(total) && items.length < total) {\n    say(`    СПИСОК НЕПОЛНЫЙ: ${items.length} из ${total}. Поднимайте limit,` +\n        ' иначе измеряется потолок, а не ручка.');\n  }\n  say(`    с непустым описанием: ${withDesc.length} из ${items.length}`);\n  // ВОТ ЭТА СТРОКА И ЕСТЬ ОТВЕТ ФАЗЫ.\n  if (!refItem) {\n    say(`    эталонной колонки ${REF_NAME} в ответе НЕТ — сравнивать нечего`);\n  } else if (!refDesc) {\n    say('    эталон пуст, сравнение невозможно (см. выше)');\n  } else if (descOf(refItem) === refDesc) {\n    say(`    ✔ ОПИСАНИЕ СОВПАЛО С ЭТАЛОНОМ: «${descOf(refItem)}»`);\n    say('    ЗНАЧИТ entityFields ЗДЕСЬ РАБОТАЕТ, и оптовый путь настоящий.');\n  } else if (descOf(refItem)) {\n    say(`    описание пришло, но ДРУГОЕ: «${descOf(refItem)}» против эталона`);\n    say('    «' + refDesc + '». Это не отказ, но и не то же самое —');\n    say('    разбираться, что именно отдаёт ручка, до того как на неё');\n    say('    переводить поиск по смыслу.');\n  } else {\n    say('    ✘ ОПИСАНИЯ НЕТ, хотя entityFields передан и одиночная ручка');\n    say('    его отдаёт. Значит поле ПРОИГНОРИРОВАНО — ровно как у');\n    say('    одиночной /related/columns. Оптового пути за описаниями нет,');\n    say('    и три запроса на колонку остаются ценой поиска по смыслу.');\n  }\n  say('');\n}\n\nconst sens = resp('J batch sens');\nsay('— J batch sens (чувствительность оптом)');\nif (sens.miss) {\n  say('    ' + sens.miss);\n  if (sens.body) say('    ' + JSON.stringify(sens.body).slice(0, 300));\n} else {\n  const b = sens.body || {};\n  const keys = b && typeof b === 'object' && !Array.isArray(b) ? Object.keys(b) : [];\n  say(`    ключей в ответе: ${keys.length}`);\n  const bucket = b[REF_COL] || b[keys[0]] || {};\n  const items = nodesOf(bucket.data);\n  say(`    totalCount: ${bucket.totalCount ?? '—'}, сущностей: ${items.length}`);\n  say('    Пусто — это НЕ отказ: у колонки может не быть признака вовсе.');\n  say('    Отвечает ли ручка оптом, видно по числу ключей: их должно быть');\n  say('    столько же, сколько URN отправлено.');\n}\n\nsay('');\nsay('ЧТО С ЭТИМ ДЕЛАТЬ');\nsay('  Совпало описание — переводить by_meaning на оптовую ручку: вместо');\nsay('  трёх запросов на колонку один-два на всю витрину. Тогда снимаются');\nsay('  и разговоры про время ответа: мерить будет нечего.');\nsay('  Не совпало — записать ИЗМЕРЕНИЕ, а не догадку: «оптовая ручка');\nsay('  entityFields игнорирует так же, как одиночная, проверено ' +\n    new Date().toISOString().slice(0, 10) + '».');\n\nreturn [{ json: { report: out.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        2100
+      ],
+      "id": "recon-shape-bulk",
+      "name": "Shape bulk"
     }
   ],
   "connections": {
@@ -1772,6 +1941,61 @@
         [
           {
             "node": "Shape sensitivity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape sensitivity": {
+      "main": [
+        [
+          {
+            "node": "J ref summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "J ref summary": {
+      "main": [
+        [
+          {
+            "node": "J batch columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "J batch columns": {
+      "main": [
+        [
+          {
+            "node": "J batch query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "J batch query": {
+      "main": [
+        [
+          {
+            "node": "J batch sens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "J batch sens": {
+      "main": [
+        [
+          {
+            "node": "Shape bulk",
             "type": "main",
             "index": 0
           }

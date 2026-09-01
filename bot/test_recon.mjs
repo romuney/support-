@@ -437,6 +437,116 @@ line('10. ФАЗА I: ГДЕ ЛЕЖИТ ПРИЗНАК ЧУВСТВИТЕЛЬН�
   check('невыполнившийся узел шейпер переживает', /ФАЗА I/.test(partial));
 }
 
+// ===================================================================== 11
+line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВНЕНИЕМ, А НЕ HTTP 200');
+{
+  // Одиночная /related/columns параметр entityFields ИГНОРИРУЕТ молча:
+  // передан, а описания не приходят, и сервер отвечает 200. Значит
+  // «оптовая ручка ответила 200» не значит ничего вовсе — ровно так проба
+  // с searchText вернула выдачу по умолчанию и выглядела успешной.
+  // Отличить «поле сработало» от «поле проигнорировано» можно только
+  // сравнением с эталоном, взятым в ЭТОМ ЖЕ прогоне.
+  const shape = js('Shape bulk');
+  const run = (byNode) => new Function('$', '$json', shape)(
+    (n) => {
+      if (!(n in byNode) || byNode[n] === null) {
+        throw new Error('node not executed: ' + n);
+      }
+      return { first: () => ({ json: byNode[n] }) };
+    }, {})[0].json.report;
+
+  const OK = (b) => ({ statusCode: 200, body: b });
+  const TBL = 'urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d';
+  const COL = 'urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.business_dt';
+  // Элемент /related — это СВЯЗЬ, сущность вложена в entity. На этой
+  // распаковке уже один раз молча получился пустой инвентарь колонок.
+  const col = (name, summary) => ({
+    relationId: 'r-' + name,
+    entity: {
+      urn: `urn:dd:tables:greenplum:column:emart.mdm_employee_structure_d.${name}`,
+      fqn: `emart.mdm_employee_structure_d.${name}`,
+      type: 'COLUMN',
+      ...(summary === undefined ? {} : { summary: { data: summary } }),
+    },
+  });
+  const batch = (items, total) => OK({ [TBL]: { totalCount: total ?? items.length, data: items } });
+  const REF = OK({ data: 'Дата среза' });
+  const EMPTY_SENS = OK({ [COL]: { totalCount: 0, data: [] } });
+
+  // 1. ОПТОВЫЙ ПУТЬ РАБОТАЕТ: описание эталонной колонки совпало.
+  const works = run({
+    'J ref summary': REF,
+    'J batch columns': batch([col('business_dt', 'Дата среза'), col('grade', 'Грейд')]),
+    'J batch query': batch([col('business_dt', 'Дата среза')]),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('совпадение с эталоном названо прямо', /ОПИСАНИЕ СОВПАЛО С ЭТАЛОНОМ/.test(works));
+  check('и сделан вывод про entityFields', /entityFields ЗДЕСЬ РАБОТАЕТ/.test(works));
+
+  // 2. ПОЛЕ ПРОИГНОРИРОВАНО: 200, колонки пришли, описаний нет.
+  // Это тот самый случай, который по HTTP-коду неотличим от первого.
+  const ignored = run({
+    'J ref summary': REF,
+    'J batch columns': batch([col('business_dt'), col('grade')]),
+    'J batch query': batch([col('business_dt')]),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('игнор поля назван игнором, а не отказом', /ПРОИГНОРИРОВАНО/.test(ignored));
+  check('и сказано, что оптового пути нет', /Оптового пути за описаниями нет/.test(ignored));
+  check('успех и игнор по выводу РАЗЛИЧИМЫ',
+    /СОВПАЛО/.test(works) && !/СОВПАЛО/.test(ignored));
+
+  // 3. ЭТАЛОН НЕ ПОЛУЧЕН — вывода нет вовсе. Записать «оптовый путь
+  // не работает» по такому прогону нельзя: не измерена ни одна из двух
+  // сторон сравнения. У кода есть право назвать факт и нет права назвать
+  // причину, которую он не измерял.
+  const noRef = run({
+    'J ref summary': { statusCode: 404 },
+    'J batch columns': batch([col('business_dt')]),
+    'J batch query': batch([col('business_dt')]),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('без эталона прогон объявлен бесполезным', /ЭТАЛОН НЕ ПОЛУЧЕН/.test(noRef));
+  check('и прямо запрещён вывод про оптовый путь',
+    /НЕЛЬЗЯ/.test(noRef) && !/ЗДЕСЬ РАБОТАЕТ/.test(noRef));
+
+  // 4. ПОТОЛОК: пришло меньше, чем totalCount. Измеряется limit,
+  // а не ручка — ровно так фаза D «намерила» 800 специализаций.
+  const capped = run({
+    'J ref summary': REF,
+    'J batch columns': batch([col('business_dt', 'Дата среза')], 289),
+    'J batch query': batch([col('business_dt', 'Дата среза')], 289),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('неполный список назван неполным', /СПИСОК НЕПОЛНЫЙ: 1 из 289/.test(capped));
+
+  // 5. Отказ ручки — это отказ, а не «описаний нет».
+  const failed = run({
+    'J ref summary': REF,
+    'J batch columns': { statusCode: 400, body: { message: 'bad body' } },
+    'J batch query': batch([col('business_dt', 'Дата среза')]),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('отказ назван кодом', /HTTP 400/.test(failed));
+  check('и тело ошибки напечатано — обычно оно и называет ожидаемые поля',
+    /bad body/.test(failed));
+
+  // 6. Форма ответа не словарь — разбор ниже неверен, и это надо сказать,
+  // а не молча выдать ноль колонок.
+  const shapeless = run({
+    'J ref summary': REF,
+    'J batch columns': OK([{ entity: {} }]),
+    'J batch query': batch([col('business_dt', 'Дата среза')]),
+    'J batch sens': EMPTY_SENS,
+  });
+  check('чужая форма ответа названа, а не разобрана в ноль',
+    /форма ответа не словарь/.test(shapeless));
+
+  // 7. Невыполнившийся узел прогон переживает.
+  check('невыполнившийся узел шейпер переживает',
+    /ФАЗА J/.test(run({ 'J ref summary': REF })));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
