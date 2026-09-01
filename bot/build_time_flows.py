@@ -3387,10 +3387,24 @@ out.ib_missing = out.ib_required && !out.ib_stated;
 // а не wrk_email_address_txt), и такая сверка давала бы ложные тревоги
 // на верном черновике: ровно поэтому в проекте нет и проверки попадания
 // эксперта в черновик. Уверенность не трогаем — как draft_leaks и ib_missing.
+//
+// ЧИСЛО ЗАКРЫТЫХ ПОЛЕЙ БЕРЁТСЯ ИЗ ДАННЫХ, А НЕ ВЫКОВЫРИВАЕТСЯ ИЗ ТЕКСТА.
+// `dd_meta` пишется ДЛЯ МОДЕЛИ: заголовки, режимы и пояснения там меняются
+// свободно, и любая правка шейпера молча ослепила бы эту проверку — замки
+// перестали бы требоваться ровно тогда, когда каталог их назвал. Ровно так
+// разъехались состав полей и его разбор, и правка регулярки закрывала
+// случай, а не класс. Поэтому `Build materials` отдаёт закрытые поля
+// СПИСКОМ, по витринам, а текст остаётся запасным путём на время, пока
+// `DD Lookup` не переимпортирован.
 {
-  const meta = String(mat.materials || '');
-  const closed = /ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ\s+(\d+)\s+из/.exec(meta);
-  out.sens_fields = closed ? Number(closed[1]) : 0;
+  const tabs = Array.isArray(mat.tables) ? mat.tables : [];
+  let closed = tabs.reduce(
+    (n, t) => n + (Array.isArray(t.sens) ? t.sens.length : 0), 0);
+  if (!tabs.length) {
+    const m = /ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ\s+(\d+)\s+из/.exec(String(mat.materials || ''));
+    closed = m ? Number(m[1]) : 0;
+  }
+  out.sens_fields = closed;
   out.sens_unmarked = out.is_export && out.sens_fields > 0 &&
     !String(out.draft || '').includes('🔒');
 }

@@ -3741,6 +3741,103 @@ line('59. ВЫДУМАННОЕ ИМЯ ПОЛЯ: СВОИ ПСЕВДОНИМЫ З
     badRun.draft_invented_fields.includes('child_age'));
 }
 
+// ===================================================================== 60
+line('60. ЯДРО НЕ РАЗБИРАЕТ РЕГУЛЯРКОЙ ТО, ЧТО ШЕЙПЕР ПИШЕТ ДЛЯ МОДЕЛИ');
+{
+  // САМЫЙ ДОРОГОЙ КЛАСС ОТКАЗОВ В ЭТОМ ПРОЕКТЕ, и он стоил пяти неверных
+  // диагнозов подряд по одной витрине. `dd_meta` пишется ДЛЯ МОДЕЛИ:
+  // заголовки, режимы, пояснения меняются в нём свободно. Когда ядро
+  // выковыривает оттуда данные регуляркой, любая правка шейпера молча
+  // ослепляет ядро — и по виду обеих нод всё в порядке.
+  //
+  // Разъехаться они могут только молча, поэтому запрет держится сеткой,
+  // а не дисциплиной: каждое исключение обязано быть НАЗВАНО здесь вместе
+  // с причиной. Незаявленное — красное.
+  const ddFlow = JSON.parse(fs.readFileSync(new URL('./DD Lookup.json', import.meta.url)));
+  const coreFlow = JSON.parse(
+    fs.readFileSync(new URL('./Support Bot Core.json', import.meta.url)));
+  const codeNodes = (f) => f.nodes.filter((n) => (n.type || '').endsWith('.code'));
+  // Строки комментариев выбрасываем: заголовок, упомянутый в объяснении,
+  // разбором не является, а без этого фильтра сетка краснела бы на каждом
+  // абзаце, которым в этом проекте объясняется каждое решение.
+  const codeLines = (src) => src.split('\n').filter((l) => !/^\s*\/\//.test(l));
+
+  // Заголовки, которые ПЕЧАТАЕТ шейпер: прописные кириллические слова
+  // из его собственного кода. Список не выписан руками — он берётся
+  // из собранного флоу, иначе новая печать шейпера мимо сетки пройдёт.
+  const printed = new Set();
+  const ddSrc = codeLines(codeNodes(ddFlow).map((n) => n.parameters.jsCode).join('\n'))
+    .join('\n');
+  for (const m of ddSrc.matchAll(/[А-ЯЁ]{2,}(?:[ ][А-ЯЁ]{2,})*/g)) {
+    if (m[0].length >= 6) printed.add(m[0]);
+  }
+  check(`заголовков у шейпера (${printed.size})`, printed.size >= 20);
+
+  // «Разбирает регуляркой» — строка, где рядом с заголовком стоит вызов
+  // сопоставления либо присваивание регулярного литерала.
+  const PARSES = /\.(?:test|exec|match|matchAll|replace|split|search)\(|RegExp\(|=\s*\//;
+
+  // ИСКЛЮЧЕНИЯ. Каждое — запасной путь, который живёт ровно до того, как
+  // соответствующие данные приедут структурой ото всех источников.
+  const ALLOWED = [
+    { node: /^(Build lookups|Build materials|Build check SQL|Retry check SQL)$/,
+      head: /^(ПОЛНЫЙ ИНВЕНТАРЬ ПОЛЕЙ|ПОДРОБНО ПО ПОЛЯМ|ПОЛЯ ИЗ)$/,
+      why: 'declaredOf/fieldsOf — запасной путь, пока в n8n не переимпортирован ' +
+           'DD Lookup: старый субворкфлоу структуру не отдаёт вовсе' },
+    { node: /^Build materials$/, head: /^ОШИБКИ$/,
+      why: 'фолбэк после статуса HTTP: диагноз строится по коду ответа, ' +
+           'а текст читается только когда структуры нет' },
+    { node: /^(Build check SQL|Retry check SQL|Parse answer|Parse revised)$/,
+      head: /^ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ$/,
+      why: 'фолбэк к mat.tables[].sens: закрытые поля приезжают списком ' +
+           'по витринам, текст читается только на старом DD Lookup' },
+  ];
+  const okBy = (node, head) =>
+    ALLOWED.find((a) => a.node.test(node) && a.head.test(head));
+
+  const scan = (nodes) => {
+    const hits = [];
+    for (const n of nodes) {
+      for (const l of codeLines(n.parameters.jsCode)) {
+        if (!PARSES.test(l)) continue;
+        for (const h of printed) if (l.includes(h)) hits.push({ node: n.name, head: h, l });
+      }
+    }
+    return hits;
+  };
+
+  // САМОПРОВЕРКА СЕТКИ. Зелёная сетка на сломанном детекторе и на чистом
+  // коде выглядит одинаково — ни одной красной строки ни там, ни там.
+  // Поэтому сначала кормим ей заведомо запрещённую ноду: она обязана
+  // покраснеть, и только тогда зелень ниже что-то значит.
+  const CANARY_HEAD = [...printed].find((h) => /ПОЛЯ/.test(h)) || [...printed][0];
+  const canary = scan([{ name: 'Канарейка',
+    parameters: { jsCode: `const x = /${CANARY_HEAD}:\\s*(\\d+)/.exec(meta);` } }]);
+  check('сама сетка рабочая: запрещённый разбор она находит',
+    canary.length === 1 && canary[0].head === CANARY_HEAD);
+  check('и не признаёт его законным', !okBy('Канарейка', CANARY_HEAD));
+  // И обратная половина самопроверки: фильтр комментариев не должен
+  // выбрасывать код. Заголовок в КОММЕНТАРИИ сетку не тревожит.
+  check('а заголовок в комментарии — не разбор',
+    scan([{ name: 'Канарейка',
+      parameters: { jsCode: `// тут про /${CANARY_HEAD}/ написано словами` } }])
+      .length === 0);
+
+  const hits = scan(codeNodes(coreFlow));
+  check(`разборов текста шейпера в ядре (${hits.length})`, hits.length > 0);
+  for (const h of hits) {
+    const a = okBy(h.node, h.head);
+    check(`${h.node} ← «${h.head}»: ${a ? a.why : 'НЕ ЗАЯВЛЕН'}`, Boolean(a));
+  }
+  // Каждое исключение обязано срабатывать: заявленный, но не встречающийся
+  // запасной путь — это мёртвая строка, которая разрешает то, чего уже нет,
+  // и молча разрешит это снова.
+  for (const a of ALLOWED) {
+    check(`исключение «${a.node.source}/${a.head.source}» ещё нужно`,
+      hits.some((h) => a.node.test(h.node) && a.head.test(h.head)));
+  }
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
