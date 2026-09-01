@@ -3181,9 +3181,16 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
   // Реальные имена: первое — двухбуквенное, как в живом ответе каталога.
   const NAMES = ['id', 'individualid', 'birthdate', 'isdeleted', 'firstname',
     'lastname', 'gender', 'createdon', 'statecode', 'ownerid'];
-  const colsRes = { statusCode: 200, body: { totalCount: NAMES.length,
+  // ОПТОВЫЙ ОТВЕТ: словарь «urn таблицы → {totalCount, data}». Форма
+  // из спецификации (BatchRelatedEntitiesResponse) и подтверждена прогоном
+  // фазы J разведки 2026-09-01 — 289 из 289 колонок с описаниями
+  // и атрибутами одним запросом. Отдельных запросов на колонку больше нет.
+  const colsRes = { statusCode: 200, body: { [URN_KIDS]: {
+    totalCount: NAMES.length,
     data: NAMES.map((n) => ({ entity: {
-      fqn: 'chrono_peoplehub_masterid.individualchildren_public.' + n } })) } };
+      urn: 'urn:dd:tables:greenplum:column:' +
+        'chrono_peoplehub_masterid.individualchildren_public.' + n,
+      fqn: 'chrono_peoplehub_masterid.individualchildren_public.' + n } })) } } };
 
   const meta = new Function('$', '$json', ddJs('Shape table meta'))(
     (n) => {
@@ -3192,9 +3199,12 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
         return { first: () => ({ json: { statusCode: 200, body: { data: 'Данные о детях' } } }) };
       }
       if (n === 'dd_entity_attrs') return { first: () => ({ json: { statusCode: 200, body: {} } }) };
-      if (n === 'dd_columns') return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      if (n === 'dd_columns_bulk') {
+        return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      }
       if (n === 'Pick columns') {
-        return { first: () => ({ json: { targets: [], mode: '', total: NAMES.length } }) };
+        return { first: () => ({ json: {
+          targets: [], mode: 'none', total_cols: NAMES.length, sens_asked: 0 } }) };
       }
       throw new Error('node not executed: ' + n);
     }, {})[0].json.dd_meta;
@@ -3229,9 +3239,12 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
         return { first: () => ({ json: { statusCode: 200, body: { data: 'Данные о детях' } } }) };
       }
       if (n === 'dd_entity_attrs') return { first: () => ({ json: { statusCode: 200, body: {} } }) };
-      if (n === 'dd_columns') return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      if (n === 'dd_columns_bulk') {
+        return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      }
       if (n === 'Pick columns') {
-        return { first: () => ({ json: { targets: [], mode: '', total: NAMES.length } }) };
+        return { first: () => ({ json: {
+          targets: [], mode: 'none', total_cols: NAMES.length, sens_asked: 0 } }) };
       }
       throw new Error('node not executed: ' + n);
     }, {})[0].json;
@@ -3311,7 +3324,9 @@ line('54. ИНВЕНТАРЬ ИЗ DD LOOKUP РАЗБИРАЕТСЯ ЯДРОМ Ц
         return { first: () => ({ json: { statusCode: 200, body: { data: 'Данные о детях' } } }) };
       }
       if (n === 'dd_entity_attrs') return { first: () => ({ json: { statusCode: 200, body: {} } }) };
-      if (n === 'dd_columns') return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      if (n === 'dd_columns_bulk') {
+        return { first: () => ({ json: colsRes }), all: () => [{ json: colsRes }] };
+      }
       if (n === 'Pick columns') return { first: () => ({ json: pick }) };
       if (n === 'dd_column_summary') {
         return { all: () => pick.targets.map((t) => ({

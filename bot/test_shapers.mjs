@@ -43,61 +43,92 @@ function shortNameLocal(o) {
 // пуст, строка не печатается.
 function runTableFull(...a) { return runTableRaw(...a); }
 function runTable(...a) { return runTableRaw(...a).dd_meta; }
+
+// ОПТОВЫЙ ОТВЕТ СОБИРАЕТСЯ ЗДЕСЬ ИЗ ТЕХ ЖЕ ФИКСТУР.
+//
+// Раньше описания и атрибуты приходили двумя запросами НА КАЖДУЮ колонку,
+// и харнесс раскладывал фикстуру «карточка» на dd_column_summary
+// и dd_column_attrs. Теперь всё это приходит ОДНИМ запросом
+// POST /entity/batch/related с entityFields — измерено фазой J разведки
+// 2026-09-01: 289 из 289 колонок с описаниями И атрибутами.
+//
+// Фикстуры оставлены прежними намеренно: меняется транспорт, а не данные,
+// и тесты обязаны проверять то же самое поведение на новом транспорте.
+// Харнесс сливает `cols` (полный состав) с `cards` (описания по отобранным)
+// в форму «urn → {totalCount, data}», как отвечает живая ручка.
+function bulkFrom(cols, cards, pickNames, urn) {
+  const body = (cols && cols.body) || cols || {};
+  // Фикстуры несут список в разных обёртках — `data`, `items`, голым
+  // массивом: живой `nodesOf` их все и разбирает, и харнесс обязан быть
+  // не строже, иначе тест краснеет на форме, которую прод принимает.
+  const list = Array.isArray(body) ? body
+    : Array.isArray(body.data) ? body.data
+    : Array.isArray(body.items) ? body.items
+    : [];
+  const byField = new Map();
+  if (cards) {
+    cards.forEach((c, i) => {
+      const b = (c && c.body) || c || {};
+      const f = (Array.isArray(pickNames) && pickNames[i]) || shortNameLocal(b);
+      if (f) byField.set(f, b);
+    });
+  }
+  const data = list.map((it) => {
+    const e = Object.assign({}, (it && it.entity) || it || {});
+    const f = shortNameLocal(e);
+    const card = byField.get(f);
+    if (card) {
+      if (card.summary !== undefined) e.summary = card.summary;
+      if (card.attributes !== undefined) e.attributes = card.attributes;
+    }
+    return { relationId: 'r-' + f, entity: e };
+  });
+  const out = { data };
+  if (Number.isFinite(body.totalCount)) out.totalCount = body.totalCount;
+  const code = (cols && cols.statusCode) || 200;
+  return { statusCode: code, body: { [urn]: out } };
+}
+
 function runTableRaw(inputs, card, cols, cards = null, pick = null, entityAttrs = null,
                   valuesPlan = null, valuesRes = undefined, pickNames = null) {
-  // ИМЯ ПОЛЯ БЕРЁТСЯ ИЗ `Pick columns`, А НЕ ИЗ ОТВЕТА КАРТОЧКИ.
-  //
-  // Так устроен живой флоу: ни /summary, ни /attribute имени не несут, оно
-  // приходит из списка целей по индексу. Харнесс выводил его из тела
-  // карточки — и на упавшей карточке терял, чего в проде не бывает.
+  const urn = String((inputs && inputs.urn) || '');
+  const colBody = (cols && cols.body) || cols || {};
+  const colList = Array.isArray(colBody) ? colBody
+    : Array.isArray(colBody.data) ? colBody.data
+    : Array.isArray(colBody.items) ? colBody.items
+    : [];
+  // Имена, по которым фикстура даёт подробности. Пустой список = «все»,
+  // ровно как у живой `Pick columns` в режиме by_meaning.
   const pickList = cards === null ? [] : cards.map((c, i) => ({
     field: (Array.isArray(pickNames) && pickNames[i])
       || shortNameLocal((c && c.body) || c || {}),
   }));
   const $ = (name) => {
-    if (name === 'dd_column_summary') {
-      if (cards === null) throw new Error('node not executed');
-      return {
-        all: () =>
-          cards.map((c) => {
-            const b = (c && c.body) || c || {};
-            const s = b.summary;
-            const data = s && typeof s === 'object' ? s.data ?? '' : typeof s === 'string' ? s : '';
-            return { json: { statusCode: c ? c.statusCode : 200, body: { data } } };
-          }),
-      };
-    }
-    if (name === 'dd_column_attrs') {
-      if (cards === null) throw new Error('node not executed');
-      return {
-        all: () =>
-          cards.map((c) => {
-            const b = (c && c.body) || c || {};
-            return { json: { statusCode: c ? c.statusCode : 200, body: b.attributes || {} } };
-          }),
-      };
+    if (name === 'dd_columns_bulk') {
+      return { first: () => ({ json: bulkFrom(cols, cards, pickNames, urn) }) };
     }
     // ЧУВСТВИТЕЛЬНОСТЬ ПРИХОДИТ СВЯЗЬЮ, а не атрибутом — измерено фазой I
-    // разведки 2026-09-01. Фикстура пишет её в `sensitivity` карточки
-    // (список ярлыков или строку), а харнесс превращает в форму ответа
-    // `/related/full_column_sensitivity`: элемент — связь, сущность
-    // вложена в `entity`.
-    if (name === 'dd_column_sens') {
+    // разведки 2026-09-01, — и ОПТОМ, чанками по 120 URN (фаза J).
+    // Ответ чанка — словарь «urn колонки → связи»: сопоставление по ключу,
+    // а не по порядку, поэтому сдвиг на единицу тут невозможен в принципе.
+    if (name === 'dd_columns_sens') {
       if (cards === null) throw new Error('node not executed');
-      return {
-        all: () =>
-          cards.map((c) => {
-            const b = (c && c.body) || c || {};
-            if (b.sensCode) return { json: { statusCode: b.sensCode, body: {} } };
-            const raw = b.sensitivity;
-            if (raw === undefined) {
-              return { json: { statusCode: c ? c.statusCode : 200, body: { totalCount: 0, data: [] } } };
-            }
-            const list = Array.isArray(raw) ? raw : String(raw).split(/,\s*/).filter(Boolean);
-            return { json: { statusCode: 200, body: { totalCount: list.length,
-              data: list.map((x) => ({ entity: { displayName: x } })) } } };
-          }),
-      };
+      const map = {};
+      let failedCode = 0;
+      cards.forEach((c, i) => {
+        const b = (c && c.body) || c || {};
+        const f = (Array.isArray(pickNames) && pickNames[i]) || shortNameLocal(b);
+        const it = colList.find((x) => shortNameLocal((x && x.entity) || x || {}) === f);
+        const cUrn = String((((it && it.entity) || it || {}).urn) || ('urn:col:' + f));
+        if (b.sensCode) { failedCode = b.sensCode; return; }
+        const raw = b.sensitivity;
+        const list = raw === undefined ? []
+          : (Array.isArray(raw) ? raw : String(raw).split(/,\s*/).filter(Boolean));
+        map[cUrn] = { totalCount: list.length,
+                      data: list.map((x) => ({ entity: { displayName: x } })) };
+      });
+      if (failedCode) return { all: () => [{ json: { statusCode: failedCode, body: {} } }] };
+      return { all: () => [{ json: { statusCode: 200, body: map } }] };
     }
     if (name === 'Build values SQL') {
       if (valuesPlan === null) throw new Error('node not executed');
@@ -108,10 +139,13 @@ function runTableRaw(inputs, card, cols, cards = null, pick = null, entityAttrs 
       return { all: () => valuesRes.map((json) => ({ json })) };
     }
     if (name === 'Pick columns') {
-      return {
-        first: () => ({ json: pick !== null ? pick : pickList[0] || null }),
-        all: () => pickList.map((json) => ({ json })),
-      };
+      const base = pick !== null ? pick : (pickList[0] ? {} : null);
+      if (base === null) return { first: () => ({ json: null }), all: () => [] };
+      const j = Object.assign({
+        targets: pickList.map((x) => x.field),
+        sens_asked: cards === null ? 0 : Object.keys(pickList).length,
+      }, base);
+      return { first: () => ({ json: j }), all: () => [{ json: j }] };
     }
     return {
       first: () => ({
@@ -119,7 +153,6 @@ function runTableRaw(inputs, card, cols, cards = null, pick = null, entityAttrs 
           'When called by agent': inputs,
           dd_entity_card: card,
           dd_entity_attrs: entityAttrs,
-          dd_columns: cols,
         }[name],
       }),
     };
@@ -135,9 +168,13 @@ function runTableRaw(inputs, card, cols, cards = null, pick = null, entityAttrs 
 
 // Прогон ноды Pick columns: что она отдаст дальше по флоу.
 function runPick(inputs, cols) {
+  const urn = String((inputs && inputs.urn) || '');
   const $ = (name) => ({
     first: () => ({
-      json: { 'When called by agent': inputs, dd_columns: cols }[name],
+      json: {
+        'When called by agent': inputs,
+        dd_columns_bulk: bulkFrom(cols, null, null, urn),
+      }[name],
     }),
   });
   return new Function('$', js('Pick columns'))($).map((i) => i.json);
@@ -425,16 +462,14 @@ const dismissalCard = {
   body: { displayName: 'hrmart.legal_position_dismissal_reason', fqn: 'hrmart.legal_position_dismissal_reason' },
 };
 const dismissalPick = runPick({ urn: URN, search: 'причины' }, dismissalCols);
-const dismissalCards = dismissalPick.map((t) => ({
+const dismissalCards = dismissalPick[0].targets.map((f) => ({
   statusCode: 200,
   body: {
-    fqn: t.field === 'dismissal_reason_desc'
-      ? 'hrmart.legal_position_dismissal_reason.dismissal_reason_desc'
-      : `hrmart.legal_position_dismissal_reason.${t.field}`,
+    fqn: `hrmart.legal_position_dismissal_reason.${f}`,
     summary: {
-      data: t.field === 'dismissal_reason_desc'
+      data: f === 'dismissal_reason_desc'
         ? 'Причины увольнения текстом от сотрудника'
-        : `техническое поле ${t.field}`,
+        : `техническое поле ${f}`,
     },
     attributes: { column_type: { type: 'text', data: 'text' } },
   },
@@ -450,7 +485,11 @@ checkS('Pick columns режим', dismissalPick[0].mode);
 console.log(out);
 console.log('\nПРОВЕРКИ:');
 checkS('  режим by_meaning выбран', dismissalPick[0].mode === 'by_meaning');
-checkS('  карточки заказаны на все поля', dismissalPick.length === 4);
+// «Заказаны» больше не про число HTTP-запросов: описания приходят
+// по всем колонкам ОДНИМ оптовым запросом (измерено фазой J разведки
+// 2026-09-01). `Pick columns` теперь отдаёт СПИСОК ИМЁН для подробного
+// блока — то есть решает, что ПЕЧАТАТЬ, а не что запрашивать.
+checkS('  подробности заказаны на все поля', dismissalPick[0].targets.length === 4);
 // КАРТОЧКИ ПРОЧИТАНЫ — ПОКАЗЫВАЮТСЯ ВСЕ. Раньше здесь проверялось
 // обратное: «нерелевантные поля не показаны». Это и был архитектурный
 // дефект — код уже заплатил запросами за описания всех колонок, а потом
@@ -468,14 +507,14 @@ checkS('  совпадение по буквам осталось подсказ
 
 line('8в. ПОИСК ПО СМЫСЛУ — ни имя, ни описание не совпали');
 const dismissalPickMiss = runPick({ urn: URN, search: 'зарплата' }, dismissalCols);
-const dismissalCardsMiss = dismissalPickMiss.map((t) => ({
+const dismissalCardsMiss = dismissalPickMiss[0].targets.map((f) => ({
   statusCode: 200,
   body: {
-    fqn: `hrmart.legal_position_dismissal_reason.${t.field}`,
+    fqn: `hrmart.legal_position_dismissal_reason.${f}`,
     // Описание НЕ должно содержать само слово поиска: «зарплата» режется
     // до основы «зарплат», а «к зарплате отношения не имеет» эту основу
     // содержит — фикстура промаха сама себе противоречила и совпадала.
-    summary: { data: `служебное поле ${t.field}, нужно для загрузки данных` },
+    summary: { data: `служебное поле ${f}, нужно для загрузки данных` },
   },
 }));
 out = runTable(
@@ -516,19 +555,19 @@ const wideCols = {
 };
 const wideCard = { statusCode: 200, body: { fqn: 'emart.wide_table', displayName: 'emart.wide_table' } };
 const widePick = runPick({ urn: URN, search: 'декрет' }, wideCols);
-const wideCards = widePick.map((t) => ({
+const wideCards = widePick[0].targets.map((f) => ({
   statusCode: 200,
   body: {
-    fqn: `emart.wide_table.${t.field}`,
+    fqn: `emart.wide_table.${f}`,
     summary: {
-      data: t.field === 'field_100' ? 'Признак: сотрудница в декретном отпуске' : `служебное поле ${t.field}`,
+      data: f === 'field_100' ? 'Признак: сотрудница в декретном отпуске' : `служебное поле ${f}`,
     },
   },
 }));
 out = runTable({ urn: URN, search: 'декрет' }, wideCard, wideCols, wideCards, widePick[0]);
 console.log('\nПРОВЕРКИ:');
-checkS('  Pick columns не режет по 60', widePick.length === N_WIDE);
-checkS('  описания запрошены по ВСЕМ полям', new RegExp(`получены по ${N_WIDE} из ${N_WIDE}`).test(out));
+checkS('  Pick columns не режет по 60', widePick[0].targets.length === N_WIDE);
+checkS('  описания запрошены по ВСЕМ полям', new RegExp(`каталог ответил по ${N_WIDE} из ${N_WIDE}`).test(out));
 checkS('  нет упоминания потолка', !/потолок/.test(out));
 checkS('  поле за старым потолком найдено', /field_100/.test(out) && /декретном отпуске/.test(out));
 
@@ -560,9 +599,9 @@ const DESCR = {
 };
 const mixRun = (search) => {
   const pick = runPick({ urn: URN, search }, MIX);
-  const cards = pick.map((t) => ({
+  const cards = pick[0].targets.map((f) => ({
     statusCode: 200,
-    body: { fqn: `emart.mix.${t.field}`, summary: { data: DESCR[t.field] || '' } },
+    body: { fqn: `emart.mix.${f}`, summary: { data: DESCR[f] || '' } },
   }));
   return { out: runTable({ urn: URN, search }, mixCard, MIX, cards, pick[0]), pick };
 };
@@ -859,40 +898,45 @@ line('9в. ОТЧЁТ: владелец и канал поддержки не в
 }
 
 // ===================================================================== 11б
-line('11б. НЕПРИШЕДШИЕ КАРТОЧКИ: проверенным считается только полученное');
+line('11б. ПУСТОЕ ОПИСАНИЕ — ФАКТ, А МОЛЧАНИЕ ПРО ЗАКРЫТОСТЬ — ТРЕВОГА');
 {
+  // ОТКАЗА ПО ОТДЕЛЬНОЙ КОЛОНКЕ БОЛЬШЕ НЕ БЫВАЕТ. Раньше описания шли
+  // запросом НА КАЖДУЮ колонку, и часть из них могла отдать 500 — отсюда
+  // «проверены N из M» и целая ветка про непришедшие карточки. Оптовая
+  // ручка отвечает по всей витрине сразу: либо ответила, либо нет, и второе
+  // это ошибка уровня таблицы (она в ОШИБКИ DD и в dd.http).
+  //
+  // Осталось два разных случая, и путать их дорого:
+  //   пустое ОПИСАНИЕ  — владелец не заполнил. Факт, не тревога;
+  //   молчание про ЧУВСТВИТЕЛЬНОСТЬ — спросили и не ответили. Тревога,
+  //   потому что молчание неотличимо от «поле открыто».
   const URN_W = 'urn:dd:tables:greenplum:table:emart.t';
   const cols = { statusCode: 200, body: { totalCount: 3, data: [
-    { entity: { fqn: 'emart.t.a_col' } },
-    { entity: { fqn: 'emart.t.b_col' } },
-    { entity: { fqn: 'emart.t.c_col' } },
+    { entity: { urn: 'urn:dd:tables:greenplum:column:emart.t.a_col', fqn: 'emart.t.a_col' } },
+    { entity: { urn: 'urn:dd:tables:greenplum:column:emart.t.b_col', fqn: 'emart.t.b_col' } },
+    { entity: { urn: 'urn:dd:tables:greenplum:column:emart.t.c_col', fqn: 'emart.t.c_col' } },
   ] } };
-  // Карточки запрошены по всем трём полям, но две вернули 500.
+  // Описание есть только у одного поля — у двух владелец его не завёл.
   const cards = [
     { statusCode: 200, body: { fqn: 'emart.t.a_col', summary: { data: 'Дата приёма' },
                                attributes: {} } },
-    { statusCode: 500, body: { fqn: 'emart.t.b_col' } },
-    { statusCode: 500, body: { fqn: 'emart.t.c_col' } },
+    { statusCode: 200, body: { fqn: 'emart.t.b_col', attributes: {} } },
+    { statusCode: 200, body: { fqn: 'emart.t.c_col', attributes: {} } },
   ];
-  const pick = { mode: 'by_meaning', total_cols: 3, picked: 3, matched: 0 };
+  const pick = { mode: 'by_meaning', total_cols: 3, picked: 3, matched: 0, sens_asked: 3 };
   const out = runTable({ urn: URN_W, search: 'декрет' },
     { statusCode: 200, body: {} }, cols, cards, pick);
 
-  // Раньше здесь печаталось «проверены 3 из 3»: details строится из targets
-  // и фильтруется по `d.field || d.failed`, то есть упавшие карточки шли
-  // в зачёт наравне с полученными, и ветка про непроверенные поля была
-  // мёртвой. «Не встретилось» читалось как «такого поля нет», хотя две
-  // трети полей никто не смотрел.
-  checkS('проверенным считается только полученное', /получены по 1 из 3/.test(out));
-  checkS('отказ карточек назван числом', /по 2 каталог не отдал карточку/.test(out));
+  checkS('каталог ответил по всем полям, и это сказано числом',
+    /каталог ответил по 3 из 3/.test(out));
+  checkS('а заполненных описаний названо своё число',
+    /описание заполнено у 1/.test(out));
   // Утверждать отсутствие поля код не имеет права НИКОГДА — ни когда
-  // карточки не пришли, ни когда пришли и не совпали. Это суждение
+  // описания пусты, ни когда они есть и не совпали. Это суждение
   // о смысле, оно за моделью.
   checkS('и код нигде не объявляет, что такого поля нет',
     !/не встретилось ни в одном/.test(out) &&
     !/такого поля или значения в таблице нет/.test(out));
-  checkS('а непришедшие карточки названы числом и списком',
-    /Не проверены описания у/.test(out) || /каталог не отдал карточку/.test(out));
   // Поля без описаний перечисляются — но как ФАКТ, а не как тревога.
   //
   // Живой прогон 2026-08-31: у витрины детей девять полей без описаний
@@ -905,13 +949,13 @@ line('11б. НЕПРИШЕДШИЕ КАРТОЧКИ: проверенным сч
   checkS('и прямо сказано, что уверенность из-за этого не снижают',
     /Уверенность из-за\s+этого НЕ снижай/.test(out.replace(/\n/g, ' ')));
 
-  // Все карточки пришли — лишних строк нет.
-  const okCards = cards.map((c, i) => ({ statusCode: 200,
-    body: { fqn: `emart.t.${['a', 'b', 'c'][i]}_col`, summary: { data: 'x' }, attributes: {} } }));
+  // Все описания заполнены — лишних строк нет.
+  const okCards = ['a', 'b', 'c'].map((n) => ({ statusCode: 200,
+    body: { fqn: `emart.t.${n}_col`, summary: { data: 'x' }, attributes: {} } }));
   const clean = runTable({ urn: URN_W, search: 'декрет' },
     { statusCode: 200, body: {} }, cols, okCards, pick);
-  checkS('без отказов лишнего не пишется',
-    /получены по 3 из 3/.test(clean) && !/БЕЗ ОПИСАНИЯ/.test(clean));
+  checkS('без пустых описаний лишнего не пишется',
+    /описание заполнено у 3/.test(clean) && !/БЕЗ ОПИСАНИЯ/.test(clean));
 
   // Карточки прочитаны, но совпадений нет: inventory() больше не утверждает,
   // что карточки не запрашивались — признак чувствительности у нас на руках.
@@ -920,11 +964,38 @@ line('11б. НЕПРИШЕДШИЕ КАРТОЧКИ: проверенным сч
   checkS('и сводка по чувствительности напечатана',
     /ЧУВСТВИТЕЛЬНОСТЬ|ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ/.test(clean));
 
-  // А при пустом search карточек правда нет — там формулировка верна.
-  const noCards = runTable({ urn: URN_W, search: '' },
+  // ГЛАВНОЕ В ЭТОЙ ГРУППЕ: СПРОСИЛИ 3, ОТВЕТИЛИ ПО 2.
+  //
+  // Оптовая ручка чувствительности отвечает словарём «urn → связи», и фаза J
+  // измерила равенство: 120 URN → 120 ключей. Если равенства не будет,
+  // про недостающие колонки мы не знаем НИЧЕГО — а по виду ответа они
+  // выглядят ровно как незакрытые. Это самый дорогой из возможных исходов:
+  // уверенное «согласование не нужно» на чувствительном поле.
+  const partial = runTableRaw({ urn: URN_W, search: 'декрет' },
+    { statusCode: 200, body: {} }, cols, okCards,
+    { mode: 'by_meaning', total_cols: 3, picked: 3, matched: 0, sens_asked: 9 });
+  checkS('неполный ответ про закрытость НАЗВАН, а не проглочен',
+    /признак спрошен по 9 полям, ответ пришёл по 3/.test(partial.dd_meta));
+  checkS('и прямо сказано, что молчание — не «поле открыто»',
+    /молчание\s+тут НЕ значит/.test(partial.dd_meta.replace(/\n/g, ' ')));
+  checkS('и это уехало структурой, а не только текстом',
+    partial.dd.sens_partial === true && partial.dd.sens_asked === 9 &&
+    partial.dd.sens_answered === 3);
+  checkS('а при равенстве тревоги нет',
+    /ЧУВСТВИТЕЛЬНОСТЬ/.test(clean) && !/признак спрошен по/.test(clean));
+
+  // А когда признак не спрашивали вовсе — формулировка про это, и она
+  // больше НЕ говорит «карточки не запрашивались»: описания приходят
+  // всегда и по всем полям, отдельным запросом идёт только закрытость.
+  // Утверждение, переставшее быть верным, — это тот же разъезд, только
+  // в тексте для модели.
+  const noSens = runTable({ urn: URN_W, search: '' },
     { statusCode: 200, body: {} }, cols);
-  checkS('без карточек формулировка прежняя',
-    /карточки в этом режиме не запрашивались/.test(noCards));
+  checkS('признак не спрашивали — так и сказано',
+    /ГРУППЫ ДОСТУПА: не запрашивались/.test(noSens) &&
+    /Считать поля\s+открытыми по этому ответу НЕЛЬЗЯ/.test(noSens.replace(/\n/g, ' ')));
+  checkS('и про карточки там больше не врётся',
+    !/карточки в этом режиме не запрашивались/.test(noSens));
 }
 
 
@@ -950,25 +1021,25 @@ line('12. РЕЖИМ ВЫБИРАЕТСЯ ПО КАЖДОЙ ИГЛЕ, А НЕ П
   const mixed = pickM('ad_login, рабочая почта');
   checkS('смешанная игла: режим by_meaning, а не by_name',
     mixed[0].mode === 'by_meaning');
-  checkS('и карточки заказаны по ВСЕМ полям, включая почту',
-    mixed.length === NAMES.length &&
-    mixed.some((t) => t.field === 'wrk_email_address_txt'));
+  checkS('и подробности заказаны по ВСЕМ полям, включая почту',
+    mixed[0].targets.length === NAMES.length &&
+    mixed[0].targets.includes('wrk_email_address_txt'));
 
   const tech = pickM('ad_login, business_dt');
   checkS('все иглы техническими именами: режим by_name',
     tech[0].mode === 'by_name');
   checkS('и заказаны обе колонки, а не одна',
-    tech.length === 2 &&
-    tech.some((t) => t.field === 'ad_login') &&
-    tech.some((t) => t.field === 'business_dt'));
+    tech[0].targets.length === 2 &&
+    tech[0].targets.includes('ad_login') &&
+    tech[0].targets.includes('business_dt'));
 
   const one = pickM('ad_login');
-  checkS('одна техническая игла: by_name, одна карточка',
-    one[0].mode === 'by_name' && one.length === 1);
+  checkS('одна техническая игла: by_name, одно поле подробно',
+    one[0].mode === 'by_name' && one[0].targets.length === 1);
 
   const ru = pickM('логин, почта');
   checkS('все иглы по-русски: by_meaning, как и раньше',
-    ru[0].mode === 'by_meaning' && ru.length === NAMES.length);
+    ru[0].mode === 'by_meaning' && ru[0].targets.length === NAMES.length);
 }
 
 // ===================================================================== 13
@@ -1002,17 +1073,26 @@ line('14. КОНТРАКТ НА ВЫХОДЕ: ДАННЫЕ РЯДОМ С ТЕК�
     data: NAMES.map((n) => ({ entity: {
       fqn: `chrono_peoplehub_masterid.individualchildren_public.${n}`,
       urn: `urn:dd:tables:greenplum:column:chrono_peoplehub_masterid.individualchildren_public.${n}` } })) } };
+  // Служебные колонки шины идут БЕЗ описания — так они и приходят из
+  // каталога. Отказа по отдельной колонке в фикстуре больше нет: описания
+  // приходят одним оптовым запросом, и поштучных отказов не бывает.
   const cardsK = NAMES.map((n) => (n.startsWith('__')
-    ? { statusCode: 500 }
+    ? { statusCode: 200, body: {
+        fqn: `chrono_peoplehub_masterid.individualchildren_public.${n}`,
+        attributes: {} } }
     : { statusCode: 200, body: {
         fqn: `chrono_peoplehub_masterid.individualchildren_public.${n}`,
         summary: { data: `описание ${n}` },
         attributes: { column_type: { type: 'text', data: 'text' } },
         ...(n === 'birthdate' ? { sensitivity: ['EMP_SENS'] } : {}) } }));
   const pickK = runPick({ urn: URN_K, search: 'дети, возраст детей' }, colsK);
+  // Атрибуты ТАБЛИЦЫ отдали 500 — отказ уровня таблицы, единственный вид
+  // отказа, который в этой ветке ещё возможен. Он обязан дожить до ядра
+  // числом: 404 это строка реестра, 401 — Service Account, 500 — ретрай,
+  // и это три РАЗНЫХ действия.
   const res = runTableFull({ urn: URN_K, search: 'дети, возраст детей' },
     { statusCode: 200, body: { data: 'Данные о детях' } }, colsK, cardsK, pickK[0],
-    null, null, undefined, NAMES);
+    { statusCode: 500 }, null, undefined, NAMES);
 
   checkS('структура отдана рядом с текстом',
     res.dd && typeof res.dd === 'object' && typeof res.dd_meta === 'string');
@@ -1026,11 +1106,16 @@ line('14. КОНТРАКТ НА ВЫХОДЕ: ДАННЫЕ РЯДОМ С ТЕК�
   checkS('чувствительность — тоже поле структуры, а не строка текста',
     (res.dd.fields.find((f) => f.name === 'birthdate') || {}).sensitive === true &&
     (res.dd.fields.find((f) => f.name === 'id') || {}).sensitive === false);
-  checkS('исход карточки назван по каждому полю',
-    (res.dd.fields.find((f) => f.name === '__contract__') || {}).card === 'failed' &&
+  // ОТКАЗА ПО ОТДЕЛЬНОЙ КОЛОНКЕ БОЛЬШЕ НЕ БЫВАЕТ: описания приходят одним
+  // оптовым запросом на всю витрину, и он либо ответил, либо нет — второе
+  // это ошибка уровня таблицы, она в `problems` и в `http`. Поэтому `card`
+  // теперь различает только «поле попало в подробный блок» и «не попало».
+  checkS('исход по каждому полю назван',
+    (res.dd.fields.find((f) => f.name === '__contract__') || {}).card === 'ok' &&
     (res.dd.fields.find((f) => f.name === 'id') || {}).card === 'ok');
-  checkS('карточки посчитаны фактом, а не пересказом',
-    res.dd.cards_requested === NAMES.length && res.dd.cards_received === 5);
+  checkS('поля с описанием посчитаны фактом, а не пересказом',
+    res.dd.cards_requested === NAMES.length &&
+    res.dd.cards_received === res.dd.fields.filter((f) => f.desc).length);
   // Статус измерен двумя нодами и раньше выбрасывался — теперь доживает
   // до ядра: 404 это строка реестра, 401 — Service Account, 500 — ретрай,
   // и это три РАЗНЫХ действия.
@@ -1041,6 +1126,67 @@ line('14. КОНТРАКТ НА ВЫХОДЕ: ДАННЫЕ РЯДОМ С ТЕК�
   // Главное: структура собирается НЕЗАВИСИМО от текста.
   checkS('состав полей не зависит от разборности текста',
     res.dd.fields.length === NAMES.length && res.dd_total === NAMES.length);
+}
+
+// ===================================================================== 15
+line('15. ОПТОВЫЙ ФЕТЧ: ГРАФ И ТЕЛА ЗАПРОСОВ');
+{
+  // Три запроса на колонку (289 × 3 ≈ 870 на вопрос) заменены одним
+  // оптовым вызовом плюс чанками за чувствительностью. Измерено фазой J
+  // разведки 2026-09-01, а не выведено: 289 из 289 колонок пришли
+  // с описаниями И атрибутами, а сверка с эталоном из одиночной ручки
+  // доказала, что entityFields не проигнорирован молча.
+  const byName = new Map(wf.nodes.map((n) => [n.name, n]));
+  const bulk = byName.get('dd_columns_bulk');
+  const sens = byName.get('dd_columns_sens');
+  checkS('оптовые ноды на месте', Boolean(bulk) && Boolean(sens));
+  checkS('поштучных запросов за карточками не осталось',
+    !byName.has('dd_column_summary') && !byName.has('dd_column_attrs') &&
+    !byName.has('dd_columns'));
+
+  const body = String(bulk.parameters.jsonBody || '');
+  checkS('оптовый запрос идёт в batch/related',
+    /entity\/batch\/related$/.test(String(bulk.parameters.url || '')));
+  checkS('и просит именно те поля, которые измерены как приходящие',
+    /displayName/.test(body) && /summary/.test(body) && /attributes/.test(body));
+  // limit 500, а не 100 по умолчанию: у витрины 289 колонок, и потолок,
+  // срабатывающий на выдаче, тихо превратил бы «столько полей у витрины»
+  // в «столько поместилось».
+  checkS('limit выше измеренного числа колонок (289)',
+    Number((body.match(/limit:\s*(\d+)/) || [])[1]) > 289);
+
+  // ЧАНК ЧУВСТВИТЕЛЬНОСТИ — ИЗМЕРЕННЫЙ РАЗМЕР, А НЕ КРУГЛОЕ ЧИСЛО.
+  // Прогон подтвердил ровно 120 URN в теле (120 отправлено → 120 ключей).
+  // Что пройдут 289, неизвестно, а отказ по размеру тела был бы по виду
+  // неотличим от «признака нет», то есть тихо превратил бы закрытое поле
+  // в открытое. Число обязано называть, откуда оно взято, — иначе это
+  // придуманный порог, каких в этом проекте уже снимали четыре.
+  const pickSrc = js('Pick columns');
+  const chunk = Number((pickSrc.match(/SENS_CHUNK\s*=\s*(\d+)/) || [])[1]);
+  checkS('чанк чувствительности задан константой', Number.isFinite(chunk));
+  checkS('и он не больше измеренного (120)', chunk <= 120);
+  checkS('и происхождение числа названо в коде',
+    /120 URN в одном теле|подтвердил ровно 120/.test(pickSrc));
+
+  // Нода чувствительности выполняется ПО РАЗУ НА ЧАНК: executeOnce тут
+  // означал бы, что спросили только первые 120 колонок, а про остальные
+  // молчание — и молчание неотличимо от «поле открыто».
+  checkS('чанки не схлопываются в один запрос', !sens.executeOnce);
+  checkS('а отказ ручки не роняет прогон',
+    sens.onError === 'continueRegularOutput' &&
+    bulk.onError === 'continueRegularOutput');
+
+  // ВЕЕРА БЫТЬ НЕ ДОЛЖНО: в n8n нет неявного слияния, и узел за развилкой
+  // выполнится по разу на каждую дошедшую ветвь. Сходящиеся ветви IF —
+  // наоборот, норма: они взаимоисключающие.
+  const IF_NODES = new Set(wf.nodes
+    .filter((n) => (n.type || '').endsWith('.if')).map((n) => n.name));
+  for (const [from, conn] of Object.entries(wf.connections)) {
+    const branches = (conn.main || []);
+    if (IF_NODES.has(from)) continue;
+    const targets = branches.flat().map((e) => e.node);
+    checkS(`${from}: один выход, а не веер`, targets.length <= 1);
+  }
 }
 
 console.log(ddFails ? `ПРОВАЛОВ: ${ddFails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
