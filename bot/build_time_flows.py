@@ -464,6 +464,16 @@ EXPORT_RULES = read_mode_rules("prompts/export.md")
 #
 # Считается, а не проставляется руками: номер, который надо не забыть поднять,
 # не поднимают. Хеш меняется ровно тогда, когда изменился текст промпта.
+# ОТПЕЧАТОК СБОРКИ ЯДРА — печатается первой строкой трассировки.
+#
+# `prompt_version` не годится: он хеш ПРОМПТОВ, и правка Code-ноды его
+# не меняет. Разбор 01.09 упёрся ровно в это — по отчёту нельзя было понять,
+# та ли перед тобой сборка, в которой уже есть починка, и круг ушёл на выяснение
+# «а вы импортировали?». Хешируем сам сборщик: он определяет ядро целиком.
+CORE_BUILD = hashlib.sha1(
+    open(__file__, "rb").read()
+).hexdigest()[:8]
+
 PROMPT_VERSION = hashlib.sha1(
     (ROUTER_PROMPT + AUTHOR_PROMPT + EXPORT_RULES).encode("utf-8")
 ).hexdigest()[:8]
@@ -5107,6 +5117,10 @@ try {
 
   L.push('# Трассировка прогона ядра');
   L.push('');
+  // Отпечаток СБОРЩИКА, а не промптов: правка Code-ноды меняет его, и по
+  // отчёту сразу видно, та ли это сборка. Без него разбор упирается
+  // в «а вы импортировали?» — круг, который уже был.
+  kv('сборка ядра', '__CORE_BUILD__');
   kv('вопрос', cut(trig.j.question, 300));
   kv('режим', (trig.j.mode || '—') + ' · тема формы: ' + cut(P.topic_kind_used || trig.j.topic_kind, 80));
 
@@ -5115,7 +5129,14 @@ try {
   if (P.router_error) kv('ОШИБКА РОУТЕРА', String(P.router_error));
   kv('домены', list(P.domains));
   kv('статьи', list(P.router_articles));
-  kv('метаданные (URN)', list(arr(P.dd).map((d) => (d && d.urn) || d)));
+  // ТОЛЬКО СВОИ URN РОУТЕРА. Поле `dd` в плане — итоговый список, в него
+  // код дописывает инвентарь; печатать его в разделе «что выбрал ОН сам»
+  // значит приписывать роутеру чужую работу. Ровно эта путаница и была
+  // в отчёте 01.09: URN стоял в разделе роутера, хотя добрал его код.
+  const byCode = arr(P.dd_added_by_code).map(String);
+  const ownDd = arr(P.dd).map((d) => String((d && d.urn) || d))
+    .filter((u) => !byCode.includes(u));
+  kv('метаданные (URN)', ownDd.length ? ownDd.join(', ') : '—');
   kv('реплика без вопроса', yn(P.no_question));
   kv('РОУТЕР НЕ ДАЛ НИЧЕГО', yn(P.router_empty_plan));
   if (arr(P.articles_invented).length) kv('придумал путей', list(P.articles_invented));
@@ -5158,7 +5179,15 @@ try {
   kv('ссылка на юнит', P.unit_link ? (P.unit_link_kind + ' ' + P.unit_link_id) : 'нет');
 
   h('4. Что РЕАЛЬНО доехало до автора');
-  kv('статей прочитано', arr(M.router_picked).length || arr(P.tables_read).length || '—');
+  // Статьи и витрины — РАЗНОЕ, и подставлять одно вместо другого нельзя:
+  // раньше «статей прочитано» падало на длину tables_read, и число совпадало
+  // случайно. Инвентарь показан отдельной строкой: именно он отвечает
+  // на «есть ли такое поле».
+  kv('статей всего в материалах', arr(P.files).length);
+  kv('из них выбрал роутер', arr(M.router_picked).length);
+  kv('витрин прочитано', arr(P.tables_read).length);
+  kv('инвентарь полей получен по',
+    arr(M.tables).filter((t) => t && arr(t.fields).length).length + ' витринам');
   kv('только мастера, совпадений нет', yn(M.masters_only));
   kv('материалы непустые', yn(M.has_materials));
   if (arr(coll.j.articles_failed).length) kv('НЕ ПРОЧИТАЛОСЬ', list(coll.j.articles_failed));
@@ -5867,7 +5896,8 @@ core_nodes += [
     }),
     llm("Revise model", [2680, 440]),
     node("Parse revised", "n8n-nodes-base.code", 2, [2860, 220], {"jsCode": PARSE_JS}),
-    node("Trace", "n8n-nodes-base.code", 2, [3040, 300], {"jsCode": TRACE_JS}),
+    node("Trace", "n8n-nodes-base.code", 2, [3040, 300],
+         {"jsCode": TRACE_JS.replace("__CORE_BUILD__", CORE_BUILD)}),
     node("Final answer", "n8n-nodes-base.code", 2, [3220, 300],
          {"jsCode": FINAL_ANSWER_JS}),
 ]
