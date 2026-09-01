@@ -36,9 +36,13 @@
 
 ```bash
 cd executive-support && python3 validate_kb.py   # правки в kb/
-cd bot       && node test_pipeline.mjs test_adapters.mjs test_shapers.mjs test_recon.mjs
+cd bot && for t in pipeline adapters shapers recon; do node test_$t.mjs || break; done
 cd telemetry && node test_telemetry.mjs
 ```
+
+Наборы перечислены циклом, а не аргументами одной команды: `node a.mjs b.mjs`
+запускает ТОЛЬКО `a.mjs`, остальное уезжает в `process.argv`. Здесь так и было
+написано — и три набора из четырёх не запускались вовсе.
 
 Правки в `kb/` — валидатор обязателен: он ловит то, что глазами не видно
 (разъехавшиеся алиасы, мастера не в своём домене, расхождение фронтматтера
