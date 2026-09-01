@@ -20,9 +20,9 @@ const dm = load('Adapter DM.json');
 
 // Настоящий реестр: проверка «домен формы не покрыт» должна ломаться, когда
 // таблица «Домены» в kb/index.md изменится, а не только когда изменится код.
-// База знаний лежит уровнем выше и в двух возможных местах — см. тот же
-// резолв в test_pipeline.mjs.
-const REGISTRY_PATHS = ['../kb/index.md', '../executive-support/kb/index.md'];
+// База знаний лежит уровнем выше, в одной папке executive-support/ — см. тот же
+// резолв в test_pipeline.mjs и объяснение, почему путь ровно один.
+const REGISTRY_PATHS = ['../executive-support/kb/index.md'];
 const REGISTRY_AT = REGISTRY_PATHS.find((p) => fs.existsSync(p));
 if (!REGISTRY_AT) {
   console.error('не найден реестр базы знаний, искали: ' + REGISTRY_PATHS.join(', '));

@@ -64,6 +64,30 @@ WHERE valid_to_dttm = '5999-01-01'
 `kb/metrics/active-headcount.md`). Переносить условия между слоями нельзя:
 `valid_to_dttm` в `emart` нет, `last_day_flg` в `dds` нет.
 
+## Джойн подневной витрины с версионной таблицей DDS
+
+Подневная витрина (`emart`, `hrmart`) хранит строку «сотрудник × день», а
+версионная DDS-таблица — историю изменений атрибута интервалами
+`valid_from_dttm`–`valid_to_dttm`. Стыкуются они сдвигом на один день:
+
+```sql
+on emart.business_dt + interval '1 day'
+   between dds.valid_from_dttm and dds.valid_to_dttm
+```
+
+Правило зафиксировано владельцем в каталоге (summary `mdm_employee_structure_d`,
+`functional_role_d`, `legal_position_d`). `valid_to_dttm` — это **исключающая**
+граница интервала версии: запись действует до начала этой даты. Строка витрины
+с `business_dt = N` соответствует версии, у которой
+`valid_from_dttm <= N < valid_to_dttm` — то есть
+`business_dt + interval '1 day' between valid_from_dttm and valid_to_dttm`.
+Без сдвига на день атрибут, действующий до конца дня N, не находится по строке
+витрины N.
+
+Это НЕ то же самое, что фильтр актуальной записи `valid_to_dttm = '5999-01-01'`
+из раздела «Слой DDS»: тот отбирает текущую версию, а здесь к конкретному дню
+витрины подбирается действовавшая на тот день версия.
+
 ## Джойны только по ключам
 
 Соединение — только по `*_rk`. По текстовым `*_nm` — никогда.

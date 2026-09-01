@@ -18,11 +18,13 @@ const js = (n) => {
 // Настоящий реестр: тесты мастеров должны ломаться, когда таблица «Домены»
 // в kb/index.md изменится, а код разбора — нет.
 //
-// База знаний лежит уровнем выше — рядом с bot/ и telemetry/. Мест два:
-// отдельным репозиторием executive-support/ и просто папкой kb/. Проверяем
-// оба и говорим, чего не нашли: молча взять пустой реестр значит получить
-// зелёные тесты мастеров на нулевой таблице «Домены».
-const REGISTRY_PATHS = ['../kb/index.md', '../executive-support/kb/index.md'];
+// База знаний лежит уровнем выше — рядом с bot/ и telemetry/, в одной папке
+// executive-support/. Путь ОДИН намеренно. Раньше их было два, executive-support/
+// и просто kb/, и список молча выбирал первый существующий: копии разъехались
+// на 14 сущностей и целый домен, а тесты мастеров остались зелёными на
+// устаревшей. Появится второе место — оно разъедется снова, поэтому список
+// не восстанавливать: копию чинят удалением, а не фолбэком.
+const REGISTRY_PATHS = ['../executive-support/kb/index.md'];
 const REGISTRY_AT = REGISTRY_PATHS.find((p) => fs.existsSync(p));
 if (!REGISTRY_AT) {
   console.error('не найден реестр базы знаний, искали: ' + REGISTRY_PATHS.join(', '));
@@ -1861,8 +1863,8 @@ line('36. АКТИВНАЯ ЧИСЛЕННОСТЬ — УМОЛЧАНИЕ ЛЮБ�
   // пишет код. Копия и статья лежат рядом на диске, и разъехаться им нечем
   // только если это проверять: тот же приём, что двусторонняя сверка
   // reached_by. Изменится формула в базе — покраснеет здесь, а не в проде.
-  const article = ['../executive-support/kb/metrics/active-headcount.md',
-                   '../kb/metrics/active-headcount.md'].find((f) => fs.existsSync(f));
+  const article = ['../executive-support/kb/metrics/active-headcount.md']
+    .find((f) => fs.existsSync(f));
   check('статья про активную численность найдена', Boolean(article));
   const formula = fs.readFileSync(article, 'utf8')
     .match(/```sql\n(active_employee_flg[^`]*?)\n```/);
