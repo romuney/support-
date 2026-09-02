@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Паспорт сборки\n\n**ПОСЛЕ ИМПОРТА — ОПУБЛИКОВАТЬ (Publish / Active).**\nФайл приезжает с `active: false`: это семантика импорта n8n, не наша.\nПока не опубликован, триггер Mattermost не срабатывает ВОВСЕ —\nExecutions пуст, и это неотличимо от «бота позвали, а он не захотел».\n\n**Стоит Published, а Executions всё равно пуст — переопубликовать.**\nТриггер Mattermost регистрирует вебхук при публикации. Импорт поверх\nработающего флоу подменяет узлы, а регистрация остаётся от прежних:\nпо виду опубликовано, по факту события уходят в никуда. Снять\nпубликацию и поставить заново — регистрация переедет на новый узел.\n\n- сборка ядра: `d2040ffe`\n- зов по тегу: @bully, @Булли\n- каналы: ~hr-report-ask, ~stonis_hakcs_2\n- реакция :bully_work: — id бота: ВЫКЛЮЧЕНА — собрано без BOT_USER_ID\n\nКанал, которого нет в списке, бот НЕ ВИДИТ вовсе — ни обращения,\nни тега: пост туда не приходит, и Executions остаётся пустым.\nИмён для тега нужно два: логин латиницей и то, как зовут люди\n(кириллица в username Mattermost запрещена).\n\nПересобрать:\n`BOT_USERNAME=<логин>,<Имя> BOT_USER_ID=<id> python3 build_time_flows.py`",
+        "content": "## Паспорт сборки\n\n**ПОСЛЕ ИМПОРТА — ОПУБЛИКОВАТЬ (Publish / Active).**\nФайл приезжает с `active: false`: это семантика импорта n8n, не наша.\nПока не опубликован, триггер Mattermost не срабатывает ВОВСЕ —\nExecutions пуст, и это неотличимо от «бота позвали, а он не захотел».\n\n**Стоит Published, а Executions всё равно пуст — переопубликовать.**\nТриггер Mattermost регистрирует вебхук при публикации. Импорт поверх\nработающего флоу подменяет узлы, а регистрация остаётся от прежних:\nпо виду опубликовано, по факту события уходят в никуда. Снять\nпубликацию и поставить заново — регистрация переедет на новый узел.\n\n- сборка ядра: `e583faca`\n- зов по тегу: @bully, @Булли\n- каналы: ~hr-report-ask, ~stonis_hakcs_2\n- реакция :bully_work: — id бота: ВЫКЛЮЧЕНА — собрано без BOT_USER_ID\n\nКанал, которого нет в списке, бот НЕ ВИДИТ вовсе — ни обращения,\nни тега: пост туда не приходит, и Executions остаётся пустым.\nИмён для тега нужно два: логин латиницей и то, как зовут люди\n(кириллица в username Mattermost запрещена).\n\nПересобрать:\n`BOT_USERNAME=<логин>,<Имя> BOT_USER_ID=<id> python3 build_time_flows.py`",
         "height": 360,
         "width": 460,
         "color": 3
@@ -504,6 +504,81 @@
           "name": "Time Bully"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "mentioned",
+              "leftValue": "={{ $('Guard channel').first().json.mentioned }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        300
+      ],
+      "id": "called-by-tag",
+      "name": "Called by tag"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Разбивка длинного текста на посты Mattermost.\n//\n// 3900, а не 4000: лимит считается сервером в символах, и запас нужен на\n// маркер «(1/2)» и на markdown, который мы добавляем сами. Упереться в лимит\n// повторно значит снова уронить последний узел — уже после того, как ядро\n// отработало и ответ собран.\nconst MM_LIMIT = 3900;\n// Больше четырёх сообщений на один черновик — это не длинный ответ, а сбой:\n// спамить канал джуна нельзя, поэтому хвост обрезается с явной пометкой.\nconst MM_MAX_PARTS = 4;\n\nfunction mmChunks(text) {\n  const s = String(text ?? '').trim();\n  if (s.length <= MM_LIMIT) return [s];\n\n  const chunks = [];\n  let rest = s;\n  // Режем по границе строки, а если её нет — по слову: разрыв посреди\n  // markdown-ссылки или таблицы ломает разметку в обеих половинах.\n  while (rest.length > MM_LIMIT && chunks.length < MM_MAX_PARTS - 1) {\n    let at = rest.lastIndexOf('\\n', MM_LIMIT);\n    if (at < MM_LIMIT * 0.5) at = rest.lastIndexOf(' ', MM_LIMIT);\n    if (at < MM_LIMIT * 0.5) at = MM_LIMIT;\n    chunks.push(rest.slice(0, at).trimEnd());\n    rest = rest.slice(at).trimStart();\n  }\n  if (rest.length > MM_LIMIT) {\n    const kept = rest.slice(0, MM_LIMIT - 80).trimEnd();\n    rest = kept + '\\n\\n✂️ обрезано ' + (rest.length - kept.length) +\n           ' символов: лимит поста Mattermost.';\n  }\n  chunks.push(rest);\n  return chunks;\n}\n\n// Нумерация обязательна: без неё несколько постов подряд читаются как\n// несколько разных ответов на одно обращение.\nfunction mmSplit(text) {\n  const chunks = mmChunks(text);\n  if (chunks.length < 2) return chunks;\n  return chunks.map((c, i) => '**(' + (i + 1) + '/' + chunks.length + ')**\\n' + c);\n}\n\n// Нода mattermost отправляет по посту на входной элемент, поэтому разбивка\n// возвращается элементами, а порядок сохраняется исполнением по элементам.\nconst mmItems = (text) => mmSplit(text).map((t) => ({ json: { text: t } }));\n\n// РАЗНЫЕ БЛОКИ — РАЗНЫМИ ПОСТАМИ.\n//\n// Сообщение заказчику и ТЗ для аналитика адресованы разным людям, и джун\n// пересылает первое, не трогая второе. Пока они ехали одним постом, переслать\n// было нечего: ни целиком, ни куском. Отдельный пост копируется целиком\n// и кнопкой «Copy Text», а заголовок остаётся первой строкой — его джун\n// снимает одним движением, в отличие от чересполосицы бизнеса и техники.\n//\n// Общий предохранитель на число постов свой: посекционного мало, три секции\n// по четыре части — это двенадцать сообщений подряд в канале джуна.\nconst MM_MAX_POSTS = 6;\n\nfunction mmSections(sections) {\n  const items = [];\n  let dropped = 0;\n  for (const s of sections) {\n    const body = String(s.body ?? '').trim();\n    if (!body) continue;\n    const chunks = mmChunks(body);\n    chunks.forEach((c, i) => {\n      const title = String(s.title ?? '').trim();\n      const mark = chunks.length > 1 ? ' (' + (i + 1) + '/' + chunks.length + ')' : '';\n      const head = title ? '**' + title + mark + '**\\n' : (mark ? '**' + mark.trim() + '**\\n' : '');\n      if (items.length < MM_MAX_POSTS) items.push({ json: { text: head + c } });\n      else dropped++;\n    });\n  }\n  // Молча потерянный хвост — тот же тихий отказ: по виду канала ответ полный.\n  if (dropped && items.length) {\n    items[items.length - 1].json.text +=\n      '\\n\\n✂️ не отправлено частей: ' + dropped + ' (предел ' + MM_MAX_POSTS +\n      ' сообщений на одно обращение).';\n  }\n  return items.length ? items : [{ json: { text: '_ответ пустой_' } }];\n}\n\n// Ответ в личку. Служебного здесь нет: человек, который пишет боту, не правит\n// базу знаний и не проверяет черновик — ему нужен ответ и честная оценка,\n// насколько ему можно верить.\nfunction dmReplyBody(a) {\n  const parts = [a.draft || 'Не удалось собрать ответ.'];\n\n  if (a.confidence_key === 'medium') {\n    parts.push('');\n    // Причина — НАСТОЯЩАЯ, а не одна на все случаи.\n    //\n    // Раньше здесь стояло «определение ещё не подтверждено» жёстко в коде: это\n    // формулировка правила про status: draft, и она печаталась на любой средней\n    // уверенности. Живой прогон 2026-08-27: ни одна прочитанная статья\n    // черновиком не была, средняя стояла из-за неизвестного признака групп\n    // доступа — а человек читал придуманное объяснение. Это подрывает ровно тот\n    // сигнал, ради которого уверенность и считается: если причина неверна, её\n    // перестают читать вместе со всей строкой.\n    //\n    // Понизил код — причина у нас есть и она точная. Заявила средней сама\n    // модель — причины у нас нет, и выдумывать её нельзя: говорим только то,\n    // что знаем. Блок gaps сюда не идёт, он про пробелы базы и адресован джуну,\n    // а не человеку в личке.\n    parts.push('⚠️ Уверенность средняя' +\n      (a.confidence_capped && a.confidence_capped_reason\n        ? ': ' + a.confidence_capped_reason + '.'\n        : ' — ответ собран не полностью, перепроверьте перед использованием.'));\n  } else if (a.confidence_key === 'none') {\n    parts.push('');\n    parts.push('⚠️ Ответа в базе знаний нет — лучше уточнить у команды HR-аналитики.');\n  }\n  return parts.join('\\n');\n}\n\nconst a = $('Call core').first().json;\n// ТЗ отдельным блоком, как в личке: аналитику нужны оба, а заказчику\n// пересылают только первый.\nreturn mmSections([\n  { title: '', body: dmReplyBody(a) },\n  { title: 'ТЗ для аналитика — заказчику не отправлять', body: a.tech_spec },\n]);\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        140
+      ],
+      "id": "build-tag-reply",
+      "name": "Build tag reply"
+    },
+    {
+      "parameters": {
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Guard channel').first().json.channel_id }}"
+        },
+        "message": "={{ $json.text }}",
+        "attachments": [],
+        "otherOptions": {
+          "root_id": "={{ $('Guard channel').first().json.thread_root }}"
+        }
+      },
+      "type": "n8n-nodes-base.mattermost",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        140
+      ],
+      "id": "reply-where-called",
+      "name": "Reply where called",
+      "credentials": {
+        "mattermostApi": {
+          "id": "7SgPbuQnw6w2wzMl",
+          "name": "Time Bully"
+        }
+      }
     }
   ],
   "connections": {
@@ -592,16 +667,29 @@
         ]
       ]
     },
-    "Build header": {
+    "Called by tag": {
       "main": [
+        [
+          {
+            "node": "Build tag reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Post header",
             "type": "main",
             "index": 0
-          },
+          }
+        ]
+      ]
+    },
+    "Build tag reply": {
+      "main": [
+        [
           {
-            "node": "Answer event",
+            "node": "Reply where called",
             "type": "main",
             "index": 0
           }
@@ -624,6 +712,22 @@
         [
           {
             "node": "Post in thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build header": {
+      "main": [
+        [
+          {
+            "node": "Called by tag",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Answer event",
             "type": "main",
             "index": 0
           }

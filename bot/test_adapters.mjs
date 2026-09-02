@@ -930,6 +930,63 @@ line('16. Проводка адаптеров: связи и фильтры');
       got === 'сколько сотрудников в юните data');
   }
 
+  // ============================ ЗОВ ТЕГОМ ОТВЕЧАЕТ ТАМ, ГДЕ ПОЗВАЛИ
+  //
+  // Обращение по форме и зов тегом — разные разговоры. Первое даёт черновик
+  // ДЛЯ ДЖУНА: отдельный пост в канале черновиков, заказчик его не видит.
+  // Второе — ответ человеку, который стоит в треде и ждёт его ТАМ.
+  //
+  // Раньше различия не было: «Post header» всегда создавал новый корневой
+  // пост в канале черновиков. Позвали в треде — ответ появлялся в стороне,
+  // а в треде тишина, неотличимая от «бот не сработал». В hr-report-ask
+  // человек может писать ТОЛЬКО в треде, так что это был единственный
+  // способ обратиться к боту — и он же не работал.
+  {
+    const gate = channel.nodes.find((n) => n.name === 'Called by tag');
+    check('развилка по тегу есть', Boolean(gate));
+    check('и читает признак у guard\'а по имени узла',
+      JSON.stringify(gate.parameters).includes("$('Guard channel')") &&
+      JSON.stringify(gate.parameters).includes('mentioned'));
+
+    const t = channel.connections['Called by tag'].main;
+    check('ветка «позвали тегом» ведёт к ответу в тред',
+      t[0][0].node === 'Build tag reply');
+    check('ветка «обращение по форме» — к черновику джуну',
+      t[1][0].node === 'Post header');
+
+    const reply = channel.nodes.find((n) => n.name === 'Reply where called');
+    // Канал ПО ID из guard'а: слушается несколько каналов, и вписанное имя
+    // увело бы ответ в другой — тихо, потому что пост всё равно уйдёт.
+    check('ответ уходит в тот канал, где позвали',
+      reply.parameters.channelId.mode === 'id' &&
+      reply.parameters.channelId.value.includes("$('Guard channel')") &&
+      reply.parameters.channelId.value.includes('channel_id'));
+    check('и в тот тред, где позвали',
+      String(reply.parameters.otherOptions.root_id)
+        .includes("$('Guard channel')") &&
+      String(reply.parameters.otherOptions.root_id).includes('thread_root'));
+
+    // Телеметрия считает ОБА случая: она висит на шапке, до развилки.
+    check('телеметрия не зависит от развилки',
+      channel.connections['Build header'].main[0]
+        .some((c) => c.node === 'Answer event'));
+
+    // Тело ответа читается у ядра ПО ИМЕНИ УЗЛА: между ядром и этим узлом
+    // стоит «Build header», и $json здесь — его выход, а не ответ ядра.
+    const body = js(channel, 'Build tag reply');
+    check('тело ответа берётся у ядра по имени узла',
+      /\$\('Call core'\)/.test(body) && !/\$json\.draft/.test(body));
+
+    // И прогон: узел обязан собрать непустой текст из ответа ядра.
+    const out = new Function('$', '$json', body)(
+      (n) => ({ first: () => ({ json: { 'Call core': {
+        draft: 'Численность считается по active_employee_flg.',
+        confidence_key: 'high', tech_spec: '', sources: [], gaps: '',
+      } }[n] }) }), {});
+    check('ответ на тег собирается непустым',
+      out.length >= 1 && /active_employee_flg/.test(out[0].json.text));
+  }
+
   // Все три адаптера зовут одно ядро
   for (const [name, w] of [['channel', channel], ['chat', chat], ['dm', dm]]) {
     const c = w.nodes.find((n) => n.name === 'Call core');

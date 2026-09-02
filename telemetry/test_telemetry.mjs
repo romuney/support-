@@ -1069,9 +1069,16 @@ line('29. Адаптер пишет bot_answered — иначе domains неот
 
   // Ветвь лога отдельная: падение Ingest не должно мешать посту с черновиком,
   // и ни один узел не должен выполниться дважды.
+  // Держим СМЫСЛ, а не имя соседа: путь ответа с 02.09 начинается развилкой
+  // «позвали тегом или пришло обращение по форме», и вписанное сюда
+  // «Post header» покраснело бы на правке, которая лога не касается вовсе.
+  // Важно ровно одно: телеметрия — отдельная ветвь и считает ОБА случая.
   const fromHeader = ch.connections['Build header'].main[0].map((c) => c.node);
-  check('лог — вторая ветвь от шапки',
-    fromHeader.includes('Post header') && fromHeader.includes('Answer event'));
+  check(`лог — вторая ветвь от шапки (${fromHeader.join(', ')})`,
+    fromHeader.length === 2 && fromHeader.includes('Answer event'));
+  const answerPath = fromHeader.find((n) => n !== 'Answer event');
+  check('вторая ветвь ведёт к ответу, а не в тупик',
+    Boolean(ch.connections[answerPath]));
   check('ветви не сходятся',
     ch.connections['Answer event'].main[0][0].node === 'To Ingest' &&
     !ch.connections['To Ingest']);
