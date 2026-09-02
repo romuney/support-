@@ -1594,6 +1594,30 @@ line('27. ПУСТОЙ ПЛАН РОУТЕРА — не «нет ответа»,
   check('и роутер при этом НЕ назван промолчавшим',
     withDomain.router_empty_plan === false);
 
+  // ТРИ СОСТОЯНИЯ РОУТЕРА, А НЕ ДВА. «Не дал ничего» и «назвал тему,
+  // но ни одной статьи» — разные отказы, и чинятся в разных местах:
+  // первый словами в таблице «Домены», второй мастерами домена.
+  //
+  // Прогон 02.09: один и тот же вопрос про сотрудников с детьми то попадал
+  // в статью про витрину детей, то нет. Выбрать одну строку из 51 модель
+  // повторяемо не умеет — и пока эти два случая слиты в один счётчик,
+  // по телеметрии не видно, работает ли страховка мастерами вообще.
+  check('домен без статей назван своим признаком',
+    withDomain.router_domain_only === true);
+  check('пустой план — это НЕ «домен без статей»',
+    p.router_domain_only === false && p.router_empty_plan === true);
+  const picked = runPlan(JSON.stringify({
+    domains: ['movement'], articles: ['kb/metrics/turnover.md'],
+    dd: [], no_question: false,
+  }), REGISTRY, { question: 'сколько уволилось' });
+  check('роутер назвал статью — признака нет',
+    picked.router_domain_only === false && picked.router_empty_plan === false);
+  // Реплика без вопроса — не промах роутера ни в каком виде.
+  check('на реплике без вопроса признака нет',
+    runPlan(JSON.stringify({ domains: ['movement'], articles: [], dd: [],
+      no_question: true }), REGISTRY, { question: 'ага' })
+      .router_domain_only === false);
+
   // Реплики без вопроса это не касается — там читать и не надо.
   const noQ = runPlan(JSON.stringify({
     domains: [], articles: [], dd: [], no_question: true,
