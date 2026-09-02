@@ -136,6 +136,41 @@ line('1. МАСТЕРА ДОМЕНА добираются кодом, а не п
 }
 
 // ====================================================================== 1а0
+line('1а000. ТЕГ БЕЗ ТЕКСТА ПРИ НЕПУСТОЙ ПЕРЕПИСКЕ — ВОПРОС, РЕШАЕТ КОД');
+{
+  // Живой прогон 02.09 21:34, дважды: три реплики с вопросом и «@Булли»
+  // отдельным сообщением. Роутер видел одно слово и сказал no_question:
+  // true — это выключало весь добор кодом, Need DD получал 0, DD Lookup
+  // не запускался. Правило есть и в промпте роутера, но держится оно здесь:
+  // на то, что модель прочтёт правило, не полагаемся.
+  const NOQ = JSON.stringify({ domains: [], articles: [], dd: [], no_question: true });
+  const THREAD = '@u.testov: Скажи где взять декретниц\n\n@u.testov: А еще покраска HQ';
+  const tag = runPlan(NOQ, REGISTRY, { question: '@Булли', mode: 'channel', thread: THREAD });
+  check('тег без текста + переписка: вопрос взят из переписки',
+    tag.no_question === false && tag.no_question_overridden === true);
+  check('и витрина по умолчанию прочитана',
+    tag.files.includes('kb/tables/mdm-employee-structure-d.md'));
+  check('и её инвентарь запланирован — Need DD не пуст',
+    tag.dd.length === 1 && tag.dd_count === 1);
+
+  // «Спасибо» в треде — не вопрос; роутер прав, читать нечего.
+  const thanks = runPlan(NOQ, REGISTRY, { question: 'спасибо', mode: 'channel', thread: THREAD });
+  check('«спасибо» при переписке остаётся репликой без вопроса',
+    thanks.no_question === true && thanks.no_question_overridden === false &&
+    thanks.files.length === 0 && thanks.dd.length === 0);
+
+  // Тег без переписки — брать вопрос неоткуда.
+  const bare = runPlan(NOQ, REGISTRY, { question: '@Булли', mode: 'channel', thread: '' });
+  check('тег без переписки — вопроса нет', bare.no_question === true && bare.dd.length === 0);
+
+  // Тег в обоих написаниях и с латиницей — граница по буквам любого алфавита.
+  const latin = runPlan(NOQ, REGISTRY, { question: '@bully', mode: 'channel', thread: THREAD });
+  check('латинский тег без текста — тоже вопрос из переписки', latin.no_question === false);
+  // Тег с текстом — роутер видел вопрос сам; его вердикт не трогаем.
+  const withText = runPlan(NOQ, REGISTRY, { question: '@Булли ок, понял', mode: 'channel', thread: THREAD });
+  check('тег с текстом — вердикт роутера остаётся', withText.no_question === true);
+}
+
 line('1а00. ЧТЕНИЕ ИЗ GITLAB ПОВТОРЯЕТСЯ ПРИ СБОЕ');
 {
   // Живой прогон 02.09 21:14: GitLab ответил «Service unavailable», реестр
