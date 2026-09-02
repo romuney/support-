@@ -2677,9 +2677,19 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   const allowed = dm.connections['DM allowed'].main[0].map((t) => t.node);
   // Ядро теперь зовётся не сразу: между гейтом и им стоит чтение треда.
   // Проверяем то же по смыслу — реакция первой, до всей работы.
-  check('реакция ставится ПЕРЕД работой ядра',
-    allowed.indexOf('React work in DM') === 0 &&
-    allowed.indexOf('React work in DM') < allowed.indexOf('Need thread DM'));
+  // Перед реакцией — один GET за id бота: константы BOT_USER_ID больше нет,
+  // её негде было взять. Ветвь всё так же боковая и первая.
+  check('id бота узнаётся ПЕРЕД реакцией, боковой ветвью от гейта',
+    allowed.indexOf('Who am I DM') === 0 &&
+    allowed.indexOf('Who am I DM') < allowed.indexOf('Need thread DM') &&
+    dm.connections['Who am I DM'].main[0][0].node === 'React work in DM');
+  const whoDm = dm.nodes.find((n) => n.name === 'Who am I DM');
+  check('id берётся из /users/me тем же credential, мягко',
+    whoDm.type === 'n8n-nodes-base.httpRequest' &&
+    whoDm.parameters.method === 'GET' &&
+    /\/api\/v4\/users\/me$/.test(whoDm.parameters.url) &&
+    whoDm.parameters.nodeCredentialType === 'mattermostApi' &&
+    whoDm.onError === 'continueRegularOutput');
   // Снятие — хвостом за отправкой, а не параллельно: параллельная ветвь
   // могла бы снять отметку раньше, чем ответ уйдёт.
   check('реакция снимается ПОСЛЕ отправки ответа',
@@ -2704,11 +2714,47 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   check('реакция адресована посту из guard\'а',
     /Guard DM.*post\.id/.test(String(react.parameters.postId)) &&
     react.parameters.postId === unreact.parameters.postId);
+  check('и user_id — по имени узла Who am I, не константой',
+    /\$\('Who am I DM'\)[^}]*\.id/.test(String(react.parameters.userId)) &&
+    react.parameters.userId === unreact.parameters.userId);
 
-  // В КАНАЛЕ реакций бота нет — там словарь дежурного, и своя реакция
-  // читалась бы как чужое действие. Решение владельца, а не недосмотр.
-  check('в канале бот реакций не ставит',
-    !channel.nodes.some((n) => n.parameters?.resource === 'reaction'));
+  // В КАНАЛЕ — ТОЛЬКО НА СООБЩЕНИЕ С ТЕГОМ. Решение владельца 02.09: видно,
+  // что бот триггернулся и работает. На посты формы в hr-report-ask —
+  // по-прежнему нет: там реакции — словарь дежурного, и своя читалась бы
+  // как чужое действие. Гейт читает `mentioned` у guard'а по имени узла.
+  {
+    const gate = channel.nodes.find((n) => n.name === 'Tagged?');
+    check('канал: гейт реакции по тегу есть и читает guard по имени',
+      Boolean(gate) && JSON.stringify(gate.parameters).includes("$('Guard channel')") &&
+      JSON.stringify(gate.parameters).includes('mentioned'));
+    const our = channel.connections['Our request'].main[0].map((t) => t.node);
+    check('канал: реакция — боковая ветвь от гейта, главный путь её не ждёт',
+      our.includes('Need thread') && our.includes('Tagged?'));
+    const t = channel.connections['Tagged?'].main;
+    check('канал: тегнули → Who am I → реакция; форма → ничего',
+      t[0][0].node === 'Who am I' && t[1].length === 0 &&
+      channel.connections['Who am I'].main[0][0].node === 'React work in channel');
+    const cr = channel.nodes.find((n) => n.name === 'React work in channel');
+    const cu = channel.nodes.find((n) => n.name === 'Unreact work in channel');
+    check('канал: реакция на сообщение с тегом из guard\'а, той же эмодзи',
+      /Guard channel.*post\.id/.test(String(cr.parameters.postId)) &&
+      cr.parameters.postId === cu.parameters.postId &&
+      cr.parameters.emojiName === 'bully_work' && cu.parameters.emojiName === 'bully_work' &&
+      cr.parameters.operation === 'create' && cu.parameters.operation === 'delete');
+    check('канал: снимается после ответа в тред',
+      channel.connections['Reply where called'].main[0][0].node === 'Unreact work in channel');
+    check('канал: падение реакции не роняет ответ',
+      cr.onError === 'continueRegularOutput' && cu.onError === 'continueRegularOutput');
+    // Путь формы до реакции не доходит: от «Post header» вниз ни одного
+    // узла реакции — словарь дежурного цел.
+    const reach = (start) => { const seen = new Set(); const q = [start];
+      while (q.length) { const n = q.shift(); if (seen.has(n)) continue; seen.add(n);
+        for (const b of (channel.connections[n]?.main || [])) for (const x of (b || [])) q.push(x.node); }
+      return seen; };
+    check('канал: путь формы реакций не ставит',
+      ![...reach('Post header')].some((n) =>
+        channel.nodes.find((x) => x.name === n)?.parameters?.resource === 'reaction'));
+  }
 
   // ЛОГ ЛИЧКИ — ШАПКА ПЛЮС ТРЕД, той же конструкцией, что в канале.
   // Тремя постами подряд он забивал канал джуна и читался как три разных

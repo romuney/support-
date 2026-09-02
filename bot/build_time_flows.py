@@ -114,34 +114,8 @@ DM_ALLOWLIST = []
 # действий дежурного. Одно значение — два места, и добывается один раз:
 #   GET /api/v4/users/username/<логин бота>  → поле id
 # либо System Console → Users → карточка бота.
-# ID УЧЁТКИ БОТА — НЕ ТОКЕН И НЕ TOKEN ID.
-#
-# Разбор 02.09: на вопрос «где взять id» прислали страницу System Console →
-# Bot Accounts, где под именем бота перечислены Token ID. Они выглядят ровно
-# как user id — те же 26 символов, те же строчные буквы и цифры, — и подстановка
-# прошла бы молча: сборщик принял бы, узел реакции получил бы отказ от API,
-# а `onError: continueRegularOutput` его проглотил. Ответ человеку ушёл бы,
-# реакция не встала бы, и разбирать было бы нечего.
-#
-# Где брать НАСТОЯЩИЙ, ничего не спрашивая у Mattermost: в n8n открыть
-# Executions, любой прогон адаптера, узел «Reply in DM» (или «Post header»),
-# вкладка OUTPUT — там лежит пост, отправленный САМИМ ботом, и `user_id`
-# в нём его собственный. Ни токена, ни доступа в System Console не нужно.
-#
-# Иначе: System Console → User Management → Users → карточка бота, либо
-#   GET /api/v4/users/username/bully  → поле `id`
-#
-# Сам токен здесь не нужен вовсе и в репозиторий не попадает: узлы работают
-# на credential'е, заведённом в n8n.
-BOT_USER_ID = os.environ.get("BOT_USER_ID", "").strip()
-if BOT_USER_ID and not re.fullmatch(r"[a-z0-9]{26}", BOT_USER_ID):
-    raise SystemExit(
-        f"BOT_USER_ID={BOT_USER_ID!r} не похож на id учётки Mattermost.\n"
-        "Ожидается 26 строчных букв и цифр. Похожую форму имеет Token ID\n"
-        "со страницы Bot Accounts — это НЕ то: id учётки берётся в\n"
-        "System Console → User Management → Users, либо запросом\n"
-        "GET /api/v4/users/username/bully → поле `id`."
-    )
+# id учётки бота для реакций НЕ настраивается: узел «Who am I» берёт его
+# из /api/v4/users/me при каждом прогоне. См. who_am_i().
 
 # Эмодзи «бот думает». Имя — от владельца (2026-09-01), пишется БЕЗ двоеточий:
 # нода Mattermost обрамляет его сама.
@@ -253,7 +227,6 @@ def build_note(pos=None):
     """
     tag = (", ".join("@" + n for n in BOT_USERNAMES) if BOT_USERNAMES
            else "ВЫКЛЮЧЕН — собрано без BOT_USERNAME")
-    react = BOT_USER_ID or "ВЫКЛЮЧЕНА — собрано без BOT_USER_ID"
     lines = [
         "## Паспорт сборки",
         "",
@@ -271,15 +244,14 @@ def build_note(pos=None):
         f"- сборка ядра: `{CORE_BUILD}`",
         f"- зов по тегу: {tag}",
         f"- каналы: {', '.join('~' + c for c in CHANNELS_WATCHED)}",
-        f"- реакция :{WORK_EMOJI}: — id бота: {react}",
+        f"- реакция :{WORK_EMOJI}: — id бота берётся из /api/v4/users/me при прогоне",
         "",
         "Канал, которого нет в списке, бот НЕ ВИДИТ вовсе — ни обращения,",
         "ни тега: пост туда не приходит, и Executions остаётся пустым.",
         "Имён для тега нужно два: логин латиницей и то, как зовут люди",
         "(кириллица в username Mattermost запрещена).",
         "",
-        "Пересобрать:",
-        "`BOT_USERNAME=<логин>,<Имя> BOT_USER_ID=<id> python3 build_time_flows.py`",
+        "Пересобрать: `python3 build_time_flows.py` (имена по умолчанию: bully, Булли)",
     ]
     # ПАЛИТРА ЗАМЕТКИ — ИЗ ИСХОДНИКА n8n, А НЕ ИЗ ДОГАДКИ.
     #
@@ -292,7 +264,7 @@ def build_note(pos=None):
     # обходили простой шаг — открыть исходник. Теперь 3 = красный на проблему,
     # 4 = зелёный когда всё настроено, и у каждого числа есть источник.
     params = {"content": "\n".join(lines), "height": 360, "width": 460,
-              "color": 4 if (BOT_USERNAMES and BOT_USER_ID) else 3}
+              "color": 4 if BOT_USERNAMES else 3}
     return node(
         "Паспорт сборки",
         "n8n-nodes-base.stickyNote",
@@ -6758,7 +6730,36 @@ def mm_trigger(name, pos, channels, posted_filters=None):
     )
 
 
-def mm_reaction(name, pos, operation, post_id_expr, emoji):
+def who_am_i(name, pos):
+    """id учётки бота — ПРИ ПРОГОНЕ, из /api/v4/users/me, а не константой.
+
+    Константа BOT_USER_ID так и не нашлась: в интерфейсе Mattermost id не
+    показывают, Bot Accounts отдаёт Token ID той же формы, и это была
+    единственная настройка, без которой узел молча не работал. А узнать id
+    бот может сам: тот же credential, что читает тред, отвечает на /users/me
+    своим id. Тем же HTTP-узлом, что работал вживую 02.09 21:34. Один GET
+    на обращение.
+
+    onError: не встал id — реакции отвалятся мягко, как и раньше, ответ уйдёт.
+    """
+    return node(
+        name,
+        "n8n-nodes-base.httpRequest",
+        4.4,
+        pos,
+        {
+            "method": "GET",
+            "url": MM_BASE.rstrip("/") + "/api/v4/users/me",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "mattermostApi",
+            "options": {},
+        },
+        credentials=copy.deepcopy(MM_CRED),
+        onError="continueRegularOutput",
+    )
+
+
+def mm_reaction(name, pos, operation, post_id_expr, emoji, user_id_expr):
     """Поставить или снять реакцию бота на пост.
 
     ПАРАМЕТРЫ ЗАДАНЫ ПО СХЕМЕ НОДЫ, А НЕ ПО СНЯТОМУ СНИМКУ. В Time examples.json
@@ -6768,7 +6769,7 @@ def mm_reaction(name, pos, operation, post_id_expr, emoji):
     неработающий узел.
 
     onError у обоих узлов НЕ случаен. Реакция — украшение: нет эмодзи
-    на сервере, пуст BOT_USER_ID, сменилось имя поля — ответ человеку всё
+    на сервере, не встал id из «Who am I», сменилось имя поля — ответ всё
     равно обязан уйти. Тот же довод, по которому лог телеметрии вынесен
     отдельной ветвью: падение второстепенного не трогает главное.
     """
@@ -6780,7 +6781,7 @@ def mm_reaction(name, pos, operation, post_id_expr, emoji):
         {
             "resource": "reaction",
             "operation": operation,
-            "userId": BOT_USER_ID,
+            "userId": user_id_expr,
             "postId": post_id_expr,
             "emojiName": emoji,
         },
@@ -8366,6 +8367,25 @@ channel_nodes = [
         "={{ $json.text }}",
         root_id_expr="={{ $('Post header').first().json.id }}",
     ),
+    # ------------------------------------------ «работаю» на сообщение с тегом
+    #
+    # Решение владельца 02.09: в канале реакция ставится ТОЛЬКО на сообщение,
+    # где бота тегнули, — чтобы было видно, что он триггернулся и работает.
+    # На посты формы в hr-report-ask — по-прежнему нет: там реакции — словарь
+    # дежурного (:loading:, :done_checkmark:), и своя читалась бы как чужое
+    # действие. Гейт тот же, что у ответа в тред: признак `mentioned` guard'а.
+    # Телеметрия узнаёт реакции по emoji_name и :bully_work: не считает —
+    # метрики дежурного не трогаются.
+    called_by_tag("Tagged?", [320, 120], "Guard channel"),
+    who_am_i("Who am I", [440, 40]),
+    mm_reaction("React work in channel", [560, 40], "create",
+                "={{ $('Guard channel').first().json.post.id }}", WORK_EMOJI,
+                "={{ $('Who am I').first().json.id }}"),
+    # Снятие — после отправки ответа в тред, и только на пути тега: форма
+    # реакции не ставила, снимать нечего.
+    mm_reaction("Unreact work in channel", [1400, 140], "delete",
+                "={{ $('Guard channel').first().json.post.id }}", WORK_EMOJI,
+                "={{ $('Who am I').first().json.id }}"),
     # ---------------------------------------------- ответ туда, где позвали
     called_by_tag("Called by tag", [800, 300], "Guard channel"),
     node("Build tag reply", "n8n-nodes-base.code", 2, [920, 140],
@@ -8392,9 +8412,17 @@ for _t in channel_triggers()[1:]:
 # Ложная ветка «Our request» никуда не ведёт: отсеянное сообщение просто
 # не идёт дальше, а причина отсева видна в данных ноды Guard channel.
 channel_conn["Our request"] = {"main": [
-    [{"node": "Need thread", "type": "main", "index": 0}],
+    [{"node": "Need thread", "type": "main", "index": 0},
+     {"node": "Tagged?", "type": "main", "index": 0}],
     [],
 ]}
+# Реакция — боковая ветвь от гейта, как в личке: главный путь её не ждёт,
+# её падение его не трогает. Ложная ветка «Tagged?» пуста: форма без реакции.
+channel_conn["Tagged?"] = {"main": [
+    [{"node": "Who am I", "type": "main", "index": 0}],
+    [],
+]}
+channel_conn.update(chain("Who am I", "React work in channel"))
 channel_conn["Need thread"] = {"main": [
     [{"node": "Get thread", "type": "main", "index": 0}],
     [{"node": "Build thread ch", "type": "main", "index": 0}],
@@ -8408,7 +8436,7 @@ channel_conn["Called by tag"] = {"main": [
     [{"node": "Build tag reply", "type": "main", "index": 0}],
     [{"node": "Post header", "type": "main", "index": 0}],
 ]}
-channel_conn.update(chain("Build tag reply", "Reply where called"))
+channel_conn.update(chain("Build tag reply", "Reply where called", "Unreact work in channel"))
 channel_conn.update(chain("Post header", "Build thread", "Post in thread"))
 # Вторая ветвь от шапки: запись в лог. Веер НА ВЫХОДЕ здесь безопасен —
 # ветви не сходятся, и ни один узел не выполняется дважды. Лог намеренно
@@ -8611,13 +8639,16 @@ dm_nodes = [
     # Ядро работает секунды и дольше: роутер, чтение статей, DD, автор,
     # проверочный запрос. Без отметки человек не отличает «бот думает»
     # от «бот не услышал» и пишет второй раз.
-    mm_reaction("React work in DM", [440, 160], "create", DM_POST_ID, WORK_EMOJI),
+    who_am_i("Who am I DM", [320, 160]),
+    mm_reaction("React work in DM", [440, 160], "create", DM_POST_ID, WORK_EMOJI,
+                "={{ $('Who am I DM').first().json.id }}"),
     call_core([700, 300], "dm", guard_node="Guard DM",
               thread_node="Build thread DM"),
     node("Build DM reply", "n8n-nodes-base.code", 2, [680, 220], {"jsCode": DM_MSG_JS}),
     # Снятие — после того, как ответ УЖЕ отправлен: реакция обязана пережить
     # ровно то ожидание, ради которого ставилась, и ни секундой меньше.
-    mm_reaction("Unreact work in DM", [1160, 220], "delete", DM_POST_ID, WORK_EMOJI),
+    mm_reaction("Unreact work in DM", [1160, 220], "delete", DM_POST_ID, WORK_EMOJI,
+                "={{ $('Who am I DM').first().json.id }}"),
     mm_post(
         "Reply in DM",
         [920, 220],
@@ -8666,7 +8697,7 @@ dm_conn = chain("Time Trigger DM", "Guard DM", "DM allowed")
 # после ответа, бессмысленна.
 dm_conn["DM allowed"] = {"main": [
     [
-        {"node": "React work in DM", "type": "main", "index": 0},
+        {"node": "Who am I DM", "type": "main", "index": 0},
         {"node": "Need thread DM", "type": "main", "index": 0},
     ],
     [],
@@ -8695,6 +8726,7 @@ dm_conn["Call core"] = {
 dm_conn["Build DM reply"] = {"main": [[{"node": "Reply in DM", "type": "main", "index": 0}]]}
 # Снятие реакции — хвостом за отправкой ответа, а не параллельной ветвью:
 # параллельная могла бы снять отметку раньше, чем ответ уйдёт.
+dm_conn.update(chain("Who am I DM", "React work in DM"))
 dm_conn.update(chain("Reply in DM", "Unreact work in DM"))
 dm_conn["Build DM log"] = {
     "main": [[{"node": "Log DM to junior channel", "type": "main", "index": 0}]]
@@ -8751,23 +8783,6 @@ print(f"Слушаются каналы: {', '.join('~' + c for c in CHANNELS_WA
 print("В остальных каналах бот не увидит ни обращения, ни тега — пост туда")
 print("просто не придёт. Добавить канал:")
 print("  CHANNEL_LISTEN=<канал>,<ещё канал> python3 build_time_flows.py")
-if not BOT_USER_ID:
-    print()
-    print(f"ВНИМАНИЕ: BOT_USER_ID пуст — реакция :{WORK_EMOJI}: в личке не встанет.")
-    print("Узлы «React work in DM» и «Unreact work in DM» отвалятся молча")
-    print("(onError: continueRegularOutput) — ответ человеку при этом уйдёт.")
-    print("ПРОЩЕ ВСЕГО — ИЗ n8n, ничего не спрашивая у Mattermost:")
-    print("  Executions → любой прогон Adapter DM или Adapter Channel →")
-    print("  узел «Reply in DM» (или «Post header») → вкладка OUTPUT →")
-    print("  поле user_id. Это пост, который отправил САМ бот, и user_id")
-    print("  в нём — его собственный.")
-    print(f"Иначе:  GET /api/v4/users/username/{BOT_USERNAMES[0] if BOT_USERNAMES else '<логин>'}  → поле id,")
-    print("либо System Console → User Management → Users → карточка бота.")
-    print("НЕ БЕРИТЕ Token ID со страницы Bot Accounts: он той же формы")
-    print("(26 строчных букв и цифр), подставится молча, а реакция не встанет.")
-    print("  BOT_USER_ID=<id> python3 build_time_flows.py")
-    print("Тот же id нужен телеметрии: BOT_USER_IDS в build_telemetry_flows.py,")
-    print("иначе реакции бота в канале лягут в лог как действия дежурного.")
 print()
 print(f"ПРОВЕРИТЬ ПРИ ИМПОРТЕ: узлы реакции :{WORK_EMOJI}: собраны по схеме ноды,")
 print("а не по снятому снимку — в Time examples.json нода реакции без полей.")
