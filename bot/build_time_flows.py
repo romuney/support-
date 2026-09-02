@@ -657,6 +657,20 @@ PROMPT_VERSION = hashlib.sha1(
 ).hexdigest()[:8]
 
 QUESTION_EXPR = "$('When called by adapter').first().json.question"
+# ПЕРЕПИСКА ТРЕДА — И РОУТЕРУ ТОЖЕ, а не только автору.
+#
+# Живой прогон 02.09 21:34, канал: три реплики подряд («где взять декретниц»,
+# «у которых день рождения в феврале», «а ещё покраска HQ») и тег отдельным
+# сообщением. Роутер получил только «@bully», ответил no_question: true —
+# и код не добрал ничего: ни headcount для декретниц, ни словарь для HQ,
+# хотя в реестре есть и то и другое. Автор отвечал из переписки и головы,
+# а «что такое декретницы» переспросил, потому что статей у него не было.
+# Планирует роутер — значит переписку обязан видеть он, иначе на любой
+# тег без текста план пуст по определению.
+THREAD_EXPR = (
+    "($('When called by adapter').first().json.thread || 'переписки нет — "
+    "новое обращение')"
+)
 REGISTRY_EXPR = "$('Decode registry').first().json.text"
 # Поля формы для роутера. Пусто — значит формы не было (личка, чат): плейсхолдер
 # тогда схлопывается в одну строку, а не в пустой блок с заголовком.
@@ -686,7 +700,8 @@ def fill(prompt, **slots):
 
 
 router_prompt_expr = fill(
-    ROUTER_PROMPT, REGISTRY=REGISTRY_EXPR, QUESTION=QUESTION_EXPR, FORM=FORM_EXPR
+    ROUTER_PROMPT, REGISTRY=REGISTRY_EXPR, QUESTION=QUESTION_EXPR, FORM=FORM_EXPR,
+    THREAD=THREAD_EXPR,
 )
 
 core_nodes += [
