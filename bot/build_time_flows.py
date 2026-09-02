@@ -123,8 +123,12 @@ DM_ALLOWLIST = []
 # а `onError: continueRegularOutput` его проглотил. Ответ человеку ушёл бы,
 # реакция не встала бы, и разбирать было бы нечего.
 #
-# Где брать НАСТОЯЩИЙ: System Console → User Management → Users → найти bully,
-# id виден в карточке и в адресной строке. Либо API:
+# Где брать НАСТОЯЩИЙ, ничего не спрашивая у Mattermost: в n8n открыть
+# Executions, любой прогон адаптера, узел «Reply in DM» (или «Post header»),
+# вкладка OUTPUT — там лежит пост, отправленный САМИМ ботом, и `user_id`
+# в нём его собственный. Ни токена, ни доступа в System Console не нужно.
+#
+# Иначе: System Console → User Management → Users → карточка бота, либо
 #   GET /api/v4/users/username/bully  → поле `id`
 #
 # Сам токен здесь не нужен вовсе и в репозиторий не попадает: узлы работают
@@ -8548,7 +8552,12 @@ if not BOT_USER_ID:
     print(f"ВНИМАНИЕ: BOT_USER_ID пуст — реакция :{WORK_EMOJI}: в личке не встанет.")
     print("Узлы «React work in DM» и «Unreact work in DM» отвалятся молча")
     print("(onError: continueRegularOutput) — ответ человеку при этом уйдёт.")
-    print(f"Взять id:  GET /api/v4/users/username/{BOT_USERNAMES[0] if BOT_USERNAMES else '<логин>'}  → поле id,")
+    print("ПРОЩЕ ВСЕГО — ИЗ n8n, ничего не спрашивая у Mattermost:")
+    print("  Executions → любой прогон Adapter DM или Adapter Channel →")
+    print("  узел «Reply in DM» (или «Post header») → вкладка OUTPUT →")
+    print("  поле user_id. Это пост, который отправил САМ бот, и user_id")
+    print("  в нём — его собственный.")
+    print(f"Иначе:  GET /api/v4/users/username/{BOT_USERNAMES[0] if BOT_USERNAMES else '<логин>'}  → поле id,")
     print("либо System Console → User Management → Users → карточка бота.")
     print("НЕ БЕРИТЕ Token ID со страницы Bot Accounts: он той же формы")
     print("(26 строчных букв и цифр), подставится молча, а реакция не встанет.")

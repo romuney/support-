@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Паспорт сборки\n\n- сборка ядра: `178386d0`\n- зов по тегу: @bully, @Булли\n- каналы: ~hr-report-ask, ~stonis_hakcs_2\n- реакция :bully_work: — id бота: ВЫКЛЮЧЕНА — собрано без BOT_USER_ID\n\nКанал, которого нет в списке, бот НЕ ВИДИТ вовсе — ни обращения,\nни тега: пост туда не приходит, и Executions остаётся пустым.\nИмён для тега нужно два: логин латиницей и то, как зовут люди\n(кириллица в username Mattermost запрещена).\n\nПересобрать:\n`BOT_USERNAME=<логин>,<Имя> BOT_USER_ID=<id> python3 build_time_flows.py`",
+        "content": "## Паспорт сборки\n\n- сборка ядра: `f4e918d2`\n- зов по тегу: @bully, @Булли\n- каналы: ~hr-report-ask, ~stonis_hakcs_2\n- реакция :bully_work: — id бота: ВЫКЛЮЧЕНА — собрано без BOT_USER_ID\n\nКанал, которого нет в списке, бот НЕ ВИДИТ вовсе — ни обращения,\nни тега: пост туда не приходит, и Executions остаётся пустым.\nИмён для тега нужно два: логин латиницей и то, как зовут люди\n(кириллица в username Mattermost запрещена).\n\nПересобрать:\n`BOT_USERNAME=<логин>,<Имя> BOT_USER_ID=<id> python3 build_time_flows.py`",
         "height": 340,
         "width": 460,
         "color": 3
