@@ -86,9 +86,9 @@ CORE_ID = os.environ.get("CORE_WORKFLOW_ID", "quV6Ec1hmobZefBX")
 # бота, а не правка кода. Через запятую, имена без «~».
 CHANNEL_LISTEN = os.environ.get("CHANNEL_LISTEN", "hr-report-ask")
 CHANNEL_DRAFTS = os.environ.get("CHANNEL_DRAFTS", "stonis_hakcs_2")
-CHANNELS_WATCHED = [
+CHANNELS_WATCHED = list(dict.fromkeys(
     c.strip() for c in f"{CHANNEL_LISTEN},{CHANNEL_DRAFTS}".split(",") if c.strip()
-]
+))
 
 # Credential бота Bully. Он уже состоит в обоих каналах.
 MM_CRED = {"mattermostApi": {"id": "7SgPbuQnw6w2wzMl", "name": "Time Bully"}}
@@ -8227,11 +8227,33 @@ return mmSections([
 ]);
 """
 
+# ПО ТРИГГЕРУ НА КАНАЛ, а не один триггер с двумя каналами в фильтре.
+#
+# Единственная форма этого узла, которая точно работала, — снимок живого флоу
+# (Time examples.json): один триггер, один канал. Два канала в одном фильтре
+# появились 02.09 вместе с каналом черновиков — и с этого дня прогонов нет:
+# последний в 12:33, а бота звали в 20:58, 20:59 и 21:04 при статусе Published.
+#
+# Узел кастомный, сборки этого инстанса; в апстриме n8n его нет, схемы тоже.
+# Регистрирует ли он вебхук на каждый канал списка, на первый или ни на один —
+# посмотреть негде. Строить на этом единственный путь обращения к боту
+# в канале нельзя. Триггер на канал — форма, подтверждённая живым прогоном,
+# и n8n допускает несколько триггеров в одном флоу: каждый регистрируется сам.
+#
+# Первый сохраняет имя «Time Trigger»: на него ссылаются тесты и RUNBOOK.
+def channel_triggers():
+    nodes = []
+    for i, ch in enumerate(CHANNELS_WATCHED):
+        name = "Time Trigger" if i == 0 else f"Time Trigger · {ch}"
+        nodes.append(mm_trigger(name, [-260, 300 + 180 * i], [ch]))
+    return nodes
+
+
 channel_nodes = [
     build_note(),
     # Слушаем и канал черновиков: там работает джун, и позвать бота тегом
     # прямо под черновиком — самый естественный способ попросить переделать.
-    mm_trigger("Time Trigger", [-260, 300], CHANNELS_WATCHED),
+    *channel_triggers(),
     # Триггер posted срабатывает на КАЖДОЕ сообщение канала, включая реплики
     # в тредах. Отсев целиком здесь: только корневые посты и только темы формы
     # с префиксом Cross Data — обращения к чужой команде HC Data не наши.
@@ -8292,6 +8314,11 @@ channel_nodes = [
     ),
 ]
 channel_conn = chain("Time Trigger", "Guard channel", "Our request")
+# Каждый триггер — в тот же guard: отсев одинаков, откуда бы пост ни пришёл.
+for _t in channel_triggers()[1:]:
+    channel_conn[_t["name"]] = {"main": [[
+        {"node": "Guard channel", "type": "main", "index": 0},
+    ]]}
 # Ложная ветка «Our request» никуда не ведёт: отсеянное сообщение просто
 # не идёт дальше, а причина отсева видна в данных ноды Guard channel.
 channel_conn["Our request"] = {"main": [

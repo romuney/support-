@@ -649,11 +649,27 @@ line('16. Проводка адаптеров: связи и фильтры');
   // значение окружения и меняется без правки кода, а вот триггер, слушающий
   // не то, что объявлено, — это молчание в канале, где бота ждут.
   {
-    const listened = (t.parameters.postedFilters.channels || [])
+    // ПО ТРИГГЕРУ НА КАНАЛ. Единственная форма этого кастомного узла,
+    // подтверждённая живым прогоном, — один триггер, один канал (снимок
+    // Time examples.json). Два канала в одном фильтре появились 02.09 —
+    // и с того дня прогонов не было: последний 12:33, бота звали в 20:58,
+    // 20:59, 21:04 при статусе Published. Регистрирует ли узел вебхук
+    // на каждый канал списка — посмотреть негде, и строить на этом
+    // единственный путь обращения к боту нельзя.
+    const triggers = channel.nodes
+      .filter((n) => n.type === 'n8n-nodes-base.mattermostTrigger');
+    const chansOf = (n) => (n.parameters.postedFilters.channels || [])
       .map((c) => c.nameAuto?.value).filter(Boolean);
-    check(`триггер слушает ровно объявленные каналы (${listened.join(', ')})`,
-      listened.length >= 1 &&
-      listened.includes('hr-report-ask') && listened.includes('stonis_hakcs_2'));
+    for (const tr of triggers) {
+      check(`«${tr.name}» слушает ровно один канал (${chansOf(tr).join(', ')})`,
+        chansOf(tr).length === 1);
+      check(`«${tr.name}» ведёт в guard`,
+        channel.connections[tr.name]?.main[0]?.[0]?.node === 'Guard channel');
+    }
+    const listened = triggers.flatMap(chansOf);
+    check(`триггеры вместе слушают объявленные каналы (${listened.join(', ')})`,
+      listened.includes('hr-report-ask') && listened.includes('stonis_hakcs_2') &&
+      new Set(listened).size === listened.length);
     // НА ТРИГГЕРЕ ФИЛЬТРУЕТСЯ ТОЛЬКО КАНАЛ.
     //
     // Разбор 02.09: панель узла предлагает «From author» / «User Names»,
