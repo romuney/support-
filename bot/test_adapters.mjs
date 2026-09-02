@@ -121,14 +121,23 @@ const runDmParts = (parsed) =>
   new Function('$json', js(dm, 'Build DM reply'))(parsed).map((i) => i.json.text);
 const runDmMsg = (parsed) => runDmParts(parsed).join('\n');
 
-function runDmLogParts(parsed) {
+// Guard подаётся по умолчанию: в живом прогоне он всегда выполнялся раньше,
+// и лог читает у него отправителя. Логин суррогатный — настоящих в репозитории
+// не заводим даже в фикстурах.
+function runDmLogParts(parsed, guard = { sender_name: 'u.testov' }) {
   const $ = (name) => {
     if (name === 'Call core') return { first: () => ({ json: parsed }) };
+    if (name === 'Guard DM') {
+      if (guard === null) throw new Error('node not executed');
+      return { first: () => ({ json: guard }) };
+    }
     throw new Error('node not executed: ' + name);
   };
   return new Function('$', js(dm, 'Build DM log'))($).map((i) => i.json.text);
 }
-const runDmLog = (parsed) => runDmLogParts(parsed).join('\n');
+const runDmLog = (parsed, guard) => (guard === undefined
+  ? runDmLogParts(parsed)
+  : runDmLogParts(parsed, guard)).join('\n');
 
 // Тред под шапкой лога лички: то, что человек реально прочитал.
 function runDmLogThread(parsed) {
@@ -2574,6 +2583,29 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
     out.payload.confidence_key === 'medium' &&
     out.payload.confidence_capped === true);
   check('время проставлено', typeof out.event_ts === 'number' && out.event_ts > 0);
+
+  // ------------------------------------------------ КТО СПРОСИЛ В ЛИЧКЕ
+  //
+  // В личку приходят вопросы, которых в канале не задают, и разбирать их
+  // без имени наполовину бессмысленно: «что спросили» видно, «кто и зачем» —
+  // нет. В канале для этого берётся автор формы; в личке формы нет вовсе,
+  // и отправитель — сам человек, посредника между ними не стоит.
+  const withWho = runDmLog(answer, { sender_name: 'u.testov' });
+  check('в шапке лога лички виден отправитель', /\*\*Личка\*\* · @u\.testov/.test(withWho));
+  check('и уверенность осталась на месте', /уверенность: средняя/.test(withWho));
+
+  // Имени нет — лог всё равно уходит. Строка без «кто» читается,
+  // отсутствующая строка — нет.
+  const noWho = runDmLog(answer, { sender_name: '' });
+  check('без имени шапка не ломается',
+    /\*\*Личка\*\* · уверенность/.test(noWho) && !noWho.includes('@'));
+  // И guard, не отдавший ничего, тоже не роняет лог.
+  check('без guard\'а лог собирается', /\*\*Личка\*\*/.test(runDmLog(answer, null)));
+
+  // Имя читается ПО ИМЕНИ УЗЛА: между guard'ом и этим узлом уже стоят вызов
+  // ядра и сборка ответа, и `$json` здесь — выход совсем другой ноды.
+  check('отправитель берётся у guard\'а по имени узла',
+    /\$\('Guard DM'\)[^\n]*sender_name/.test(js(dm, 'Build DM log')));
 }
 
 // ===================================================================== 47

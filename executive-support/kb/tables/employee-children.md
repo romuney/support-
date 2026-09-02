@@ -5,7 +5,7 @@ title: Данные о детях сотрудников
 owner: Владелец витрины
 status: active
 updated: 2026-08-31
-aliases: [individualchildren_public, дети сотрудников, данные о детях сотрудников]
+aliases: [individualchildren_public, дети, дети сотрудников, ребёнок, дети сотрудника, данные о детях сотрудников, сотрудники с детьми, многодетные]
 ---
 
 # chrono_peoplehub_masterid.individualchildren_public
