@@ -26,7 +26,9 @@ def main():
     ap.add_argument("--names", help="файл с именами по строке, либо имена через запятую")
     ap.add_argument("--out", default="out")
     ap.add_argument("--size", type=int, default=128)
-    ap.add_argument("--thresh", type=int, default=sheet.FLOOD_THRESH)
+    ap.add_argument("--thresh", type=int, default=sheet.FLOOD_THRESH,
+                    help="допуск по яркости вокруг цвета фона; от персонажа "
+                         "маску защищает не он, а насыщенность")
     a = ap.parse_args()
 
     cells = sheet.split_grid(Image.open(a.image), a.cols, a.rows)
@@ -51,10 +53,10 @@ def main():
         keyed = sheet.key_background(cell, a.thresh)
         box = sheet.content_box(keyed)
         if box is None:
-            # Пустая ячейка почти всегда значит, что заливка съела персонажа
-            # насквозь: фон и шерсть слились, обводки нет. Молчать нельзя —
-            # в паке просто не окажется одной реакции, и заметится это
-            # уже в Mattermost.
+            # Пустая ячейка почти всегда значит, что маска фона накрыла
+            # персонажа целиком: он вышел таким же нейтрально-серым, как фон.
+            # Молчать нельзя — в паке просто не окажется одной реакции,
+            # и заметится это уже в Mattermost.
             empty.append(name)
             continue
         img = sheet.fit_square(keyed, box, a.size)
@@ -63,8 +65,8 @@ def main():
 
     if empty:
         sys.exit(f"\nпусто после вырезания фона: {', '.join(empty)}\n"
-                 "фон слился с персонажем — поднять --thresh нельзя, надо "
-                 "перегенерировать лист с die-cut обводкой")
+                 "персонаж в этих ячейках не отличается от фона по цвету — "
+                 "сузить --thresh, а если не помогло, перегенерировать лист")
 
 
 if __name__ == "__main__":

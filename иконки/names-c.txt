@@ -1,0 +1,16 @@
+bully_ready
+bully_done
+bully_fail
+bully_hi
+bully_helpful
+bully_not_helpful
+bully_detail
+bully_search
+bully_high
+bully_mid
+bully_none
+bully_unknown
+bully_flag
+bully_warn
+bully_lock
+bully_expert
