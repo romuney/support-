@@ -143,12 +143,16 @@ line('7. Тело реакции JSON-СТРОКОЙ разбирается — 
 }
 
 // ====================================================================== 8
-line('8. Словарь реакций: три эмодзи дежурного');
+line('8. Словарь реакций: эмодзи дежурного, старые имена и пак');
 {
   const cases = [
     ['loading', 'taken', null],
     ['done_checkmark', 'closed', true],
     ['im_red_cross', 'closed', false],
+    // Эмодзи пака — те же события. Старые имена остаются: backfill читает
+    // историю, где закрывали ими.
+    ['bully_done', 'closed', true],
+    ['bully_fail', 'closed', false],
   ];
   for (const [emoji, type, resolved] of cases) {
     const e = one({

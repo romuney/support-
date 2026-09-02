@@ -498,7 +498,7 @@ line('8. Канал джуна: шапка обращения и разбор в
 
   // Шапка — то, что видно в канале не разворачивая тред. В ней ровно четыре
   // вещи: светофор, чьё обращение, о чём и куда идти. Всё остальное — в тред.
-  check('светофор у средней — жёлтый', head.startsWith('🟡'));
+  check('светофор у средней — жёлтая кепка', head.startsWith(':bully_mid:'));
   check('тема из формы в шапке', head.includes('Вопрос по отчетам'));
   check('автор из формы в шапке', head.includes('@Anna Sokolova'));
   check('ссылка на обращение', head.includes('time.tbank.ru/tinkoff/pl/18hwrdmk6bstf8n8pp8pswxbd1'));
@@ -528,13 +528,13 @@ line('9. Канал джуна: пост без id — ссылки нет, но
   const msg = runChannelMsg(p, {});
   check('нет битой ссылки', !msg.includes('открыть обращение'));
   check('черновик на месте', msg.includes('Ответ'));
-  check('светофор у высокой — зелёный', runChannelHead(p, {}).startsWith('🟢'));
+  check('светофор у высокой — зелёная кепка', runChannelHead(p, {}).startsWith(':bully_high:'));
   const none = runParse('ЧЕРНОВИК ОТВЕТА: Ответа нет\nУВЕРЕННОСТЬ: нет ответа');
-  check('светофор у «нет ответа» — красный', runChannelHead(none, {}).startsWith('🔴'));
+  check('светофор у «нет ответа» — красная кепка', runChannelHead(none, {}).startsWith(':bully_none:'));
   // Модель отклонилась от формата — это не «посередине», а «непонятно»,
   // и цвет должен отличаться от жёлтого, иначе сигнал теряется.
   const broken = runParse('Просто текст без блоков');
-  check('светофор у сломанного формата — белый', runChannelHead(broken, {}).startsWith('⚪'));
+  check('светофор у сломанного формата — серая кепка', runChannelHead(broken, {}).startsWith(':bully_unknown:'));
 }
 
 // ====================================================================== 10
@@ -1043,7 +1043,8 @@ line('16. Проводка адаптеров: связи и фильтры');
     // ТЗ и разбор — джуну, после ответа: хвост пути тега ведёт в «Post header»,
     // тот же путь, что у формы. Ветви в «Post header» взаимоисключающие.
     check('после ответа в тред разбор и ТЗ уходят джуну',
-      channel.connections['Unreact work in channel'].main[0][0].node === 'Post header');
+      channel.connections['Unreact work in channel'].main[0][0].node === 'React ready in channel' &&
+      channel.connections['React ready in channel'].main[0][0].node === 'Post header');
   }
 
   // Все три адаптера зовут одно ядро
@@ -2181,7 +2182,7 @@ line('35. ИБ: код МЕРИТ, попало ли требование в ч�
     msg.includes('согласования ИБ'));
   check('канал заявки назван', msg.includes('~sec_analytics_ask'));
   const thread = runChannelParts(missed).join('\n');
-  const posIb = thread.indexOf('🔒');
+  const posIb = thread.indexOf(':bully_lock:');
   const posBasis = thread.indexOf('**Основание:**');
   check('строка ИБ идёт раньше основания',
     posIb !== -1 && (posBasis === -1 || posIb < posBasis));
@@ -2190,7 +2191,7 @@ line('35. ИБ: код МЕРИТ, попало ли требование в ч�
   check('когда согласование названо — строка подтверждает, а не тревожит',
     okMsg.includes('в черновике оно названо'));
   const quiet = runChannelMsg(noReq);
-  check('без требования строки ИБ в треде нет', !quiet.includes('🔒'));
+  check('без требования строки ИБ в треде нет', !quiet.includes(':bully_lock:'));
 }
 
 // ===================================================================== 36
@@ -2229,7 +2230,7 @@ line('36. ЭКСПЕРТ печатается ДЖУНУ вместе с дат�
   // Порядок: маршрут после строки ИБ (та говорит, что черновик нельзя
   // отправлять как есть), но раньше основания — это факт про обращение,
   // а не оценка доверия к черновику.
-  const iRoute = thread.indexOf('🧭');
+  const iRoute = thread.indexOf(':bully_expert:');
   const iBasis = thread.indexOf('**Основание:**');
   check('маршрут раньше основания',
     iRoute !== -1 && (iBasis === -1 || iRoute < iBasis));
@@ -2250,7 +2251,7 @@ line('36. ЭКСПЕРТ печатается ДЖУНУ вместе с дат�
   // читаться, и вместе с ней перестают читать соседние.
   const quiet = runParse(ANSWER, { question: 'вопрос', mode: 'channel' }, {}, MAT_OK);
   check('без маршрута строки в треде нет',
-    !runChannelParts(quiet).join('\n').includes('🧭'));
+    !runChannelParts(quiet).join('\n').includes(':bully_expert:'));
 
   // Канал вместо человека — тот же маршрут, а не пустой адресат.
   const chan = runParse(ANSWER, { question: 'воронка найма', mode: 'channel' }, {},
@@ -2385,7 +2386,7 @@ line('40. ЭКСПЕРТ, КОТОРОГО НЕ ПОДБИРАЛИ, назван
   check('и имя названо', thread.includes('Artur Mermovich'));
   // Раньше маршрута и основания: это не «насколько верить черновику»,
   // а «черновик нельзя отправлять как есть».
-  const iFlag = thread.indexOf('🚩');
+  const iFlag = thread.indexOf(':bully_flag:');
   const iBasis = thread.indexOf('**Основание:**');
   check('предупреждение раньше основания',
     iFlag !== -1 && (iBasis === -1 || iFlag < iBasis));
@@ -2399,7 +2400,7 @@ line('40. ЭКСПЕРТ, КОТОРОГО НЕ ПОДБИРАЛИ, назван
                  checked: '2026-08-26', matched: ['квот'] }] });
   check('подобранный эксперт тревоги не вызывает',
     ok.experts_invented.length === 0);
-  check('и строки в треде нет', !runChannelParts(ok).join('\n').includes('🚩'));
+  check('и строки в треде нет', !runChannelParts(ok).join('\n').includes(':bully_flag:'));
 
   // Совпал ОДИН маршрут, а назван человек из ДРУГОЙ строки — тоже выдумка.
   const mixed = runParse(
@@ -2727,6 +2728,17 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
   check('и user_id — по имени узла Who am I, не константой',
     /\$\('Who am I DM'\)[^}]*\.id/.test(String(react.parameters.userId)) &&
     react.parameters.userId === unreact.parameters.userId);
+  // «ГОТОВО» — ПОСЛЕ ОТВЕТА И ПОСЛЕ СНЯТИЯ «ДУМАЕТ». Решение владельца 02.09:
+  // по реакции на своём сообщении человек видит, что бот на него ответил.
+  // Порядок важен: две реакции бота рядом читались бы как «всё ещё работает».
+  const ready = dm.nodes.find((n) => n.name === 'React ready in DM');
+  check('личка: «готово» ставится после снятия «думает»',
+    Boolean(ready) && dm.connections['Unreact work in DM'].main[0][0].node === 'React ready in DM');
+  check('личка: «готово» — эмодзи пака на том же посте тем же id, мягко',
+    ready.parameters.operation === 'create' && ready.parameters.emojiName === 'bully_ready' &&
+    ready.parameters.postId === react.parameters.postId &&
+    ready.parameters.userId === react.parameters.userId &&
+    ready.onError === 'continueRegularOutput');
 
   // В КАНАЛЕ — ТОЛЬКО НА СООБЩЕНИЕ С ТЕГОМ. Решение владельца 02.09: видно,
   // что бот триггернулся и работает. На посты формы в hr-report-ask —
@@ -2755,6 +2767,14 @@ line('46. ЛИЧКА пишет в лог — тем же узлом, что к�
       channel.connections['Reply where called'].main[0][0].node === 'Unreact work in channel');
     check('канал: падение реакции не роняет ответ',
       cr.onError === 'continueRegularOutput' && cu.onError === 'continueRegularOutput');
+    const crd = channel.nodes.find((n) => n.name === 'React ready in channel');
+    check('канал: «готово» — после снятия «думает», до поста джуну',
+      Boolean(crd) && channel.connections['Unreact work in channel'].main[0][0].node === 'React ready in channel' &&
+      channel.connections['React ready in channel'].main[0][0].node === 'Post header');
+    check('канал: «готово» — эмодзи пака на том же сообщении тем же id, мягко',
+      crd.parameters.operation === 'create' && crd.parameters.emojiName === 'bully_ready' &&
+      crd.parameters.postId === cr.parameters.postId && crd.parameters.userId === cr.parameters.userId &&
+      crd.onError === 'continueRegularOutput');
     // Путь формы до реакции не доходит: от «Post header» вниз ни одного
     // узла реакции — словарь дежурного цел.
     const reach = (start) => { const seen = new Set(); const q = [start];
@@ -3213,7 +3233,7 @@ line('52. ЗАПРОС БЕЗ ФИЛЬТРА АКТИВНОСТИ — СТРОК
   });
 
   const flagged = run({ draft_no_active_filter: true });
-  check('строка есть', /🚩/.test(flagged) && /фильтра активной численности/.test(flagged));
+  check('строка есть', /:bully_flag:/.test(flagged) && /фильтра активной численности/.test(flagged));
   check('и названо условие целиком',
     /active_employee_flg = 1 and company_fire_flg = 0/.test(flagged));
   check('сказано, почему это не видно по результату',

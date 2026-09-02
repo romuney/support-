@@ -663,7 +663,8 @@ SELECT
     t.taken_by,
     c.closed_at,
     c.closed_by,
-    -- Разделение `:done_checkmark:` / `:im_red_cross:` даёт бесплатную метрику
+    -- Разделение `:done_checkmark:` / `:im_red_cross:` (с 02.09 также
+    -- `:bully_done:` / `:bully_fail:` из пака) даёт бесплатную метрику
     -- доли закрытых НЕрешёнными — честнее, чем «закрыто N обращений».
     c.resolved,
 
