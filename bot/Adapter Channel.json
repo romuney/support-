@@ -168,7 +168,7 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "question": "={{ $json.question }}",
+            "question": "={{ $('Guard channel').first().json.question }}",
             "mode": "channel",
             "topic_kind": "={{ $('Guard channel').first().json.topic_kind ?? '' }}",
             "form_domain": "={{ $('Guard channel').first().json.form_domain ?? '' }}",

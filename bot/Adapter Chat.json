@@ -25,7 +25,7 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "question": "={{ $json.chatInput }}",
+            "question": "={{ $('When chat message received').first().json.chatInput }}",
             "mode": "chat",
             "topic_kind": "",
             "form_domain": "",

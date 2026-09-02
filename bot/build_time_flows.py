@@ -6336,13 +6336,21 @@ core = wf("Support Bot Core", core_nodes, core_conn)
 
 
 # ------------------------------------------- общее для адаптеров: вызов ядра
-def call_core(pos, question_expr, mode, guard_node=None, thread_node=None):
+def call_core(pos, mode, guard_node=None, thread_node=None, question_expr=None):
     """Вызов ядра. guard_node — имя Code-ноды разбора формы, если она есть.
 
     Чат формы не знает вовсе, поэтому поля уезжают пустыми строками. Схему
     входов при этом всё равно передаём полностью: n8n сверяет её с объявленной
     в триггере, и расхождение здесь тихое — поле просто приедет пустым.
     """
+    # Вопрос приходит ЛИБО из guard'а, либо явным выражением (чат формы
+    # не знает и guard'а не имеет). Ни одного — молчаливо пустой вопрос,
+    # оба — два источника правды; и то и другое уже стоило простоя.
+    assert bool(guard_node) != bool(question_expr), (
+        f"Call core в режиме {mode}: вопрос должен приходить ровно из одного "
+        f"источника (guard_node={guard_node!r}, question_expr={question_expr!r})"
+    )
+
     if guard_node:
         g = f"$('{guard_node}').first().json"
         form = {
@@ -6357,7 +6365,22 @@ def call_core(pos, question_expr, mode, guard_node=None, thread_node=None):
         form = {k: "" for k in ("topic_kind", "form_domain", "report_url",
                                 "form_context", "external_transfer")}
 
-    values = {"question": question_expr, "mode": mode}
+    # ВОПРОС ЧИТАЕТСЯ ПО ИМЕНИ УЗЛА, А НЕ ИЗ ПРОХОДЯЩЕГО ЭЛЕМЕНТА.
+    #
+    # Стояло `$json.question`, и это работало ровно до тех пор, пока перед
+    # «Call core» стоял guard. Появился догоняющий тред — и между ними встал
+    # «Build thread», который отдаёт только переписку. Вопрос стал undefined,
+    # роутер увидел пустоту и честно ответил `no_question: true`: бот замолчал
+    # на КАЖДОМ обращении, и по логу это выглядело как «в базе нет ответа».
+    #
+    # Тот же класс, что стоил разбора 01.09 на гейтах и разворотах списков:
+    # чтение `$json` держит невидимый контракт «слева стоит ровно тот узел,
+    # о котором я думаю». Любая вставка в цепочку рвёт его молча.
+    values = {
+        "question": (f"={{{{ $('{guard_node}').first().json.question }}}}"
+                     if guard_node else question_expr),
+        "mode": mode,
+    }
     values.update(form)
     # Переписка треда: пусто у нового обращения, непусто у продолжения.
     # Отдельным входом, а не приклеенная к question: роутер и автор читают
@@ -7101,10 +7124,6 @@ def guard_gate(name, pos):
         },
     )
 
-
-# Вопрос берём из нормализованного поля guard'а, а не из `post.message`:
-# guard уже распаковал пост, каким бы он ни пришёл — объектом или строкой.
-POST_MSG = "={{ $json.question }}"
 
 # Лимит длины поста Mattermost.
 #
@@ -7939,7 +7958,7 @@ channel_nodes = [
     need_thread("Need thread", [320, 300], "Guard channel"),
     get_thread("Get thread", [440, 160], "Guard channel"),
     build_thread("Build thread ch", [560, 300], "Get thread"),
-    call_core([700, 300], POST_MSG, "channel", guard_node="Guard channel",
+    call_core([700, 300], "channel", guard_node="Guard channel",
               thread_node="Build thread ch"),
     node("Build header", "n8n-nodes-base.code", 2, [680, 300], {"jsCode": CHANNEL_HEAD_JS}),
     mm_post(
@@ -8037,7 +8056,9 @@ chat_nodes = [
         [-260, 300],
         {"options": {}},
     ),
-    call_core([0, 300], "={{ $json.chatInput }}", "chat"),
+    call_core([0, 300], "chat",
+              question_expr="={{ $('When chat message received')"
+                            ".first().json.chatInput }}"),
     node("Build reply", "n8n-nodes-base.code", 2, [260, 300], {"jsCode": CHAT_MSG_JS}),
 ]
 chat = wf(
@@ -8225,7 +8246,7 @@ dm_nodes = [
     # проверочный запрос. Без отметки человек не отличает «бот думает»
     # от «бот не услышал» и пишет второй раз.
     mm_reaction("React work in DM", [440, 160], "create", DM_POST_ID, WORK_EMOJI),
-    call_core([700, 300], POST_MSG, "dm", guard_node="Guard DM",
+    call_core([700, 300], "dm", guard_node="Guard DM",
               thread_node="Build thread DM"),
     node("Build DM reply", "n8n-nodes-base.code", 2, [680, 220], {"jsCode": DM_MSG_JS}),
     # Снятие — после того, как ответ УЖЕ отправлен: реакция обязана пережить
