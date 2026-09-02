@@ -6667,6 +6667,23 @@ def mm_trigger(name, pos, channels, posted_filters=None):
     are empty. You must specify at least one of them». Подтверждено живым
     запуском 2026-08-07.
 
+    ЧТО ИЗВЕСТНО ОБ ЭТОМ УЗЛЕ ИЗ ИСХОДНИКОВ (проверено 02.09, не по памяти).
+    В апстриме n8n триггера Mattermost нет — только узел действий. Три публичных
+    community-пакета прочитаны целиком:
+      · myluffe (master): v1, WebSocket, фильтр только по типу события,
+        реконнект через 500 мс на закрытии сокета;
+      · @hoangnvpck 0.1.2: v1, фильтров по каналу нет;
+      · @designveloper 2.3.4: v1, параметры eventType / websocketUrl /
+        channelIds (multiOptions ПО ID из /users/me/channels) / includeDM /
+        includeGM; совпадение — `channelIds.includes(broadcast.channel_id)`,
+        клиентское; реконнект с экспоненциальной паузой и ping/pong.
+    Ни в одном нет postedFilters, nameAuto, mode: name, isDirectMessage,
+    userNames. Значит этот v2 — сборка инстанса без публичного исходника,
+    и единственное знание о нём — живой снимок плюс наблюдение 02.09:
+    два канала в одном фильтре → событий нет, один → работают. Отсюда
+    «по триггеру на канал». Механизм — WebSocket: «молчит при Published»
+    это оборвавшийся сокет, а не регистрация вебхука.
+
     ФИЛЬТР ПО АВТОРУ («From author» / User Names) ЗДЕСЬ НЕ СТАВИТСЯ НИКОГДА.
     Разбор 02.09: в панели узла он выглядит как способ «слушать только зов
     бота», но фильтрует АВТОРА поста. Указав там логин бота, получаешь триггер,
