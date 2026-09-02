@@ -291,6 +291,15 @@ bot AS (
            -- «роутер промахнулся» и «в базе нет ответа» по логу неразличимы.
            max_by(CAST(json_extract_scalar(payload, '$.router_empty') AS boolean),
                   event_ts) AS router_empty,
+           -- Роутер назвал ТЕМУ, но ни одной статьи. Не то же самое, что
+           -- «не дал ничего», и чинится в другом месте: `router_empty` —
+           -- словами в таблице «Домены», это — мастерами домена.
+           -- Прогон 02.09: один и тот же вопрос про детей сотрудников
+           -- то попадал в статью, то нет. Выбрать строку из 51 модель
+           -- повторяемо не умеет, поэтому доля таких планов — это доля
+           -- обращений, где всё держится на мастерах.
+           max_by(CAST(json_extract_scalar(payload, '$.router_domain_only') AS boolean),
+                  event_ts) AS router_domain_only,
            -- Пути, которых нет в реестре: роутер их придумал. Метрика его
            -- качества, и путать её с пробелом базы нельзя — чинятся в разных
            -- местах, а по логу без этой колонки они неразличимы.
@@ -695,6 +704,7 @@ SELECT
     COALESCE(b.dd_never_ran, false)                         AS dd_never_ran,
     (b.dd_count > 0 AND COALESCE(b.dd_received, 0) = 0)     AS dd_planned_not_received,
     COALESCE(b.router_empty, false)                         AS router_empty,
+    COALESCE(b.router_domain_only, false)                   AS router_domain_only,
     COALESCE(b.check_asked, 0)                              AS check_asked,
     COALESCE(b.check_skipped, 0)                            AS check_skipped,
     COALESCE(b.check_rows, 0)                               AS check_rows,
@@ -911,6 +921,7 @@ SELECT
     count_if(dd_never_ran)                                 AS dd_node_never_ran,
     count_if(dd_planned_not_received)                      AS dd_planned_not_received,
     count_if(router_empty)                                 AS router_empty_plan,
+    count_if(router_domain_only)                           AS router_domain_only_plan,
     count_if(articles_invented > 0)                        AS router_invented_paths,
     count_if(tables_no_meta > 0)                           AS tables_without_inventory,
     count_if(parse_error IS NOT NULL OR router_error IS NOT NULL) AS bot_errors,
@@ -1003,6 +1014,8 @@ ans AS (
            CAST(json_extract_scalar(payload, '$.dd_received') AS integer) AS dd_received,
            CAST(json_extract_scalar(payload, '$.dd_never_ran') AS boolean) AS dd_never_ran,
            CAST(json_extract_scalar(payload, '$.router_empty') AS boolean) AS router_empty,
+           CAST(json_extract_scalar(payload, '$.router_domain_only') AS boolean)
+                                                                     AS router_domain_only,
            CAST(json_extract_scalar(payload, '$.articles_invented') AS integer)
                                                                      AS articles_invented,
            CAST(json_extract_scalar(payload, '$.check_asked') AS integer)  AS check_asked,
@@ -1041,6 +1054,7 @@ SELECT
     count_if(dd_never_ran)                                 AS dd_node_never_ran,
     count_if(dd_count > 0 AND COALESCE(dd_received, 0) = 0) AS dd_planned_not_received,
     count_if(router_empty)                                 AS router_empty_plan,
+    count_if(router_domain_only)                           AS router_domain_only_plan,
     count_if(COALESCE(articles_invented, 0) > 0)           AS router_invented_paths,
     count_if(parse_error IS NOT NULL OR router_error IS NOT NULL) AS bot_errors,
 
