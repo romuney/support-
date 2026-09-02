@@ -5604,7 +5604,13 @@ try {
       ['Build check SQL', 'сборка проверочного запроса'],
       ['Parse pairs', 'Ask pairs (модель)'],
       ['Retry check SQL', 'доспрос — сборка'],
-      ['Check result', 'Check values — Trino ×' + stage('Check values').n],
+      // Число запросов — по ВХОДУ Trino, а не по выходу: выход — это строки
+      // словаря (в прогоне 02.09 — 16 строк на 3 запроса), и «×16» читалось
+      // бы как шестнадцать обращений к базе. Вход — элементы того Code-узла,
+      // что собрал SQL: после доспроса это «Retry check SQL», иначе «Build
+      // check SQL»; по схеме в «Check values» ведёт ровно один из них.
+      ['Check result', 'Check values — Trino ×' +
+        (stage('Retry check SQL').ran ? stage('Retry check SQL') : stage('Build check SQL')).n],
       ['Parse revised', 'Revise draft (модель)'],
     ];
     const sec = (ms) => (ms / 1000).toFixed(1) + ' с';
