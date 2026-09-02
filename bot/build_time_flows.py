@@ -5452,6 +5452,16 @@ try {
     arr(M.tables).filter((t) => t && arr(t.fields).length).length + ' витринам');
   kv('только мастера, совпадений нет', yn(M.masters_only));
   kv('материалы непустые', yn(M.has_materials));
+  // РАЗМЕР ВХОДА АВТОРА. Разбор 02.09: прогон шёл четыре минуты вместо
+  // тридцати секунд, и первый же вопрос был «не мы ли раздули промпт».
+  // Ответ пришлось собирать офлайн, потому что в трассе размера не было
+  // вовсе — при том что `materials_len` давно считается для телеметрии.
+  // Время узла видно в n8n, объём входа рядом с ним — здесь.
+  if (M.materials_len != null) {
+    kv('размер материалов',
+       M.materials_len + ' символов ≈ ' +
+       Math.round(M.materials_len / 2.7) + ' токенов (плюс статика промпта)');
+  }
   if (arr(coll.j.articles_failed).length) kv('НЕ ПРОЧИТАЛОСЬ', list(coll.j.articles_failed));
   if (arr(P.dropped).length) kv('срезано потолком статей', list(P.dropped));
   if (arr(P.dd_dropped).length) kv('срезано потолком метаданных', list(P.dd_dropped));
