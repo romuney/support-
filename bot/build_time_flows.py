@@ -5587,6 +5587,49 @@ try {
   kv('вопрос', cut(trig.j.question, 300));
   kv('режим', (trig.j.mode || '—') + ' · тема формы: ' + cut(P.topic_kind_used || trig.j.topic_kind, 80));
 
+  // ВРЕМЯ ПО ЭТАПАМ. Штампы `_ts` ставит сборщик на контрольные Code-узлы
+  // (см. TIMED_NODES); разница соседних — время тяжёлого узла между ними.
+  // Считается от последнего ВЫПОЛНИВШЕГОСЯ штампа: ветки необязательные,
+  // и пропущенный узел не рвёт учёт, а просто сливается со следующим.
+  h('0. Время — где прошли минуты');
+  {
+    const cp = [
+      ['Decode registry', ''],
+      ['Plan', 'Router (модель)'],
+      ['Collect articles', 'Read article — GitLab ×' + stage('Read article').n],
+      ['Build lookups', 'DD Lookup ×' + stage('Call DD Lookup').n],
+      ['Lookup result', 'Run lookups — Trino'],
+      ['Build materials', 'сборка материалов'],
+      ['Parse answer', 'Author (модель)'],
+      ['Build check SQL', 'сборка проверочного запроса'],
+      ['Parse pairs', 'Ask pairs (модель)'],
+      ['Retry check SQL', 'доспрос — сборка'],
+      ['Check result', 'Check values — Trino ×' + stage('Check values').n],
+      ['Parse revised', 'Revise draft (модель)'],
+    ];
+    const sec = (ms) => (ms / 1000).toFixed(1) + ' с';
+    let prev = null, t0 = null, longest = null;
+    for (const [name, label] of cp) {
+      const st = stage(name);
+      const ts = Number(st.j && st.j._ts);
+      if (!st.ran || !Number.isFinite(ts)) continue;
+      if (t0 === null) { t0 = ts; prev = ts; continue; }
+      const d = ts - prev;
+      kv(label, sec(d));
+      if (!longest || d > longest[1]) longest = [label, d];
+      prev = ts;
+    }
+    if (t0 === null) {
+      kv('время', 'штампов нет — ядро собрано без TIMED_NODES');
+    } else {
+      const now = Date.now();
+      kv('хвост до трассы', sec(now - prev));
+      kv('ВСЕГО от реестра до трассы', sec(now - t0));
+      if (longest) kv('САМОЕ ДОЛГОЕ', longest[0] + ' — ' + sec(longest[1]));
+      L.push('- до реестра (Who am I, GitLab) — не измеряется: первый штамп стоит после него');
+    }
+  }
+
   h('1. Роутер — что ОН выбрал сам');
   if (P.registry_error) kv('РЕЕСТР НЕ ПРОЧИТАН', String(P.registry_error));
   if (P.router_error) kv('ОШИБКА РОУТЕРА', String(P.router_error));
@@ -6548,6 +6591,45 @@ for _n in core_nodes:
             "__CORE_NODES__", _census)
 assert "__CORE_NODES__" not in json.dumps(core_nodes, ensure_ascii=False), \
     "перепись узлов не подставилась в «Trace»"
+
+# ВРЕМЯ ПО ЭТАПАМ — ИЗ ШТАМПОВ НА КОНТРОЛЬНЫХ CODE-УЗЛАХ.
+#
+# Разбор 02.09 22:10: прогон шёл почти две минуты, трасса показала ЧТО
+# отработало, но не СКОЛЬКО. n8n внутри флоу длительность узлов не отдаёт,
+# а тяжёлые узлы (модели, Trino, GitLab, DD) — не Code и штамп сами не
+# поставят. Зато между любыми двумя тяжёлыми стоит Code-узел, и он стоит
+# миллисекунды. Каждый из перечисленных пишет в свой выход `_ts` = момент
+# завершения; разница соседних штампов — это время тяжёлого узла между ними.
+#
+# Тело узла не трогается: оно заворачивается в функцию, и штамп ставится
+# на уже возвращённые элементы. Все Code-узлы ядра работают в режиме
+# «раз на все элементы» и возвращают массив — проверено по сборке.
+TIMED_NODES = [
+    "Decode registry", "Plan", "Collect articles", "Build lookups",
+    "Lookup result", "Build materials", "Parse answer", "Build check SQL",
+    "Parse pairs", "Retry check SQL", "Check result", "Parse revised",
+]
+
+
+def timed(js):
+    return (
+        "const __run = () => {\n" + js + "\n};\n"
+        "const __out = __run();\n"
+        "const __ts = Date.now();\n"
+        "if (Array.isArray(__out)) {\n"
+        "  for (const it of __out) {\n"
+        "    if (it && it.json && typeof it.json === 'object') it.json._ts = __ts;\n"
+        "  }\n"
+        "}\n"
+        "return __out;\n"
+    )
+
+
+for _n in core_nodes:
+    if _n["name"] in TIMED_NODES:
+        assert _n["type"] == "n8n-nodes-base.code", _n["name"]
+        _n["parameters"]["jsCode"] = timed(_n["parameters"]["jsCode"])
+assert {n["name"] for n in core_nodes} >= set(TIMED_NODES)
 
 core = wf("Support Bot Core", core_nodes, core_conn)
 
