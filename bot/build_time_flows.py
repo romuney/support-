@@ -82,8 +82,13 @@ CORE_ID = os.environ.get("CORE_WORKFLOW_ID", "quV6Ec1hmobZefBX")
 # Каналы Time. Имена подтверждены пользователем и артефактом выгрузки
 # hr-report-ask-3-4-aug-2026.md. Задаются по имени (mode: name), как в примере
 # Time examples.json, поэтому опечатка тихо приведёт к молчащему триггеру.
-CHANNEL_LISTEN = "hr-report-ask"
-CHANNEL_DRAFTS = "stonis_hakcs_2"
+# Каналы задаются через окружение: добавить канал — это решение владельца
+# бота, а не правка кода. Через запятую, имена без «~».
+CHANNEL_LISTEN = os.environ.get("CHANNEL_LISTEN", "hr-report-ask")
+CHANNEL_DRAFTS = os.environ.get("CHANNEL_DRAFTS", "stonis_hakcs_2")
+CHANNELS_WATCHED = [
+    c.strip() for c in f"{CHANNEL_LISTEN},{CHANNEL_DRAFTS}".split(",") if c.strip()
+]
 
 # Credential бота Bully. Он уже состоит в обоих каналах.
 MM_CRED = {"mattermostApi": {"id": "7SgPbuQnw6w2wzMl", "name": "Time Bully"}}
@@ -120,10 +125,20 @@ BOT_USER_ID = os.environ.get("BOT_USER_ID", "")
 # в Mattermost, а не с соглашением пака. Переименуют эмодзи — править здесь.
 WORK_EMOJI = "bully_work"
 
-# Логин бота для распознавания @упоминания. Пусто — путь по тегу выключен,
-# и сборщик говорит об этом вслух: молча не отвечать на тег хуже, чем
-# не уметь, — человек видит, что бота позвали, и ждёт ответа.
-BOT_USERNAME = os.environ.get("BOT_USERNAME", "")
+# ИМЕНА БОТА ДЛЯ РАСПОЗНАВАНИЯ @УПОМИНАНИЯ — СПИСОК, А НЕ ОДНО.
+#
+# Живой прогон 02.09: в канале написали «@Булли», и бот промолчал. Логин
+# в Mattermost латиницей (кириллица в username запрещена), а зовут его люди
+# так, как видят в клиенте, — по отображаемому имени. Одно значение здесь
+# означало выбрать, какое из двух написаний работает, а какое молча нет.
+#
+# Через запятую: логин, отображаемое имя, никнейм — всё, на что бот обязан
+# отзываться. Пусто — путь по тегу выключен, и сборщик говорит об этом
+# вслух: молча не отвечать на тег хуже, чем не уметь, — человек видит,
+# что бота позвали, и ждёт ответа.
+BOT_USERNAMES = [
+    n.strip() for n in os.environ.get("BOT_USERNAME", "").split(",") if n.strip()
+]
 
 # База Mattermost для догоняющего чтения треда. Совпадает с телеметрией:
 # одно значение на два сборщика, переменная окружения одна.
@@ -6709,7 +6724,7 @@ GUARD_JS = r"""
 const PREFIXES     = __PREFIXES__;
 const REQUIRE_ROOT = __REQUIRE_ROOT__;
 // Логин бота: по нему распознаётся @упоминание. Пусто — путь по тегу выключен.
-const MENTION      = __MENTION__;
+const MENTION      = __MENTION__;  // список имён, на которые бот отзывается
 // Личка: ответ в треде бота — продолжение разговора, тег там не нужен,
 // потому что в диалоге, кроме двоих, никого нет. В канале иначе: там тред
 // живёт своей жизнью — дежурный, согласование, обсуждение, — и бот, отвечающий
@@ -6737,13 +6752,22 @@ const postId  = String(post.id ?? '');
 // равным его же id — это всё ещё корень, а не ответ.
 const isReply = Boolean(rootId && rootId !== postId);
 
-// Упоминание бота. Без \b намеренно, и не только из-за кириллицы: `\b` после
-// логина совпал бы и с `@bully_bot`, то есть бот отзывался бы на чужое имя,
-// начинающееся так же. Ограничитель — «дальше не символ логина».
-const mentioned = MENTION
-  ? new RegExp('@' + MENTION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
-               '(?![a-z0-9_.\\-])', 'i').test(message)
-  : false;
+// УПОМИНАНИЕ БОТА. Имён несколько: логин латиницей и то, как его зовут люди
+// («@Булли»). Кириллица в username Mattermost запрещена, поэтому одно
+// значение здесь означало бы выбрать, какое написание работает.
+//
+// Ограничитель — «дальше не буква и не цифра», и БУКВА ЛЮБОГО АЛФАВИТА.
+// `\b` не годится: он совпал бы и с `@bully_bot`, то есть бот отзывался бы
+// на чужое имя, начинающееся так же. Но и класс `[a-z0-9_.\-]` не годится:
+// он латинский, и на имени «Булли» пропускал `@Буллика` и `@Буллиан` —
+// тот же капкан, что `\b` по кириллице, только вывернутый наизнанку.
+// `\p{L}` с флагом `u` закрывает оба алфавита разом.
+const mentioned = MENTION.some((name) => {
+  const n = String(name || '').trim();
+  if (!n) return false;
+  return new RegExp('@' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+                    '(?![\\p{L}\\p{N}_.\\-])', 'iu').test(message);
+});
 
 // ПРОДОЛЖЕНИЕ РАЗГОВОРА, а не новое обращение. Бот задаёт уточняющие вопросы
 // («какая нужна гранулярность?»), и до этой правки ответ на них не читался
@@ -7119,7 +7143,7 @@ def guard(name, pos, prefixes=(), require_root=False, require_dm=False,
         GUARD_JS
         .replace("__PREFIXES__", json.dumps(list(prefixes), ensure_ascii=False))
         .replace("__REQUIRE_ROOT__", "true" if require_root else "false")
-        .replace("__MENTION__", json.dumps(BOT_USERNAME, ensure_ascii=False))
+        .replace("__MENTION__", json.dumps(BOT_USERNAMES, ensure_ascii=False))
         .replace("__ALLOW_THREAD__", "true" if allow_thread else "false")
         .replace("__DROP_BOT__", "true" if bot_echo else "false")
         .replace("__REQUIRE_DM__", "true" if require_dm else "false")
@@ -7981,7 +8005,7 @@ return mmSections([
 channel_nodes = [
     # Слушаем и канал черновиков: там работает джун, и позвать бота тегом
     # прямо под черновиком — самый естественный способ попросить переделать.
-    mm_trigger("Time Trigger", [-260, 300], [CHANNEL_LISTEN, CHANNEL_DRAFTS]),
+    mm_trigger("Time Trigger", [-260, 300], CHANNELS_WATCHED),
     # Триггер posted срабатывает на КАЖДОЕ сообщение канала, включая реплики
     # в тредах. Отсев целиком здесь: только корневые посты и только темы формы
     # с префиксом Cross Data — обращения к чужой команде HC Data не наши.
@@ -8422,15 +8446,25 @@ if not DM_FILTER_FROM_FILE:
     print("стоять «Is Direct Message». Пусто — имя значения угадано неверно;")
     print("скопируйте настроенную ноду из n8n (Ctrl+C) в bot/dm_trigger_filter.json,")
     print("и сборщик будет брать фильтр оттуда, а не из догадки.")
-if not BOT_USERNAME:
+if not BOT_USERNAMES:
     print()
     print("ВНИМАНИЕ: BOT_USERNAME пуст — путь по @упоминанию ВЫКЛЮЧЕН.")
     print("В канале бот отвечает только на новые обращения с шапкой формы;")
     print("позвать его тегом под тредом не получится, и по виду флоу это")
     print("неотличимо от «бот не захотел отвечать». В личке продолжение")
     print("разговора тредом работает и без логина.")
-    print("Взять логин: профиль бота в Time, поле username (без @). Затем:")
-    print("  BOT_USERNAME=<логин> python3 build_time_flows.py")
+    print("Имён нужно НЕСКОЛЬКО: логин латиницей и то, как его зовут люди.")
+    print("Логин — профиль бота в Time, поле username (без @); отображаемое")
+    print("имя — то, что видно в клиенте. Затем:")
+    print("  BOT_USERNAME=<логин>,<Отображаемое имя> python3 build_time_flows.py")
+else:
+    print()
+    print(f"Бот отзывается на тег: {', '.join('@' + n for n in BOT_USERNAMES)}")
+print()
+print(f"Слушаются каналы: {', '.join('~' + c for c in CHANNELS_WATCHED)}")
+print("В остальных каналах бот не увидит ни обращения, ни тега — пост туда")
+print("просто не придёт. Добавить канал:")
+print("  CHANNEL_LISTEN=<канал>,<ещё канал> python3 build_time_flows.py")
 if not BOT_USER_ID:
     print()
     print(f"ВНИМАНИЕ: BOT_USER_ID пуст — реакция :{WORK_EMOJI}: в личке не встанет.")
