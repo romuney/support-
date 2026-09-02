@@ -351,9 +351,14 @@ line('0з. ПРОДОЛЖЕНИЕ РАЗГОВОРА: личка тредом, �
   // поэтому подставляем его в код guard'а и проверяем саму логику.
   // Без этого правило про тег осталось бы непроверенным до продакшена.
   // Имён у бота НЕСКОЛЬКО: логин латиницей и то, как его зовут люди.
+  // Подмена РЕГУЛЯРКОЙ, а не по точному тексту: в сборке с настроенным
+  // BOT_USERNAME строка выглядит иначе, подмена молча не срабатывала,
+  // и проверка «без имён тег не работает» тестировала настоящие имена.
+  // Набор обязан быть зелёным в обеих сборках — иначе настроенная выглядит
+  // сломанной, а это ровно то состояние, в которое её и приводят.
   const tagged = (event, names = ['bully', 'Булли']) => new Function('$json',
-    js(channel, 'Guard channel').replace('const MENTION      = [];',
-      `const MENTION      = ${JSON.stringify(names)};`))(event)[0].json;
+    js(channel, 'Guard channel').replace(/const MENTION\s*=\s*\[[^\]]*\];/,
+      `const MENTION = ${JSON.stringify(names)};`))(event)[0].json;
   const call = tagged(chPost('@bully посмотри тред и ответь', 'q1'));
   check('канал: реплика С тегом пропущена', call.pass === true);
   check('и это продолжение — тред будет дочитан', call.is_follow_up === true);
@@ -656,6 +661,32 @@ line('16. Проводка адаптеров: связи и фильтры');
     const drafts = channel.nodes.find((n) => n.name === 'Post header')
       .parameters.channelId.value;
     check(`канал черновиков (~${drafts}) тоже слушается`, listened.includes(drafts));
+
+    // ПАСПОРТ СБОРКИ НА ХОЛСТЕ. Предупреждения сборщика читают один раз —
+    // в момент сборки, — а разбирают отказ через неделю и в другом месте.
+    // 02.09 бота позвали тегом, он промолчал, и ни в n8n, ни в Executions
+    // не было ничего: guard отсеял реплику до ядра, а ответ «собрано без
+    // BOT_USERNAME» лежал в терминале, которого давно нет.
+    //
+    // Заметка обязана говорить ПРАВДУ о своей сборке, иначе она хуже
+    // отсутствия: по ней перестанут проверять. Поэтому сверяется с тем же
+    // guard'ом и тем же триггером, а не с текстом самой себя.
+    for (const [name, w] of [['канал', channel], ['личка', dm]]) {
+      const note = w.nodes.find((n) => n.type === 'n8n-nodes-base.stickyNote');
+      check(`${name}: паспорт сборки на холсте`, Boolean(note));
+      const text = note.parameters.content;
+      const names = JSON.parse(
+        js(w, name === 'канал' ? 'Guard channel' : 'Guard DM')
+          .match(/const MENTION\s*=\s*(\[[^\]]*\])/)[1]);
+      check(`${name}: паспорт не врёт про тег`,
+        names.length
+          ? names.every((n) => text.includes('@' + n))
+          : /ВЫКЛЮЧЕН/.test(text));
+      // Список каналов в паспорте — тот же, что слушает триггер.
+      for (const c of listened) {
+        check(`${name}: паспорт называет канал ~${c}`, text.includes('~' + c));
+      }
+    }
   }
   const post = channel.nodes.find((n) => n.name === 'Post header');
   check('пишем в stonis_hakcs_2', JSON.stringify(post.parameters.channelId).includes('stonis_hakcs_2'));
