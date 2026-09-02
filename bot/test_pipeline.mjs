@@ -57,7 +57,10 @@ function runPlan(routerOutput, registry = REGISTRY, trigger = {}) {
 function runTrace(present) {
   const $ = (name) => {
     if (!(name in present)) throw new Error('node not executed: ' + name);
-    const items = [{ json: present[name] }];
+    // Массив — узел отдал несколько элементов (строки Trino, статьи);
+    // объект — один. Счётчики «×N» в трассе считают именно элементы.
+    const v = present[name];
+    const items = (Array.isArray(v) ? v : [v]).map((json) => ({ json }));
     return { first: () => items[0], all: () => items };
   };
   return new Function('$', '$json', js('Trace'))($, {})[0].json;
@@ -169,6 +172,28 @@ line('1а00000. ВРЕМЯ ПО ЭТАПАМ — ИЗ ШТАМПОВ НА КОН
   check('время роутера посчитано', /Router \(модель\): 12\.3 с/.test(tr));
   check('время автора посчитано', /Author \(модель\): 61\.0 с/.test(tr));
   check('Trino посчитан по штампу после него', /Check values — Trino ×1: 24\.0 с/.test(tr));
+  // Число запросов — по входу Trino, не по выходу. Прогон 02.09: три запроса
+  // словаря вернули 16 строк, и «×16» прочиталось бы как шестнадцать
+  // обращений к базе. Вход — элементы узла, собравшего SQL: «Build check
+  // SQL», а после доспроса — «Retry check SQL».
+  const rows16 = Array.from({ length: 16 }, () => ({ fld: 'gender_desc' }));
+  const byInput = runTrace({
+    'Decode registry': { _ts: t0 }, 'Read article': {}, 'Call DD Lookup': {},
+    'Build check SQL': [{ _ts: t0 + 100 }, { check_sql: 'b' }, { check_sql: 'c' }],
+    'Check values': rows16,
+    'Check result': { _ts: t0 + 24_100 },
+  }).trace;
+  check('Trino: запросов столько, сколько SQL собрал Build check SQL, а не строк',
+    /Check values — Trino ×3: 24\.0 с/.test(byInput) && !/×16/.test(byInput));
+  const afterAsk = runTrace({
+    'Decode registry': { _ts: t0 }, 'Read article': {}, 'Call DD Lookup': {},
+    'Build check SQL': { _ts: t0 + 100, check_sql: '' },
+    'Retry check SQL': [{ _ts: t0 + 5_100 }, { check_sql: 'y' }],
+    'Check values': rows16,
+    'Check result': { _ts: t0 + 15_100 },
+  }).trace;
+  check('после доспроса запросы считаются по Retry check SQL',
+    /Check values — Trino ×2: 10\.0 с/.test(afterAsk));
   check('самое долгое названо', /САМОЕ ДОЛГОЕ: Author \(модель\) — 61\.0 с/.test(tr));
   check('итог посчитан от первого штампа', /ВСЕГО от реестра до трассы: /.test(tr));
   // Необязательная ветка пропущена — учёт не рвётся: Revise не было,
