@@ -200,6 +200,47 @@ def node(name, ntype, version, pos, params, **extra):
     return n
 
 
+def build_note(pos=None):
+    """Паспорт сборки на холсте n8n: что включено, а что молча выключено.
+
+    Сборщик и так печатает предупреждения, но их читают один раз — в момент
+    сборки, — а разбирают отказ через неделю и в другом месте. Живой прогон
+    02.09: бота позвали тегом, он промолчал; ни в n8n, ни в Executions
+    не было ничего, потому что guard отсеял реплику ещё до ядра. Ответ
+    «собрано без BOT_USERNAME» лежал в терминале, которого давно нет.
+
+    Заметка собирается из тех же констант, что и сами узлы, поэтому
+    разъехаться с ними не может.
+    """
+    tag = (", ".join("@" + n for n in BOT_USERNAMES) if BOT_USERNAMES
+           else "ВЫКЛЮЧЕН — собрано без BOT_USERNAME")
+    react = BOT_USER_ID or "ВЫКЛЮЧЕНА — собрано без BOT_USER_ID"
+    lines = [
+        "## Паспорт сборки",
+        "",
+        f"- сборка ядра: `{CORE_BUILD}`",
+        f"- зов по тегу: {tag}",
+        f"- каналы: {', '.join('~' + c for c in CHANNELS_WATCHED)}",
+        f"- реакция :{WORK_EMOJI}: — id бота: {react}",
+        "",
+        "Канал, которого нет в списке, бот НЕ ВИДИТ вовсе — ни обращения,",
+        "ни тега: пост туда не приходит, и Executions остаётся пустым.",
+        "Имён для тега нужно два: логин латиницей и то, как зовут люди",
+        "(кириллица в username Mattermost запрещена).",
+        "",
+        "Пересобрать:",
+        "`BOT_USERNAME=<логин>,<Имя> BOT_USER_ID=<id> python3 build_time_flows.py`",
+    ]
+    return node(
+        "Паспорт сборки",
+        "n8n-nodes-base.stickyNote",
+        1,
+        pos or [-260, -120],
+        {"content": "\n".join(lines), "height": 340, "width": 460,
+         "color": 3 if BOT_USERNAMES else 2},
+    )
+
+
 def wf(name, nodes, connections):
     return {
         "name": name,
@@ -8003,6 +8044,7 @@ return mmSections([
 """
 
 channel_nodes = [
+    build_note(),
     # Слушаем и канал черновиков: там работает джун, и позвать бота тегом
     # прямо под черновиком — самый естественный способ попросить переделать.
     mm_trigger("Time Trigger", [-260, 300], CHANNELS_WATCHED),
@@ -8298,6 +8340,7 @@ if dm_filter is None:
 DM_POST_ID = "={{ $('Guard DM').first().json.post.id }}"
 
 dm_nodes = [
+    build_note(),
     mm_trigger("Time Trigger DM", [-260, 300], None, posted_filters=dm_filter),
     # В личке префикса темы нет — человек пишет обычным текстом. Зато
     # обязателен фильтр эха: бот слушает и пишет один и тот же канал.
