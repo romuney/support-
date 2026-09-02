@@ -114,7 +114,30 @@ DM_ALLOWLIST = []
 # действий дежурного. Одно значение — два места, и добывается один раз:
 #   GET /api/v4/users/username/<логин бота>  → поле id
 # либо System Console → Users → карточка бота.
-BOT_USER_ID = os.environ.get("BOT_USER_ID", "")
+# ID УЧЁТКИ БОТА — НЕ ТОКЕН И НЕ TOKEN ID.
+#
+# Разбор 02.09: на вопрос «где взять id» прислали страницу System Console →
+# Bot Accounts, где под именем бота перечислены Token ID. Они выглядят ровно
+# как user id — те же 26 символов, те же строчные буквы и цифры, — и подстановка
+# прошла бы молча: сборщик принял бы, узел реакции получил бы отказ от API,
+# а `onError: continueRegularOutput` его проглотил. Ответ человеку ушёл бы,
+# реакция не встала бы, и разбирать было бы нечего.
+#
+# Где брать НАСТОЯЩИЙ: System Console → User Management → Users → найти bully,
+# id виден в карточке и в адресной строке. Либо API:
+#   GET /api/v4/users/username/bully  → поле `id`
+#
+# Сам токен здесь не нужен вовсе и в репозиторий не попадает: узлы работают
+# на credential'е, заведённом в n8n.
+BOT_USER_ID = os.environ.get("BOT_USER_ID", "").strip()
+if BOT_USER_ID and not re.fullmatch(r"[a-z0-9]{26}", BOT_USER_ID):
+    raise SystemExit(
+        f"BOT_USER_ID={BOT_USER_ID!r} не похож на id учётки Mattermost.\n"
+        "Ожидается 26 строчных букв и цифр. Похожую форму имеет Token ID\n"
+        "со страницы Bot Accounts — это НЕ то: id учётки берётся в\n"
+        "System Console → User Management → Users, либо запросом\n"
+        "GET /api/v4/users/username/bully → поле `id`."
+    )
 
 # Эмодзи «бот думает». Имя — от владельца (2026-09-01), пишется БЕЗ двоеточий:
 # нода Mattermost обрамляет его сама.
@@ -8525,8 +8548,10 @@ if not BOT_USER_ID:
     print(f"ВНИМАНИЕ: BOT_USER_ID пуст — реакция :{WORK_EMOJI}: в личке не встанет.")
     print("Узлы «React work in DM» и «Unreact work in DM» отвалятся молча")
     print("(onError: continueRegularOutput) — ответ человеку при этом уйдёт.")
-    print("Взять id:  GET /api/v4/users/username/<логин бота>  → поле id,")
-    print("либо System Console → Users → карточка бота. Затем:")
+    print(f"Взять id:  GET /api/v4/users/username/{BOT_USERNAMES[0] if BOT_USERNAMES else '<логин>'}  → поле id,")
+    print("либо System Console → User Management → Users → карточка бота.")
+    print("НЕ БЕРИТЕ Token ID со страницы Bot Accounts: он той же формы")
+    print("(26 строчных букв и цифр), подставится молча, а реакция не встанет.")
     print("  BOT_USER_ID=<id> python3 build_time_flows.py")
     print("Тот же id нужен телеметрии: BOT_USER_IDS в build_telemetry_flows.py,")
     print("иначе реакции бота в канале лягут в лог как действия дежурного.")
