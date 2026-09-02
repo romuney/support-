@@ -137,10 +137,16 @@ BOT_USER_ID=<id> python3 build_time_flows.py
 **`BOT_USER_ID` — это id учётки, а не Token ID.** Страница System Console →
 Bot Accounts показывает под именем бота список Token ID, и они той же формы:
 26 строчных букв и цифр. Подставится молча, а реакция не встанет — узел
-получит отказ API, и `onError` его проглотит. Настоящий id: System Console →
-User Management → Users → карточка бота, либо `GET /api/v4/users/username/bully`
-→ поле `id`. Сборщик проверяет форму, но отличить одно от другого не может —
-только вы.
+получит отказ API, и `onError` его проглотит. Сборщик проверяет форму,
+но отличить одно от другого не может — только вы.
+
+**Где его взять, не выходя из n8n:** Executions → любой прогон `Adapter DM`
+или `Adapter Channel` → узел `Reply in DM` (или `Post header`) → вкладка
+OUTPUT → поле `user_id`. Это пост, отправленный самим ботом, и `user_id`
+в нём — его собственный. Ни токена, ни доступа в System Console не нужно.
+
+Иначе: System Console → User Management → Users → карточка бота, либо
+`GET /api/v4/users/username/bully` → поле `id`.
 
 **Канал, которого нет в списке, бот не видит вовсе** — ни обращения, ни тега.
 Пост туда не приходит, и в n8n это выглядит как пустой Executions: неотличимо
