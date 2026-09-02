@@ -213,6 +213,35 @@ def node(name, ntype, version, pos, params, **extra):
     return n
 
 
+def who_am_i(name, pos):
+    """id учётки бота — ПРИ ПРОГОНЕ, из /api/v4/users/me, а не константой.
+
+    Константа BOT_USER_ID так и не нашлась: в интерфейсе Mattermost id не
+    показывают, Bot Accounts отдаёт Token ID той же формы, и это была
+    единственная настройка, без которой узел молча не работал. А узнать id
+    бот может сам: тот же credential, что читает тред, отвечает на /users/me
+    своим id. Тем же HTTP-узлом, что работал вживую 02.09 21:34. Один GET
+    на обращение.
+
+    onError: не встал id — реакции отвалятся мягко, как и раньше, ответ уйдёт.
+    """
+    return node(
+        name,
+        "n8n-nodes-base.httpRequest",
+        4.4,
+        pos,
+        {
+            "method": "GET",
+            "url": MM_BASE.rstrip("/") + "/api/v4/users/me",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "mattermostApi",
+            "options": {},
+        },
+        credentials=copy.deepcopy(MM_CRED),
+        onError="continueRegularOutput",
+    )
+
+
 def build_note(pos=None):
     """Паспорт сборки на холсте n8n: что включено, а что молча выключено.
 
@@ -677,6 +706,11 @@ router_prompt_expr = fill(
 )
 
 core_nodes += [
+    # id бота — в КАЖДОЙ трассе, с любого адаптера. Свой узел, а не вход
+    # от адаптера: в канале «Who am I» адаптера стоит за гейтом тега,
+    # на пути формы не выполняется, и выражение на него уронило бы
+    # «Call core». Один GET перед чтением реестра, onError мягкий.
+    who_am_i("Who am I", [-140, 300]),
     GET_INDEX,
     DECODE_INDEX,
     node(
@@ -5543,6 +5577,13 @@ try {
   // отчёту сразу видно, та ли это сборка. Без него разбор упирается
   // в «а вы импортировали?» — круг, который уже был.
   kv('сборка ядра', '__CORE_BUILD__');
+  // id учётки бота — из /users/me этим же прогоном. Владелец просил его
+  // в трассе: в интерфейсе Mattermost id не показан, а телеметрии он нужен
+  // (BOT_USER_IDS), иначе действия бота лягут в лог как действия дежурного.
+  const me = stage('Who am I');
+  kv('id бота', !me.ran ? 'узел не выполнялся'
+    : me.j.id ? me.j.id + ' (@' + (me.j.username || '?') + ')'
+    : 'ответ без id: ' + cut(JSON.stringify(me.j), 160));
   kv('вопрос', cut(trig.j.question, 300));
   kv('режим', (trig.j.mode || '—') + ' · тема формы: ' + cut(P.topic_kind_used || trig.j.topic_kind, 80));
 
@@ -6390,7 +6431,7 @@ core_nodes += [
 # ловит через try/catch вокруг $(). Ровно тот же приём, что в «Shape table meta»
 # субворкфлоу DD Lookup — он проверен живым прогоном.
 core_conn = {}
-core_conn.update(chain("When called by adapter", "Get a file", "Decode registry", "Router"))
+core_conn.update(chain("When called by adapter", "Who am I", "Get a file", "Decode registry", "Router"))
 core_conn["Router"] = {"main": [[{"node": "Plan", "type": "main", "index": 0}]]}
 
 # ВАЖНО: ветки идут ПОСЛЕДОВАТЕЛЬНО, а не параллельно.
@@ -6727,35 +6768,6 @@ def mm_trigger(name, pos, channels, posted_filters=None):
         pos,
         params,
         credentials=copy.deepcopy(MM_CRED),
-    )
-
-
-def who_am_i(name, pos):
-    """id учётки бота — ПРИ ПРОГОНЕ, из /api/v4/users/me, а не константой.
-
-    Константа BOT_USER_ID так и не нашлась: в интерфейсе Mattermost id не
-    показывают, Bot Accounts отдаёт Token ID той же формы, и это была
-    единственная настройка, без которой узел молча не работал. А узнать id
-    бот может сам: тот же credential, что читает тред, отвечает на /users/me
-    своим id. Тем же HTTP-узлом, что работал вживую 02.09 21:34. Один GET
-    на обращение.
-
-    onError: не встал id — реакции отвалятся мягко, как и раньше, ответ уйдёт.
-    """
-    return node(
-        name,
-        "n8n-nodes-base.httpRequest",
-        4.4,
-        pos,
-        {
-            "method": "GET",
-            "url": MM_BASE.rstrip("/") + "/api/v4/users/me",
-            "authentication": "predefinedCredentialType",
-            "nodeCredentialType": "mattermostApi",
-            "options": {},
-        },
-        credentials=copy.deepcopy(MM_CRED),
-        onError="continueRegularOutput",
     )
 
 
