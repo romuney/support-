@@ -221,9 +221,12 @@ line('12. Реакции бота отсеиваются — иначе reaction
 {
   // Бот ставит реакции уверенности в этот же канал. Считать их за
   // «дежурный отреагировал» = получить медиану в секунды и не заметить.
-  const src = BUILDER.replace('BOT_USER_IDS = []', 'BOT_USER_IDS = ["botX"]');
+  // Точка настройки проверяется по форме, а не по текущему значению:
+  // список заполнен реальным id, и тест не должен краснеть от того,
+  // что настройка сделана.
+  const src = BUILDER.replace(/^BOT_USER_IDS = \[[^\]]*\]$/m, 'BOT_USER_IDS = ["botX"]');
   const patched = new Function('$json',
-    js('Normalize').replace(/const BOT_USER_IDS = \[\];/, 'const BOT_USER_IDS = ["botX"];'));
+    js('Normalize').replace(/const BOT_USER_IDS = \[[^\]]*\];/, 'const BOT_USER_IDS = ["botX"];'));
   const r = patched({
     event: 'reaction_added',
     data: { reaction: { post_id: 'p1', user_id: 'botX', emoji_name: 'loading', create_at: TS } },
