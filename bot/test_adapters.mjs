@@ -1026,14 +1026,24 @@ line('16. Проводка адаптеров: связи и фильтры');
     check('тело ответа берётся у ядра по имени узла',
       /\$\('Call core'\)/.test(body) && !/\$json\.draft/.test(body));
 
-    // И прогон: узел обязан собрать непустой текст из ответа ядра.
+    // И прогон: узел обязан собрать непустой текст из ответа ядра —
+    // и БЕЗ ТЗ. Живой прогон 02.09 22:00: в тред заказчика в продовом
+    // канале ушёл блок «ТЗ для аналитика — заказчику не отправлять» с SQL.
+    // Форма была скопирована из лички, где аналитик и есть адресат.
     const out = new Function('$', '$json', body)(
       (n) => ({ first: () => ({ json: { 'Call core': {
         draft: 'Численность считается по active_employee_flg.',
-        confidence_key: 'high', tech_spec: '', sources: [], gaps: '',
+        confidence_key: 'high', sources: [], gaps: '',
+        tech_spec: 'select mdm_employee_rk from prod_v_emart.mdm_employee_structure_d',
       } }[n] }) }), {});
-    check('ответ на тег собирается непустым',
-      out.length >= 1 && /active_employee_flg/.test(out[0].json.text));
+    const tagText = out.map((i) => i.json.text).join('\n');
+    check('ответ на тег собирается непустым', /active_employee_flg/.test(tagText));
+    check('и ТЗ в тред заказчика НЕ уходит',
+      !/ТЗ для аналитика/.test(tagText) && !/select mdm_employee_rk/.test(tagText));
+    // ТЗ и разбор — джуну, после ответа: хвост пути тега ведёт в «Post header»,
+    // тот же путь, что у формы. Ветви в «Post header» взаимоисключающие.
+    check('после ответа в тред разбор и ТЗ уходят джуну',
+      channel.connections['Unreact work in channel'].main[0][0].node === 'Post header');
   }
 
   // Все три адаптера зовут одно ядро
