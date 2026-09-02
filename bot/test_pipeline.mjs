@@ -136,6 +136,48 @@ line('1. МАСТЕРА ДОМЕНА добираются кодом, а не п
 }
 
 // ====================================================================== 1а0
+line('1а00000. ВРЕМЯ ПО ЭТАПАМ — ИЗ ШТАМПОВ НА КОНТРОЛЬНЫХ УЗЛАХ');
+{
+  // Разбор 02.09 22:10: почти две минуты, и по трассе не видно, где. n8n
+  // длительность узлов внутри флоу не отдаёт; штампы на Code-узлах между
+  // тяжёлыми — единственный способ измерить, не гадая.
+  const TIMED = ['Decode registry', 'Plan', 'Collect articles', 'Build lookups',
+    'Lookup result', 'Build materials', 'Parse answer', 'Build check SQL',
+    'Parse pairs', 'Retry check SQL', 'Check result', 'Parse revised'];
+  for (const n of TIMED) {
+    check(`${n}: обёрнут штампом времени`, /it\.json\._ts = __ts/.test(js(n)));
+  }
+  // Обёртка не ломает тело: Plan по-прежнему считает план, и штамп — число.
+  const p = runPlan(JSON.stringify({ domains: ['movement'], articles: [], dd: [], no_question: false }),
+    REGISTRY, { question: 'сколько уволилось' });
+  check('обёрнутый Plan работает и ставит числовой штамп',
+    p.files.length > 0 && Number.isFinite(p._ts) && p._ts > 1.7e12);
+
+  // Трасса считает разницу соседних штампов и называет самое долгое.
+  const t0 = 1_800_000_000_000;
+  const tr = runTrace({
+    'Decode registry': { _ts: t0 },
+    'Plan': { _ts: t0 + 12_300 },                 // Router 12.3 с
+    'Collect articles': { _ts: t0 + 15_300 },     // GitLab 3.0 с
+    'Read article': {}, 'Call DD Lookup': {}, 'Check values': {},
+    'Build lookups': { _ts: t0 + 25_300 },        // DD 10.0 с
+    'Build materials': { _ts: t0 + 25_400 },
+    'Parse answer': { _ts: t0 + 86_400 },         // Author 61.0 с
+    'Build check SQL': { _ts: t0 + 86_500 },
+    'Check result': { _ts: t0 + 110_500 },        // Trino 24.0 с
+  }).trace;
+  check('время роутера посчитано', /Router \(модель\): 12\.3 с/.test(tr));
+  check('время автора посчитано', /Author \(модель\): 61\.0 с/.test(tr));
+  check('Trino посчитан по штампу после него', /Check values — Trino ×1: 24\.0 с/.test(tr));
+  check('самое долгое названо', /САМОЕ ДОЛГОЕ: Author \(модель\) — 61\.0 с/.test(tr));
+  check('итог посчитан от первого штампа', /ВСЕГО от реестра до трассы: /.test(tr));
+  // Необязательная ветка пропущена — учёт не рвётся: Revise не было,
+  // и его строки нет, а Parse pairs слился со следующим штампом.
+  check('пропущенные ветки не дают пустых строк', !/Revise draft \(модель\): /.test(tr));
+  check('без штампов трасса говорит об этом, а не молчит',
+    /штампов нет/.test(runTrace({}).trace));
+}
+
 line('1а0000. ID БОТА — В КАЖДОЙ ТРАССЕ, ИЗ /users/me ЭТИМ ЖЕ ПРОГОНОМ');
 {
   // Владелец просил id в трассе: в интерфейсе Mattermost он не показан,
