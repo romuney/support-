@@ -117,34 +117,37 @@ domains: [] и articles: []. Пустой ответ здесь честнее �
 ФОРМАТ ВЫВОДА
 Только JSON, без пояснений, без markdown-заборов, без текста до и после:
 
-{"domains": ["headcount"], "articles": ["m-legal-headcount"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "грейд"}], "no_question": false}
+{"domains": ["movement"], "articles": ["m-turnover"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "дата увольнения"}], "no_question": false}
 
-ВИТРИНУ СОТРУДНИКОВ (`t-emp-structure`) В articles НЕ ВОЗВРАЩАЙ: код читает
-её на каждом вопросе сам. Место в списке ограничено шестью строками, и потратив
-одну на неё, ты теряешь ту, которую не добирает никто, кроме тебя.
+МАСТЕРОВ ДОМЕНА В articles НЕ ВОЗВРАЩАЙ: их добирает код по таблице «Домены»,
+как только ты назвал домен. Место в списке ограничено шестью строками, и потратив
+одну на мастера, ты теряешь ту, которую не добирает никто, кроме тебя. То же
+касается витрины сотрудников `t-emp-structure` и словаря `rc-field-synonyms` —
+они читаются на каждом вопросе независимо от домена.
+
+Отсюда следует, что ПУСТОЙ articles — нормальный ответ, а не отказ: если тему
+закрывает мастер домена, называть больше нечего.
 
 Примеры ниже намеренно из РАЗНЫХ доменов. Домен определяется вопросом,
 а не привычкой: у большинства обращений он не `headcount`.
 
 Пример про продуктовую структуру — «выгрузи руководителей продуктов и команд
 КП 3 и КП 4». Речь о каталоге продуктов (КП), а не об управленческих юнитах:
-у них разные справочники, и подменять один другим нельзя.
+у них разные справочники, и подменять один другим нельзя. Справочник КП —
+мастер домена, поэтому articles пуст, а метаданные полей нужны:
 
-{"domains": ["allocation"], "articles": ["t-functional-unit"], "dd": [{"urn": "urn:dd:tables:dlh:table:dds.functional_unit", "hint": "уровень, руководитель"}], "no_question": false}
+{"domains": ["allocation"], "articles": [], "dd": [{"urn": "urn:dd:tables:dlh:table:dds.functional_unit", "hint": "уровень, руководитель"}], "no_question": false}
 
 Пример с двумя объектами — вопрос про отчёт и витрину под ним. Нужны оба:
 по отчёту видно готовое решение, по витрине — из чего оно считается.
 
 {"domains": ["employee-directories"], "articles": ["r-hr-detail-list"], "dd": [{"urn": "urn:dd:reports:reports:report:1728", "hint": ""}, {"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "логин, почта"}], "no_question": false}
 
-Пример со словом заказчика — «сколько сотрудников по покраске HQ и BigOps»:
-
-{"domains": ["employee-directories"], "articles": ["rc-field-synonyms"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "специализация, операционная"}], "no_question": false}
-
 Пример с несколькими доменами — «руководители команд и их аллокация
-на продукты» задевает и управленческую структуру, и продуктовую:
+на продукты» задевает и управленческую структуру, и продуктовую. Оба домена
+закрыты своими мастерами, называть отдельные статьи не нужно:
 
-{"domains": ["org-structure", "allocation"], "articles": ["t-functional-unit", "m-fte-product"], "dd": [], "no_question": false}
+{"domains": ["org-structure", "allocation"], "articles": [], "dd": [], "no_question": false}
 
 Все четыре поля обязательны. Нечего вернуть — пустой массив.
 Максимум 6 элементов в articles, максимум 4 объекта в dd.
