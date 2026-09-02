@@ -136,6 +136,28 @@ line('1. МАСТЕРА ДОМЕНА добираются кодом, а не п
 }
 
 // ====================================================================== 1а0
+line('1а0000. ID БОТА — В КАЖДОЙ ТРАССЕ, ИЗ /users/me ЭТИМ ЖЕ ПРОГОНОМ');
+{
+  // Владелец просил id в трассе: в интерфейсе Mattermost он не показан,
+  // а телеметрии нужен (BOT_USER_IDS). Узел свой, в ядре, на главном пути:
+  // адаптерный «Who am I» в канале стоит за гейтом тега и на пути формы
+  // не выполняется — выражение на него уронило бы «Call core».
+  const me = core.nodes.find((n) => n.name === 'Who am I');
+  check('в ядре есть Who am I: GET /users/me тем же credential, мягко',
+    me && me.type === 'n8n-nodes-base.httpRequest' && me.parameters.method === 'GET' &&
+    /\/api\/v4\/users\/me$/.test(me.parameters.url) &&
+    me.parameters.nodeCredentialType === 'mattermostApi' &&
+    me.onError === 'continueRegularOutput');
+  check('стоит сразу за триггером, до чтения реестра',
+    core.connections['When called by adapter'].main[0][0].node === 'Who am I' &&
+    core.connections['Who am I'].main[0][0].node === 'Get a file');
+  const withId = runTrace({ 'Who am I': { id: 'abcdefghijklmnopqrstuvwxyz', username: 'bully' } }).trace;
+  check('трасса печатает id и логин', /id бота: abcdefghijklmnopqrstuvwxyz \(@bully\)/.test(withId));
+  check('без узла — сказано, что не выполнялся', /id бота: узел не выполнялся/.test(runTrace({}).trace));
+  check('ответ без id — показан образцом',
+    /id бота: ответ без id: .*"message"/.test(runTrace({ 'Who am I': { message: 'Unauthorized' } }).trace));
+}
+
 line('1а000. ТЕГ БЕЗ ТЕКСТА ПРИ НЕПУСТОЙ ПЕРЕПИСКЕ — ВОПРОС, РЕШАЕТ КОД');
 {
   // Живой прогон 02.09 21:34, дважды: три реплики с вопросом и «@Булли»
