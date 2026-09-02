@@ -181,7 +181,7 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "question": "={{ $json.question }}",
+            "question": "={{ $('Guard DM').first().json.question }}",
             "mode": "dm",
             "topic_kind": "={{ $('Guard DM').first().json.topic_kind ?? '' }}",
             "form_domain": "={{ $('Guard DM').first().json.form_domain ?? '' }}",

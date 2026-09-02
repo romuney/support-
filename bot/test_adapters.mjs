@@ -632,9 +632,14 @@ line('16. Проводка адаптеров: связи и фильтры');
   // Ложная ветка ворот никуда не ведёт — отсеянное сообщение не идёт дальше.
   check('канал: ложная ветка ворот пустая',
     channel.connections['Our request'].main[1].length === 0);
-  check('канал: вопрос в ядро из нормализованного поля',
-    JSON.stringify(channel.nodes.find((n) => n.name === 'Call core').parameters)
-      .includes('$json.question'));
+  // Вопрос — из нормализованного поля guard'а И ПО ИМЕНИ УЗЛА. Проверка
+  // на `$json.question` была зелёной ровно до того дня, когда между guard'ом
+  // и вызовом ядра встал догоняющий тред: подстрока на месте, вопрос пустой.
+  // Что выражение и правда вычисляется в вопрос — прогоном ниже, в блоке 16.
+  check('канал: вопрос в ядро из нормализованного поля guard\'а',
+    channel.nodes.find((n) => n.name === 'Call core')
+      .parameters.workflowInputs.value.question
+      === "={{ $('Guard channel').first().json.question }}");
 
   const dmT = dm.nodes.find((n) => n.name === 'Time Trigger DM');
   check('DM-триггер без фильтра по ИМЕНИ канала',
@@ -759,6 +764,73 @@ line('16. Проводка адаптеров: связи и фильтры');
   check('реестр только в промпте роутера',
     router.parameters.text.includes('Decode registry')
     && !author.parameters.text.includes('Decode registry'));
+
+  // ============================================ ВХОД ЯДРА НЕ ЧИТАЕТ $json
+  //
+  // ЖИВОЙ ОТКАЗ 2026-09-02, сразу после переимпорта: бот замолчал на каждом
+  // обращении. В трассе `вопрос: —`, роутер вернул `no_question: true`,
+  // материалы пустые — и по логу это выглядело как «в базе нет ответа».
+  //
+  // Причина: `question` читался из `$json`. Работало, пока перед «Call core»
+  // стоял guard; появился догоняющий тред — и между ними встал «Build thread»,
+  // который отдаёт только переписку. Вопрос стал undefined МОЛЧА: n8n
+  // необъявленному полю не сопротивляется, оно просто приезжает пустым.
+  //
+  // `$json` на входе ядра — это невидимый контракт «слева стоит ровно тот
+  // узел, о котором я думаю». Любая вставка в цепочку рвёт его, и рвёт тихо.
+  // Тот же класс уже стоил разбора 01.09 дважды: на гейтах и на разворотах
+  // списков. Поэтому здесь он запрещён целиком, а не чинится по месту.
+  for (const [name, wf] of [['канал', channel], ['личка', dm], ['чат', chat]]) {
+    const v = wf.nodes.find((n) => n.name === 'Call core')
+      .parameters.workflowInputs.value;
+    const names = new Set(wf.nodes.map((n) => n.name));
+    for (const [k, expr] of Object.entries(v)) {
+      if (typeof expr !== 'string' || !expr.startsWith('=')) continue;
+      check(`${name}: «${k}» не читает $json`, !/\$json\b/.test(expr));
+      // И узел, у которого читают, обязан существовать: опечатка в имени
+      // даёт пустое поле, а не ошибку, — то же молчание другим путём.
+      for (const m of expr.matchAll(/\$\('([^']+)'\)/g)) {
+        check(`${name}: «${k}» читает существующий узел «${m[1]}»`,
+          names.has(m[1]));
+      }
+    }
+  }
+
+  // ================================== И ВОПРОС РЕАЛЬНО ДОЕЗЖАЕТ ДО ЯДРА
+  //
+  // Запрет выше — про форму записи. Этот прогон — про смысл: выражение
+  // вычисляется в той обстановке, которая будет в n8n, то есть с $json
+  // от УЗЛА, СТОЯЩЕГО СЛЕВА. Именно он в живом отказе и подменился.
+  for (const [name, wf, guardName, feeder] of [
+    ['канал', channel, 'Guard channel', 'Build thread ch'],
+    ['личка', dm, 'Guard DM', 'Build thread DM'],
+  ]) {
+    // Кто ведёт в «Call core» — берётся из связей, а не вписывается:
+    // цепочка ещё будет меняться, и тест обязан следовать за ней.
+    const into = Object.entries(wf.connections)
+      .filter(([, c]) => (c.main || []).some((br) => (br || [])
+        .some((t) => t.node === 'Call core')))
+      .map(([src]) => src);
+    check(`${name}: в «Call core» ведёт один узел (${into.join(', ')})`,
+      into.length === 1 && into[0] === feeder);
+
+    const guardOut = runGuard(wf, guardName, {
+      channel_type: name === 'личка' ? 'D' : undefined,
+      sender_name: '@r.kazantsev',
+      post: JSON.stringify({ id: 'p9', root_id: '', channel_id: 'c9',
+        message: 'сколько сотрудников в юните data' }),
+    });
+    // $json — выход «Build thread»: переписки нет, вопроса в нём тоже нет.
+    const passing = { thread: '', thread_posts: 0, thread_state: 'empty' };
+    const expr = wf.nodes.find((n) => n.name === 'Call core')
+      .parameters.workflowInputs.value.question.slice(1);
+    const body = expr.replace(/^\s*\{\{/, '').replace(/\}\}\s*$/, '');
+    const got = new Function('$', '$json', `return (${body});`)(
+      (n) => ({ first: () => ({ json: { [guardName]: guardOut }[n] ?? {} }) }),
+      passing);
+    check(`${name}: вопрос доезжает до ядра, а не теряется по пути`,
+      got === 'сколько сотрудников в юните data');
+  }
 
   // Все три адаптера зовут одно ядро
   for (const [name, w] of [['channel', channel], ['chat', chat], ['dm', dm]]) {
