@@ -117,17 +117,34 @@ domains: [] и articles: []. Пустой ответ здесь честнее �
 ФОРМАТ ВЫВОДА
 Только JSON, без пояснений, без markdown-заборов, без текста до и после:
 
-{"domains": ["headcount"], "articles": ["t-emp-structure"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "грейд"}], "no_question": false}
+{"domains": ["headcount"], "articles": ["m-legal-headcount"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "грейд"}], "no_question": false}
 
-Пример с двумя объектами — вопрос про отчёт и витрину под ним. У строки
-отчёта в реестре стоит прочерк в колонке «путь» — статьи нет, поэтому в
-articles его id не идёт, а метаданные по нему нужны и dd_urn возвращается:
+ВИТРИНУ СОТРУДНИКОВ (`t-emp-structure`) В articles НЕ ВОЗВРАЩАЙ: код читает
+её на каждом вопросе сам. Место в списке ограничено шестью строками, и потратив
+одну на неё, ты теряешь ту, которую не добирает никто, кроме тебя.
 
-{"domains": ["headcount"], "articles": ["t-emp-structure"], "dd": [{"urn": "urn:dd:reports:reports:report:1728", "hint": ""}, {"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "численность"}], "no_question": false}
+Примеры ниже намеренно из РАЗНЫХ доменов. Домен определяется вопросом,
+а не привычкой: у большинства обращений он не `headcount`.
+
+Пример про продуктовую структуру — «выгрузи руководителей продуктов и команд
+КП 3 и КП 4». Речь о каталоге продуктов (КП), а не об управленческих юнитах:
+у них разные справочники, и подменять один другим нельзя.
+
+{"domains": ["allocation"], "articles": ["t-functional-unit"], "dd": [{"urn": "urn:dd:tables:dlh:table:dds.functional_unit", "hint": "уровень, руководитель"}], "no_question": false}
+
+Пример с двумя объектами — вопрос про отчёт и витрину под ним. Нужны оба:
+по отчёту видно готовое решение, по витрине — из чего оно считается.
+
+{"domains": ["employee-directories"], "articles": ["r-hr-detail-list"], "dd": [{"urn": "urn:dd:reports:reports:report:1728", "hint": ""}, {"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "логин, почта"}], "no_question": false}
 
 Пример со словом заказчика — «сколько сотрудников по покраске HQ и BigOps»:
 
-{"domains": ["headcount"], "articles": ["rc-field-synonyms", "t-emp-structure"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "специализация, операционная"}], "no_question": false}
+{"domains": ["employee-directories"], "articles": ["rc-field-synonyms"], "dd": [{"urn": "urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d", "hint": "специализация, операционная"}], "no_question": false}
+
+Пример с несколькими доменами — «руководители команд и их аллокация
+на продукты» задевает и управленческую структуру, и продуктовую:
+
+{"domains": ["org-structure", "allocation"], "articles": ["t-functional-unit", "m-fte-product"], "dd": [], "no_question": false}
 
 Все четыре поля обязательны. Нечего вернуть — пустой массив.
 Максимум 6 элементов в articles, максимум 4 объекта в dd.

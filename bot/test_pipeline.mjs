@@ -1688,6 +1688,56 @@ line('28. ЗНАЧЕНИЯ ФИЛЬТРОВ: роутер их больше не
   const src = fs.readFileSync('build_time_flows.py', 'utf8');
   check('в промпте роутера про values не сказано',
     !/values/.test(fs.readFileSync('prompts/router.md', 'utf8')));
+
+  // ПРИМЕРЫ В ПРОМПТЕ РОУТЕРА СВЕРЯЮТСЯ С РЕЕСТРОМ.
+  //
+  // Пример — это few-shot, то есть для модели он сильнее правила. Пример,
+  // называющий id или URN, которых в реестре нет, учит выдумывать ровно то,
+  // что промпт запрещает абзацем выше. И разъезжается он молча: реестр
+  // правят каждую неделю, промпт — раз в месяц.
+  //
+  // Разбор 02.09: все три примера возвращали один и тот же домен, одну и ту же
+  // статью и один и тот же URN — витрину сотрудников. Правила это не нарушало,
+  // но показывало модели, что ответ всегда один; на выгрузке руководителей
+  // продуктов роутер ушёл в управленческую структуру вместо продуктовой.
+  // Здесь же держится и разнообразие: примеры обязаны покрывать разные домены.
+  {
+    const prompt = fs.readFileSync('prompts/router.md', 'utf8');
+    const reg = fs.readFileSync(REGISTRY_AT, 'utf8');
+    const blocks = [...prompt.matchAll(/^\{"domains".*\}$/gm)].map((m) => JSON.parse(m[0]));
+    check(`примеров вывода в промпте (${blocks.length})`, blocks.length >= 4);
+
+    const ids = new Set();
+    const domains = new Set();
+    for (const l of reg.split('\n')) {
+      const c = l.split('|').map((x) => x.trim());
+      if (c.length > 7 && c[1] && !/^-+$/.test(c[1])) ids.add(c[1]);
+      if (c.length === 5 && c[1] && !/^-+$/.test(c[1])) domains.add(c[1]);
+    }
+    const urns = new Set([...reg.matchAll(/urn:dd:[^\s|]+/g)].map((m) => m[0]));
+
+    const seenDomains = new Set();
+    for (const b of blocks) {
+      for (const d of b.domains) {
+        check(`пример: домен «${d}» есть в реестре`, domains.has(d));
+        seenDomains.add(d);
+      }
+      for (const a of b.articles) {
+        check(`пример: id «${a}» есть в реестре`, ids.has(a));
+      }
+      for (const d of b.dd) {
+        check(`пример: URN «${d.urn.slice(0, 46)}…» есть в реестре`, urns.has(d.urn));
+      }
+    }
+    // Три примера с одним доменом — это не иллюстрация правила, а показ
+    // готового ответа. Модель повторит его и там, где домен другой.
+    check(`примеры покрывают разные домены (${seenDomains.size})`,
+      seenDomains.size >= 3);
+    // Витрину сотрудников код читает сам на каждом вопросе: пример, который
+    // её называет, учит тратить место в списке на уже прочитанное.
+    check('примеры не тратят место на витрину по умолчанию',
+      blocks.every((b) => !b.articles.includes('t-emp-structure')));
+  }
   check('и сборщик их нигде не собирает',
     !/byUrnValues|values_asked|field_values/.test(src));
 }
