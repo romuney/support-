@@ -217,10 +217,17 @@ SCHEMA = [
 #   закрывающие       снятие ПЕРЕОТКРЫВАЕТ: здесь это исправление ошибки.
 #
 # Правила живут в пересчёте витрины, здесь только классификация.
+# Два имени на одно событие — не дубль, а переезд: с 02.09 у дежурного есть
+# эмодзи пака (`иконки/`), и закрывать можно любым из двух. Старые ключи
+# остаются НАВСЕГДА: backfill перечитывает историю, и снятый ключ превратил
+# бы прошлые закрытия в `unknown` — то есть в поломку разбора, а не в правку
+# словаря. «Взято в работу» пока только :loading: — в паке ему пары нет.
 EMOJI = {
     "loading": {"kind": "taken", "resets_on_remove": False},
     "done_checkmark": {"kind": "closed", "resolved": True, "resets_on_remove": True},
+    "bully_done": {"kind": "closed", "resolved": True, "resets_on_remove": True},
     "im_red_cross": {"kind": "closed", "resolved": False, "resets_on_remove": True},
+    "bully_fail": {"kind": "closed", "resolved": False, "resets_on_remove": True},
 }
 
 # ----------------------------------------------------------------- темы
