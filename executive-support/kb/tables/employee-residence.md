@@ -4,15 +4,19 @@ type: table
 title: Город проживания сотрудника
 owner: Владелец витрины
 status: active
-updated: 2026-08-19
-aliases: [employee_residence, город проживания, пребывание сотрудника]
+updated: 2026-09-02
+aliases: [employee_residence, город проживания, город отправки документов, пребывание сотрудника, мастер локаций, локации сотрудника, city_nm]
 ---
 
 # sse_crossdata.employee_residence
 
 ## Что описывает
 
-Город проживания сотрудника.
+**Мастер для локаций сотрудника.** Город проживания и город отправки
+документов.
+
+Если просят город проживания или город отправки документов — всегда брать
+из этой таблицы. Город проживания сотрудника — поле `city_nm`.
 
 Именно эта витрина стоит за пробелом, найденным в обращении
 `cases/2026-08-17-export-pii-surrogate-key-and-restricted-fields.md`:
@@ -34,9 +38,18 @@ aliases: [employee_residence, город проживания, пребыван�
 
 | С чем | По каким полям |
 |---|---|
-| `t-emp-structure` | `mdm_employee_rk = mdm_employee_rk` **и** `CURRENT_DATE BETWEEN valid_from_dttm AND valid_to_dttm` |
+| `t-emp-structure` | `e.employee_rk = er.mdm_employee_rk` **и** `er.valid_to_dttm = '5999-01-01'` |
 
-Срез на текущую дату — через условие по `valid_from_dttm`/`valid_to_dttm`,
+Готовый джойн:
+
+```sql
+left join prod_v_sse_crossdata.employee_residence er
+    on e.employee_rk = er.mdm_employee_rk
+   and er.valid_to_dttm = '5999-01-01'  -- актуальная версия записи
+```
+
+Срез на текущую локацию — через `valid_to_dttm = '5999-01-01'` (актуальная
+версия, эквивалент `CURRENT_DATE BETWEEN valid_from_dttm AND valid_to_dttm`),
 без него на одного сотрудника вернётся вся история проживания.
 
 ## Срез атрибутов

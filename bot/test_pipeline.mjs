@@ -4434,6 +4434,89 @@ line('60. ЯДРО НЕ РАЗБИРАЕТ РЕГУЛЯРКОЙ ТО, ЧТО Ш�
   }
 }
 
+// ===================================================================== 61
+line('61. ЧИСЛО РЯДОМ С СОТРУДНИКОМ — МАСТЕР ID, А ПОПРАВКА В ТРЕДЕ ГЛАВНЕЕ ЧЕРНОВИКА');
+{
+  // Живой прогон 03.09, личка. «Дата расторжения договора с ‹логин› (N)»:
+  // бот принял N за табельный номер и написал фильтр по employee_main_work_no.
+  // Человек поправил — «это мастер ID сотрудника». Второй ответ начался
+  // словами «мастер ID, то есть табельный номер» и оставил то же поле.
+  // В материалах не было ни строки о том, что такое мастер ID и в каком
+  // поле он лежит, — автору было не из чего взять другое. Знание — в словаре,
+  // умолчание — в промпте, а имя поля в промпте не дублируется.
+  const syn = fs.readFileSync('../executive-support/kb/recipes/field-synonyms.md', 'utf8');
+  const rows = syn.split('\n').filter((l) => /^\|/.test(l));
+  const master = rows.find((l) => /мастер id/i.test(l));
+  check('в словаре есть строка про мастер ID', !!master);
+  check('и ведёт она в mdm_employee_rk', !!master && /mdm_employee_rk/.test(master));
+  check('и число без пояснения отнесено туда же', !!master && /без пояснения/.test(master));
+  const tab = rows.find((l) => /^\|\s*табельн/i.test(l));
+  check('табельный номер — отдельная строка', !!tab);
+  check('и она ведёт в employee_main_work_no, а не в мастер ID',
+    !!tab && /employee_main_work_no/.test(tab) && !/mdm_employee_rk/.test(tab));
+  check('и оговорено, что берётся только по слову «табельный»',
+    !!tab && /«табельный»/.test(tab));
+
+  // Роутер: домен справочников сотрудника узнаёт мастер ID по «о чём вопросы».
+  const domRow = REGISTRY.split('\n').find((l) => /^\|\s*employee-directories\s*\|/.test(l));
+  check('домен employee-directories знает слова «мастер ID»',
+    !!domRow && /мастер id/i.test(domRow));
+
+  // Автор: умолчание — в промпте, поле — в словаре.
+  const author = fs.readFileSync('prompts/author.md', 'utf8');
+  check('в промпте автора есть правило про мастер ID по умолчанию',
+    /МАСТЕР ID, ПОКА НЕ СКАЗАНО «ТАБЕЛЬНЫЙ»/.test(author));
+  check('и запрет приравнивать одно к другому',
+    /то есть табельный номер» — неверно всегда/.test(author));
+  check('имя поля в промпте не дублируется — оно в словаре',
+    !/mdm_employee_rk/.test(author) && !/employee_main_work_no/.test(author));
+
+  // Переписка: поправка человека главнее прошлого черновика.
+  const plan = runPlan(JSON.stringify(
+    { domains: [], articles: [], dd: [], no_question: false }));
+  const mat = runMaterials(plan, [], null, {
+    thread: "бот: where lp.employee_main_work_no = '12345'\n\n" +
+            '@человек: 12345 - это мастер ID сотрудника',
+  });
+  check('блок переписки говорит, что поправка отменяет прошлый черновик',
+    /ПОПРАВИЛ твой прошлый ответ/.test(mat.materials));
+  check('и запрещает приравнивать «Y, то есть X»', /«Y, то есть X»/.test(mat.materials));
+
+  // Сверка значений: своя прошлая реплика в треде — не «константа из статьи».
+  // Второй прогон 03.09 отсеял пару именно так: первый ответ бота лежал
+  // в переписке, а переписка — в материалах.
+  const sqlJs = js('Build check SQL');
+  const run = (materials, draft) => new Function('$', '$json', sqlJs)(
+    (n) => {
+      if (n === 'Build materials') return { first: () => ({ json: { materials } }) };
+      if (n === 'Parse answer') return { first: () => ({ json: { draft, tech_spec: '' } }) };
+      throw new Error('node not executed: ' + n);
+    }, { check_values: '' }).map((i) => i.json);
+  const MAT = [
+    '=== ПЕРЕПИСКА В ТРЕДЕ ===',
+    "бот: where e.emp_stream_desc = 'Дата'",
+    '',
+    '@человек: да, стрим Дата',
+    '',
+    '=== СТАТЬЯ kb/tables/mdm-employee-structure-d.md ===',
+    'подневная витрина',
+    '',
+    '=== МЕТАДАННЫЕ КАТАЛОГА: ' + URN_TABLE + ' ===',
+    'ПОЛЯ: mdm_employee_rk, emp_stream_desc, business_dt',
+  ].join('\n');
+  const r = run(MAT, "where e.emp_stream_desc = 'Дата' and e.last_day_flg = 1");
+  check('пара из своей же реплики в треде идёт в проверку',
+    r.some((i) => i.check_sql && i.check_field === 'emp_stream_desc'));
+  check('и не отсеяна как константа из статьи',
+    !r.some((i) => (i.check_skipped || []).some((x) => /emp_stream_desc.*константа/.test(x))));
+  // А константа из СТАТЬИ по-прежнему не проверяется: вырезан только тред.
+  const MAT2 = MAT.replace('подневная витрина', "актуальная версия: valid_to_dttm = '5999-01-01'") +
+    '\nПОЛЯ: valid_to_dttm';
+  const r2 = run(MAT2, "where valid_to_dttm = '5999-01-01'");
+  check('константа из статьи после правки не проверяется, как и раньше',
+    r2.some((i) => (i.check_skipped || []).some((x) => /valid_to_dttm.*константа/.test(x))));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);
