@@ -3487,8 +3487,20 @@ line('56. СОГЛАСОВАНИЕ ДОСТУПА: пометка 🔒 вмес�
     sens_unmarked_fields: ['disability_flg', 'full_nm'],
   }).join('\n');
   check('джун видит НАЗВАННЫМИ непомеченные закрытые поля',
-    /Закрыто каталогом, а замка в ответе нет: disability_flg, full_nm/.test(msg));
+    /Закрыто каталогом, а замка нет: disability_flg, full_nm/.test(msg));
   check('и формулировка без запрета', /запрета нет, есть согласование/.test(msg));
+
+  // И ГДЕ ИМЕННО ЗАМКА НЕТ. Промпт требует его в обоих текстах, но роняет
+  // их порознь: живой прогон 03.09 дал замки в ответе заказчику и голый
+  // тот же select в ТЗ. Без места джун шёл в ответ, находил там замки
+  // и переставал читать строку — вместе с настоящим промахом по телефону.
+  const whereMsg = runChannelParts({
+    draft: 'состав файла', confidence_key: 'high',
+    is_export: true, sens_fields: 3, sens_unmarked: true,
+    sens_unmarked_fields: ['contact_main_phone_no'],
+    sens_unmarked_where: 'в ТЗ',
+  }).join('\n');
+  check('место промаха названо', /а замка нет \(в ТЗ\): contact_main_phone_no/.test(whereMsg));
 
   const quiet = runChannelParts({
     draft: 'логин 🔒', confidence_key: 'high',
@@ -3573,6 +3585,47 @@ line('58. РАЗРЕШЕНИЕ ССЫЛКИ НА ЮНИТ СТОИТ ДО АВТ
   // убивал бы конвейер ДО автора, и в канале это «бот промолчал».
   check('пустой ответ не роняет прогон', ru.alwaysOutputData === true);
   check('и отказ справочника тоже', ru.onError === 'continueRegularOutput');
+}
+
+// ===================================================================== 59
+line('59. ССЫЛКА НА ЮНИТ — НЕ ССЫЛКА НА ОТЧЁТ');
+{
+  // ЖИВОЙ ПРОГОН 03.09. В личке заказчик прислал название команды ссылкой
+  // на структуру. Поля формы в личке нет, и `report_url` собирался «из всего
+  // текста» — ссылка на юнит уехала туда как ссылка на отчёт. Дальше по
+  // цепочке `report_url` → `asksReport` включалось правило «спрашивали про
+  // отчёт, а отчёта не разбирали», и бот отвечал: «По отчёту „Executive
+  // отчеты для команд и руководителей“ в базе ничего нет… Разбор витрины
+  // за ответ про отчёт я подменять не буду». Спрашивали про команду.
+  const UUID = '0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9';
+  const post = (message) => ({
+    channel_type: 'D', sender_name: '@r.kazantsev',
+    post: JSON.stringify({ id: 'p9', root_id: '', message, channel_id: 'c1' }),
+  });
+
+  for (const host of ['hr.tbank.ru', 'my.tbank.ru']) {
+    const g = guardDm(post('нужен список по команде ' +
+      '[Executive отчеты для команд и руководителей](https://' + host +
+      '/structure/resource/units/' + UUID + ')'));
+    check(`ссылка на юнит с ${host} в report_url не уехала`,
+      (g.report_url || []).length === 0);
+    check(`  и сам вопрос при этом цел (${host})`,
+      String(g.question).includes('Executive отчеты'));
+  }
+
+  // Настоящая ссылка на дашборд отсеиваться не должна — иначе правило
+  // «спрашивали про отчёт» перестало бы работать вовсе.
+  const dash = guardDm(post('почему в дашборде другие цифры ' +
+    'https://superset.tbank.ru/dashboard/42'));
+  check('ссылка на дашборд остаётся ссылкой на отчёт',
+    (dash.report_url || []).includes('https://superset.tbank.ru/dashboard/42'));
+
+  // И обе рядом: юнит выбрасывается ПОШТУЧНО, дашборд остаётся.
+  const both = guardDm(post('по юниту https://my.tbank.ru/structure/resource/units/' +
+    UUID + ' цифры расходятся с https://superset.tbank.ru/dashboard/42'));
+  check('из двух ссылок отсеяна ровно одна',
+    (both.report_url || []).length === 1 &&
+    both.report_url[0].includes('superset'));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

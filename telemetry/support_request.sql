@@ -375,6 +375,14 @@ bot AS (
                   event_ts) AS sens_unmarked_fields,
            max_by(CAST(json_extract_scalar(payload, '$.sens_unmarked') AS boolean),
                   event_ts) AS sens_unmarked,
+           -- ГДЕ именно замка нет: в ответе заказчику, в ТЗ или в обоих.
+           -- Числом это не заменить: правило промпта одно, а роняется оно
+           -- в двух местах по разным причинам. Прогон 03.09: в ответе
+           -- заказчику замки стояли, в ТЗ тот же select шёл голым — и без
+           -- этой колонки промах читался как промах в ответе, которого там
+           -- не было, а настоящий (телефон, голый в обоих) терялся рядом.
+           max_by(json_extract_scalar(payload, '$.sens_unmarked_where'),
+                  event_ts) AS sens_unmarked_where,
            -- Название своей компании, поставленное значением фильтра.
            -- «Уволились из Тбанка» — это вся витрина, а не значение поля;
            -- искать «Тбанк» среди подразделений бессмысленно по построению.
@@ -747,6 +755,7 @@ SELECT
     COALESCE(b.catalog_only_fields, 0)                      AS catalog_only_fields,
     COALESCE(b.sens_unmarked_fields, 0)                     AS sens_unmarked_fields,
     COALESCE(b.sens_unmarked, false)                        AS sens_unmarked,
+    COALESCE(b.sens_unmarked_where, '')                     AS sens_unmarked_where,
     COALESCE(b.draft_company_filter, 0)                     AS draft_company_filter,
     COALESCE(b.draft_invented_fields, 0)                    AS draft_invented_fields,
     COALESCE(b.revise_carried, 0)                           AS revise_carried,

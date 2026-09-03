@@ -4,7 +4,7 @@ type: table
 title: Справочник юнитов Каталога продуктов
 owner: HC Data
 status: active
-updated: 2026-08-31
+updated: 2026-09-03
 aliases: [functional_unit, dds.functional_unit, каталог продуктов, КП, структура каталога продуктов, функциональная структура, юниты каталога продуктов, functional_unit_id, functional_unit_rk, id продукта]
 ---
 
@@ -17,7 +17,7 @@ aliases: [functional_unit, dds.functional_unit, каталог продукто�
 тип юнита, руководящая роль.
 
 Как и управленческий справочник, нужен прежде всего для перевода `id`
-из ссылки в `rk`: ссылка `my.tbank.ru/product-catalog/product/<id>` несёт
+из ссылки в `rk`: ссылка `…/product-catalog/product/<id>` несёт
 `functional_unit_id`, а работать дальше можно только с `functional_unit_rk`.
 Алгоритм — [`../recipes/unit-link.md`](../recipes/unit-link.md).
 
@@ -49,7 +49,7 @@ aliases: [functional_unit, dds.functional_unit, каталог продукто�
 | поле | что важно знать |
 |---|---|
 | `functional_unit_rk` | **постоянный** ключ юнита КП |
-| `functional_unit_id` | внутренний идентификатор. **Это он стоит в ссылке** `my.tbank.ru/product-catalog/product/<id>` |
+| `functional_unit_id` | внутренний идентификатор. **Это он стоит в ссылке** `…/product-catalog/product/<id>` — на любом нашем хосте |
 | `parent_functional_unit_rk` | ключ родительского юнита КП |
 | `functional_unit_nm` | название. Фильтровать по нему нельзя — см. «Категорически нельзя» |
 | `functional_unit_type_cd` | код типа юнита КП |

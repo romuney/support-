@@ -4517,6 +4517,237 @@ line('61. ЧИСЛО РЯДОМ С СОТРУДНИКОМ — МАСТЕР ID, �
     r2.some((i) => (i.check_skipped || []).some((x) => /valid_to_dttm.*константа/.test(x))));
 }
 
+// ===================================================================== 62
+line('62. ССЫЛКА НА ЮНИТ УЗНАЁТСЯ ПО ПУТИ, А НЕ ПО ХОСТУ');
+{
+  // ЖИВОЙ ПРОГОН 03.09, И ОН СТОИЛ ОДИННАДЦАТИ МИНУТ.
+  //
+  // Заказчик прислал название команды ссылкой на структуру — с `hr.tbank.ru`.
+  // В шаблоне был зашит `my.tbank.ru`, признак не сработал, справочник
+  // не запрашивался, и бот пять раз подряд просил «назовите команду словами»,
+  // имея это название в тексте той самой ссылки. Девять прогонов ядра ушли
+  // на то, что «Build lookups» делает одним запросом.
+  const UUID = '0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9';
+  const ask = (host) => runPlan(
+    JSON.stringify({ domains: [], articles: [], dd: [], no_question: false }),
+    REGISTRY,
+    { question: 'оценка review по команде [Executive отчеты для команд ' +
+        'и руководителей](https://' + host + '/structure/resource/units/' + UUID + ')' });
+
+  for (const host of ['hr.tbank.ru', 'my.tbank.ru', 'tbank.ru', 'people.hr.tbank.ru']) {
+    const r = ask(host);
+    check(`ссылка с ${host} опознана`, r.unit_link === true);
+    check(`  и id разобран (${host})`, r.unit_link_id === UUID);
+  }
+
+  // Чужой хост с тем же путём признаком не считается: справочник наш,
+  // и `id` из посторонней системы в нём искать нечего.
+  const alien = ask('example.com');
+  check('чужой хост признаком не считается', alien.unit_link === false);
+
+  // И ГЛАВНОЕ СЛЕДСТВИЕ: справочник спрашивается ДО автора.
+  const m = ask('hr.tbank.ru');
+  check('рецепт перевода добран', m.files.includes('kb/recipes/unit-link.md'));
+  check('и справочник управленческой структуры',
+    m.files.includes('kb/tables/management-unit.md'));
+
+  const lk = new Function('$', '$json', js('Build lookups'))(
+    (n) => {
+      if (n === 'Plan') return { first: () => ({ json: m }) };
+      if (n === 'Call DD Lookup') return { all: () => [] };
+      throw new Error('node not executed: ' + n);
+    }, {})[0].json;
+  check('гейт справочника открыт', lk.lookup_needed === true);
+  check('и в запрос уехал id из ссылки', lk.lookup_sql.includes(UUID));
+  check('запрос берёт ключ, а не только проверяет наличие',
+    /management_unit_rk/.test(lk.lookup_sql) && /management_unit_nm/.test(lk.lookup_sql));
+
+  // ССЫЛКА НА ЮНИТ — НЕ ССЫЛКА НА ОТЧЁТ. По ней гейт `asksReport` включал
+  // правило «спрашивали про отчёт, а отчёта не разбирали», и бот отвечал
+  // «по отчёту в базе ничего нет» на вопрос про команду.
+  check('ссылкой на отчёт не считается', m.report_url_found === '');
+  // Настоящая ссылка на дашборд рядом при этом не теряется.
+  const both = runPlan(
+    JSON.stringify({ domains: [], articles: [], dd: [], no_question: false }),
+    REGISTRY,
+    { report_url: 'https://hr.tbank.ru/structure/resource/units/' + UUID +
+        ' https://superset.tbank.ru/dashboard/42' });
+  check('дашборд рядом со ссылкой на юнит уцелел',
+    both.report_url_found === 'https://superset.tbank.ru/dashboard/42');
+}
+
+// ===================================================================== 63
+line('63. ДЫРА В ЗАПРОСЕ И ВЫДУМАННОЕ ИМЯ ПОНИЖАЮТ УВЕРЕННОСТЬ');
+{
+  // Оба детектора работали с 2026-08-31 и уезжали ТОЛЬКО в телеметрию:
+  // джун видел их в разборе, а заказчик получал «высокую» без оговорок.
+  // Живой прогон 03.09 дал оба промаха в одном разговоре — выдуманное
+  // `review_score` в первом ответе и `'<ключ из шага 1>'` в последнем,
+  // после прямой просьбы «выполняй сам и напиши мне итоговый SQL».
+  const parseJs = js('Parse answer');
+  const runP = (output, materials) => new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'Build materials') {
+        return { first: () => ({ json: { materials, has_materials: true } }) };
+      }
+      if (name === 'When called by adapter') {
+        return { first: () => ({ json: { question: 'вопрос', mode: 'dm' } }) };
+      }
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      throw new Error('node not executed: ' + name);
+    }, { output })[0].json;
+
+  // Имя витрины в материалах обязательно: код добавляет к нему префикс
+  // `prod_v_` сам, и без строки с `emart.x` схема Trino из собственного
+  // запроса считалась бы выдуманным именем.
+  const MAT = 'МЕТАДАННЫЕ ОБЪЕКТА urn:dd:tables:greenplum:table:emart.x\n' +
+    'ПОЛЯ: mdm_employee_rk, last_day_flg, active_employee_flg, ' +
+    'mapped_management_unit_rk, summary_score';
+  const draft = (sql) => 'ЧЕРНОВИК ОТВЕТА:\n```sql\n' + sql + '\n```\nУВЕРЕННОСТЬ: высокая';
+
+  // ДЫРА В ЧЕРНОВИКЕ, А НЕ В ТЗ. Раньше проверка читала только `tech_spec`
+  // и текст, который копирует ЗАКАЗЧИК, не смотрела вовсе.
+  const holed = runP(draft(
+    'SELECT mdm_employee_rk\nFROM prod_v_emart.x e\n' +
+    "WHERE e.lvl{N}_mapped_management_unit_rk = '<ключ из шага 1>'"), MAT);
+  check('угловая дыра в ответе заказчику найдена',
+    holed.draft_placeholders.includes('<ключ из шага 1>'));
+  check('и фигурная — тоже: lvl{N} это не имя поля',
+    holed.draft_placeholders.includes('{N}'));
+  check('уверенность за дыру понижена', holed.confidence_key === 'medium');
+  check('и причина названа словами',
+    /заполнить руками/.test(holed.confidence_capped_reason));
+
+  // ```-забор бывает не только у SQL: строка JSON под шаблон фигурной дыры
+  // попала бы целиком, и проверка загорелась бы на ответе про каталог.
+  const jsonFence = runP('ЧЕРНОВИК ОТВЕТА:\n```\n' +
+    '{"urn": "urn:dd:tables:greenplum:table:emart.x"}\n```\nУВЕРЕННОСТЬ: высокая', MAT);
+  check('JSON в заборе дырой не считается', jsonFence.draft_placeholders.length === 0);
+
+  // Плейсхолдер в ПОДПИСИ к фильтру — это норма, её предписывает рецепт:
+  // ключ юнита человеком не читается, и название рядом обязательно.
+  const signed = runP(draft(
+    'SELECT mdm_employee_rk\nFROM prod_v_emart.x e\n' +
+    "WHERE e.mapped_management_unit_rk = '7232d114'  -- <название юнита>"), MAT);
+  check('подпись в комментарии дырой не считается',
+    signed.draft_placeholders.length === 0);
+  check('и уверенность не тронута', signed.confidence_key === 'high');
+
+  // ВЫДУМАННОЕ ИМЯ. `review_score` в ультраширокой нет — оценки лежат
+  // в отдельной витрине, и заказчик поймал это сам через три минуты.
+  const invented = runP(draft(
+    'SELECT e.mdm_employee_rk, e.review_score\nFROM prod_v_emart.x e'), MAT);
+  check('выдуманное имя названо', invented.draft_invented_fields.includes('review_score'));
+  check('уверенность за него понижена', invented.confidence_key === 'medium');
+  check('и причина названа словами',
+    /нет ни в статьях, ни в инвентаре/.test(invented.confidence_capped_reason));
+
+  // БЕЗ МАТЕРИАЛОВ ПРОВЕРКА МОЛЧИТ: сверять не с чем — значит выдуманным
+  // окажется каждое имя, включая верные. Такой прогон и так понижен
+  // правилом «материалов не было вовсе», второй раз незачем.
+  const blind = new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'Build materials') {
+        return { first: () => ({ json: { materials: '', has_materials: false } }) };
+      }
+      if (name === 'When called by adapter') {
+        return { first: () => ({ json: { question: 'вопрос', mode: 'dm' } }) };
+      }
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      throw new Error('node not executed: ' + name);
+    },
+    { output: draft('SELECT e.mdm_employee_rk, e.review_score FROM prod_v_emart.x e') },
+  )[0].json;
+  check('без материалов выдуманных имён не называется',
+    blind.draft_invented_fields.length === 0);
+  check('но прогон всё равно понижен — за пустые материалы',
+    blind.confidence_key === 'none');
+}
+
+// ===================================================================== 64
+line('64. ЗАМОК ИЩЕТСЯ В ДВУХ ТЕКСТАХ ПОРОЗНЬ, И МЕСТО НАЗЫВАЕТСЯ');
+{
+  // Промпт требует 🔒 и в ответе заказчику, и в ТЗ. Проверка это мерила,
+  // но склеивала оба текста, и по её выводу нельзя было понять, где чинить.
+  // Живой прогон 03.09: в ответе заказчику замки стояли, в ТЗ тот же select
+  // шёл голым — и помеченные поля попадали в список наравне с настоящим
+  // промахом по телефону, голому в обоих текстах.
+  const parseJs = js('Parse answer');
+  const mat = {
+    materials: 'ЧУВСТВИТЕЛЬНЫХ ПОЛЕЙ 2 из 20', has_materials: true,
+    tables: [{ name: 'emart.x', fields: ['grade', 'contact_main_phone_no'],
+               sens: ['grade', 'contact_main_phone_no'] }],
+  };
+  const runP = (output) => new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'Build materials') return { first: () => ({ json: mat }) };
+      if (name === 'When called by adapter') {
+        return { first: () => ({ json: { question: 'состав', mode: 'dm' } }) };
+      }
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      throw new Error('node not executed: ' + name);
+    }, { output })[0].json;
+
+  const SEL = (lock) => 'select\n    grade' + (lock ? '  -- 🔒 нужен доступ' : '') +
+    '\n  , contact_main_phone_no\nfrom prod_v_emart.x';
+
+  const spec = runP('ЧЕРНОВИК ОТВЕТА:\n' + SEL(true) +
+    '\nТЗ ДЛЯ АНАЛИТИКА:\n' + SEL(false) + '\nУВЕРЕННОСТЬ: высокая');
+  check('поле, голое только в ТЗ, названо',
+    spec.sens_unmarked_fields.includes('grade'));
+  check('и настоящий промах в обоих текстах — тоже',
+    spec.sens_unmarked_fields.includes('contact_main_phone_no'));
+  check('место промаха названо', spec.sens_unmarked_where === 'в ответе заказчику и в ТЗ');
+
+  const onlySpec = runP('ЧЕРНОВИК ОТВЕТА:\n' + SEL(true).replace(
+    'contact_main_phone_no', 'contact_main_phone_no  -- 🔒 нужен доступ') +
+    '\nТЗ ДЛЯ АНАЛИТИКА:\n' + SEL(false) + '\nУВЕРЕННОСТЬ: высокая');
+  check('замки только в ответе — место названо «в ТЗ»',
+    onlySpec.sens_unmarked_where === 'в ТЗ');
+
+  const clean = runP('ЧЕРНОВИК ОТВЕТА:\n' + SEL(true).replace(
+    'contact_main_phone_no', 'contact_main_phone_no  -- 🔒 нужен доступ') +
+    '\nУВЕРЕННОСТЬ: высокая');
+  check('когда всё помечено — признака нет', clean.sens_unmarked === false);
+  check('и место пустое', clean.sens_unmarked_where === '');
+}
+
+// ===================================================================== 65
+line('65. ТРАССА ПОКАЗЫВАЕТ ТОТ ПРОХОД, КОТОРЫЙ УШЁЛ ЗАКАЗЧИКУ');
+{
+  // Живой прогон 03.09: первый проход поставил medium и честный пробел
+  // «нет статьи с подтверждённой схемой по витрине оценок», второй переписал
+  // ответ, поднял до «высокой» и стёр пробел. В трассе разбора читалось
+  // medium — то есть по разбору отправленный ответ был НЕ ВИДЕН вовсе.
+  const base = {
+    'When called by adapter': { question: 'список сотрудников', mode: 'dm' },
+    'Decode registry': { full: REGISTRY },
+    Plan: { files: [], dd: [], domains: [] },
+    'Collect articles': { articles_failed: [] },
+    'Build materials': { has_materials: true, tables: [] },
+    'Check result': { check_rows: 1, check_exact: 1, check_failed: '' },
+  };
+  const FIRST = { confidence_claimed: 'medium', confidence_key: 'medium',
+                  gaps: 'нет статьи по витрине оценок', sens_unmarked_fields: [] };
+  const REV = { confidence_claimed: 'high', confidence_key: 'high',
+                gaps: '', sens_unmarked_fields: [] };
+
+  const t = runTrace({ ...base, 'Parse answer': FIRST, 'Parse revised': REV }).trace;
+  check('в трассе стоит уверенность отправленного ответа',
+    /уверенность действующая: high/.test(t));
+  check('подъём уверенности назван', /ПРАВКА ПОДНЯЛА УВЕРЕННОСТЬ: medium → high/.test(t));
+  check('и стёртый пробел первого прохода — тоже',
+    /ПРАВКА СТЁРЛА ПРОБЕЛ[^\n]*витрине оценок/.test(t));
+  check('в итоге это названо промахом',
+    /правка подняла уверенность со средней до высокой/.test(t));
+
+  // Без второго прохода читается первый — как и раньше.
+  const one = runTrace({ ...base, 'Parse answer': FIRST }).trace;
+  check('без правки трасса читает первый проход',
+    /уверенность действующая: medium/.test(one));
+  check('и про правку не пишет ничего', !/ПРАВКА/.test(one));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

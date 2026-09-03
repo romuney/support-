@@ -4,7 +4,7 @@ type: table
 title: Справочник юнитов управленческой структуры
 owner: HC Data
 status: active
-updated: 2026-08-31
+updated: 2026-09-03
 aliases: [management_unit, dds.management_unit, справочник юнитов, юниты управленческой структуры, management_unit_id, management_unit_rk, ключ юнита управленческой структуры]
 ---
 
@@ -16,7 +16,7 @@ aliases: [management_unit, dds.management_unit, справочник юнито�
 идентификатор, название, родитель, руководитель.
 
 **Зачем он нужен в первую очередь:** это единственное место, где `id` юнита
-из ссылки `my.tbank.ru` превращается в `management_unit_rk` — ключ, которым
+из ссылки на структуру превращается в `management_unit_rk` — ключ, которым
 юнит адресуется в основных витринах. В `t-emp-structure` идентификатора
 из ссылки НЕТ, есть только `rk`, поэтому без этого шага ссылку заказчика
 использовать нечем. Алгоритм целиком — [`../recipes/unit-link.md`](../recipes/unit-link.md).
@@ -49,7 +49,7 @@ aliases: [management_unit, dds.management_unit, справочник юнито�
 | поле | что важно знать |
 |---|---|
 | `management_unit_rk` | **постоянный** ключ юнита. Им юнит адресуется везде |
-| `management_unit_id` | внутренний идентификатор. **Это он стоит в ссылке** `my.tbank.ru/structure/resource/units/<id>` |
+| `management_unit_id` | внутренний идентификатор. **Это он стоит в ссылке** `…/structure/resource/units/<id>` — на любом нашем хосте: и `my.tbank.ru`, и `hr.tbank.ru` |
 | `parent_management_unit_rk` | ключ родительского юнита, по нему строится иерархия |
 | `management_unit_nm` | название. Дублируется и меняется — фильтровать по нему нельзя |
 | `head_management_position_rk` | ключ позиции руководителя юнита |

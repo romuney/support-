@@ -4,8 +4,8 @@ type: recipe
 title: Ссылка на юнит — как превратить её в ключ витрины
 owner: HC Data
 status: active
-updated: 2026-08-31
-aliases: [ссылка на юнит, id юнита, идентификатор юнита из ссылки, my.tbank.ru, ссылка на подразделение, ссылка на продукт, uuid юнита, как найти юнит по ссылке]
+updated: 2026-09-03
+aliases: [ссылка на юнит, id юнита, идентификатор юнита из ссылки, my.tbank.ru, hr.tbank.ru, ссылка на подразделение, ссылка на продукт, uuid юнита, как найти юнит по ссылке]
 ---
 
 # Ссылка на юнит → `id` → `rk` → основные витрины
@@ -38,8 +38,15 @@ https://my.tbank.ru/structure/resource/units/e289067b-26b6-44f2-917e-668d1ea65cc
 
 | Ссылка | Структура | Справочник | Поле с `id` |
 |---|---|---|---|
-| `my.tbank.ru/structure/resource/units/<id>` | управленческая | `t-management-unit` | `management_unit_id` |
-| `my.tbank.ru/product-catalog/product/<id>` | Каталог продуктов | `t-functional-unit` | `functional_unit_id` |
+| `…/structure/resource/units/<id>` | управленческая | `t-management-unit` | `management_unit_id` |
+| `…/product-catalog/product/<id>` | Каталог продуктов | `t-functional-unit` | `functional_unit_id` |
+
+**Структуру определяет ПУТЬ, а не хост.** Один и тот же интерфейс отдаётся
+с разных поддоменов — в обращениях уже встречались `my.tbank.ru` и
+`hr.tbank.ru`, — и ссылка с непривычного хоста остаётся ссылкой на юнит.
+Прогон 03.09: хост в ссылке был `hr.tbank.ru`, признак не сработал,
+и бот пять раз подряд просил назвать команду словами, имея её название
+в тексте той же ссылки.
 
 `id` — это UUID, последний сегмент пути. Хвост после `?` (например
 `?searchEmployee=68058`) к юниту отношения не имеет и отбрасывается.
