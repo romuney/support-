@@ -66,6 +66,14 @@ Id присваивается n8n **только при импорте** — у 
 
 Канал `~hr-report-ask`: id `piyu3cs9xpdwie7nwxje5cwm8r` (переменная `CHANNEL_ID`).
 Credential Time — «Time Bully» (`7SgPbuQnw6w2wzMl`).
+Credential каталога DD — «Spirit (Devplatform) Service Account Support»
+(`mR1hhfmm8mKuMeX0`, константа `DP_CRED` в `build_dd_flow.py`).
+Credential GitLab — «Spirit (Devplatform) MAIN» (`GITLAB_CRED`), LLM-прокси —
+«Tbank LLM Proxy bully» (`LLM_CRED`): переведены руками в живом ядре 03.09,
+их id в репозитории нет — в JSON стоит `null`, и n8n при импорте подставляет
+учётку по имени (единственную этого типа с таким именем). После импорта
+открыть «Get a file» и любой узел модели: учётка должна стоять, а не гореть
+красным. Узнал id (карточка учётки в n8n) — вписать в константу вместо `None`.
 
 **Как только id воркфлоу узнан — вписывать его как значение по умолчанию в сборщик**
 (`os.environ.get("...", "<id>")`), а не хранить только в переменной окружения:

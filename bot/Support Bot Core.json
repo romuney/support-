@@ -85,8 +85,8 @@
       "name": "Get a file",
       "credentials": {
         "devplatformApi": {
-          "id": "mR1hhfmm8mKuMeX0",
-          "name": "Spirit (Devplatform) Service Account Support"
+          "id": null,
+          "name": "Spirit (Devplatform) MAIN"
         }
       },
       "onError": "continueRegularOutput",
@@ -144,8 +144,8 @@
       "name": "Router model",
       "credentials": {
         "openAiApi": {
-          "id": "r7ggVfrFwXpEzDKh",
-          "name": "Tbank LLM Proxy account 70"
+          "id": null,
+          "name": "Tbank LLM Proxy bully"
         }
       }
     },
@@ -194,8 +194,8 @@
       "name": "Read article",
       "credentials": {
         "devplatformApi": {
-          "id": "mR1hhfmm8mKuMeX0",
-          "name": "Spirit (Devplatform) Service Account Support"
+          "id": null,
+          "name": "Spirit (Devplatform) MAIN"
         }
       },
       "onError": "continueRegularOutput",
@@ -484,8 +484,8 @@
       "name": "Author model",
       "credentials": {
         "openAiApi": {
-          "id": "r7ggVfrFwXpEzDKh",
-          "name": "Tbank LLM Proxy account 70"
+          "id": null,
+          "name": "Tbank LLM Proxy bully"
         }
       }
     },
@@ -619,8 +619,8 @@
       "name": "Ask model",
       "credentials": {
         "openAiApi": {
-          "id": "r7ggVfrFwXpEzDKh",
-          "name": "Tbank LLM Proxy account 70"
+          "id": null,
+          "name": "Tbank LLM Proxy bully"
         }
       }
     },
@@ -756,8 +756,8 @@
       "name": "Revise model",
       "credentials": {
         "openAiApi": {
-          "id": "r7ggVfrFwXpEzDKh",
-          "name": "Tbank LLM Proxy account 70"
+          "id": null,
+          "name": "Tbank LLM Proxy bully"
         }
       }
     },

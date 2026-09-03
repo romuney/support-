@@ -51,8 +51,8 @@
       "name": "Get a file",
       "credentials": {
         "devplatformApi": {
-          "id": "mR1hhfmm8mKuMeX0",
-          "name": "Spirit (Devplatform) Service Account Support"
+          "id": null,
+          "name": "Spirit (Devplatform) MAIN"
         }
       }
     },
@@ -89,8 +89,8 @@
       "name": "T-Bank LLM proxy",
       "credentials": {
         "openAiApi": {
-          "id": "r7ggVfrFwXpEzDKh",
-          "name": "Tbank LLM Proxy account 70"
+          "id": null,
+          "name": "Tbank LLM Proxy bully"
         }
       }
     },
@@ -115,8 +115,8 @@
       "name": "list_kb_folder",
       "credentials": {
         "devplatformApi": {
-          "id": "mR1hhfmm8mKuMeX0",
-          "name": "Spirit (Devplatform) Service Account Support"
+          "id": null,
+          "name": "Spirit (Devplatform) MAIN"
         }
       }
     },
@@ -141,8 +141,8 @@
       "name": "read_kb_article",
       "credentials": {
         "devplatformApi": {
-          "id": "mR1hhfmm8mKuMeX0",
-          "name": "Spirit (Devplatform) Service Account Support"
+          "id": null,
+          "name": "Spirit (Devplatform) MAIN"
         }
       }
     },

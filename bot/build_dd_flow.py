@@ -37,8 +37,9 @@ DST_SUB = "DD Lookup.json"
 # n8n, импорт копией) — id меняется, и тогда DD_SUBFLOW_ID=<новый>.
 DD_SUBFLOW_ID = os.environ.get("DD_SUBFLOW_ID", "7tgrNcbmZGuW2AON")
 
-# Credential для DD. Тот же, которым ходят GitLab-ноды ядра, — один Service
-# Account на оба источника, меньше поводов разъехаться.
+# Credential для КАТАЛОГА DD. До 2026-09-03 им же ходили и GitLab-ноды —
+# один Service Account на оба источника; теперь у GitLab своя учётка,
+# GITLAB_CRED ниже.
 #
 # До 2026-08-27 здесь стоял «Spirit (Devplatform) Service Account account 2»
 # (id RBgLA1Lw8UGBMCU3), а в живом «DD Lookup» credential был уже другой:
@@ -49,6 +50,26 @@ DD_SUBFLOW_ID = os.environ.get("DD_SUBFLOW_ID", "7tgrNcbmZGuW2AON")
 # нода «Collect articles»: правка в интерфейсе живёт до следующего импорта.
 DP_CRED = {"devplatformApi": {"id": "mR1hhfmm8mKuMeX0",
                              "name": "Spirit (Devplatform) Service Account Support"}}
+
+# Credential для GITLAB — отдельный с 2026-09-03: в живом ядре «Get a file»
+# переведён руками на «Spirit (Devplatform) MAIN», а каталог остался на Service
+# Account Support (в тот же день DD отдавал инвентарь по двум витринам, то есть
+# работает). Правка в интерфейсе живёт до следующего импорта — поэтому она
+# здесь, а не только в n8n.
+#
+# id: None — НАМЕРЕННО, а не пробел. Учётка снята со скриншота, где виден
+# только её заголовок; id живёт в URL карточки учётки и в экспорте живого
+# воркфлоу, ни того ни другого в репозитории нет. n8n при импорте разрешает
+# учётку так (useNodeHelpers.ts, matchCredentials, вызывается из addNode ←
+# addImportedNodesToWorkflow; прочитано в n8n@1.100.0): сначала по id, и
+# найденный id ПЕРЕБИВАЕТ имя; без id или с неизвестным id — единственная
+# учётка этого типа с таким же именем. Оставь здесь старый id — импорт молча
+# вернёт Service Account Support под новым именем. Имя обязано совпадать
+# буква в букву; двух учёток с таким именем быть не должно, иначе нода
+# приедет без учётки — это видно в n8n красным на ноде.
+# Узнал id (карточка учётки в n8n или экспорт ядра) — впиши сюда вместо None.
+GITLAB_CRED = {"devplatformApi": {"id": None,
+                                 "name": "Spirit (Devplatform) MAIN"}}
 
 # Модель LLM-прокси. ОДНО МЕСТО НА ВЕСЬ ПРОЕКТ, по той же причине, что
 # и DP_CRED выше.
@@ -64,8 +85,11 @@ DP_CRED = {"devplatformApi": {"id": "mR1hhfmm8mKuMeX0",
 # Credential для прокси при этом отдельный: DP_CRED — это Devplatform
 # (каталог и GitLab), а прокси ходит под openAiApi. Оба нормализуются здесь.
 LLM_MODEL = "tgpt/text.instant.sota"
-LLM_CRED = {"openAiApi": {"id": "r7ggVfrFwXpEzDKh",
-                          "name": "Tbank LLM Proxy account 70"}}
+#
+# С 2026-09-03 — «Tbank LLM Proxy bully» вместо «…account 70»: переведён руками
+# в живом ядре. id неизвестен, None — по тем же правилам, что у GITLAB_CRED.
+LLM_CRED = {"openAiApi": {"id": None,
+                          "name": "Tbank LLM Proxy bully"}}
 
 wf = json.load(open(SRC, encoding="utf-8"))
 
@@ -73,8 +97,8 @@ wf = json.load(open(SRC, encoding="utf-8"))
 # Неподключённая разведочная нода: свою роль выполнила, ключ columns известен.
 wf["nodes"] = [n for n in wf["nodes"] if n["name"] != "HTTP Request"]
 
-# Один Service Account на весь конвейер, включая ноды, унаследованные
-# из исходника.
+# Одна учётка на ИСТОЧНИК, включая ноды, унаследованные из исходника:
+# GitLab-ноды (CUSTOM.gitlab, CUSTOM.gitlabTool) — GITLAB_CRED, каталог — DP_CRED.
 #
 # Исходник «Support Bot.json» — снимок первой конструкции, и credential в нём
 # заморожен на момент снятия. Через него он доезжает и до ядра: build_time_flows
@@ -89,7 +113,8 @@ wf["nodes"] = [n for n in wf["nodes"] if n["name"] != "HTTP Request"]
 # без единой правки кода и без видимой причины.
 for _n in wf["nodes"]:
     if "devplatformApi" in (_n.get("credentials") or {}):
-        _n["credentials"] = copy.deepcopy(DP_CRED)
+        _is_gitlab = "gitlab" in str(_n.get("type", "")).lower()
+        _n["credentials"] = copy.deepcopy(GITLAB_CRED if _is_gitlab else DP_CRED)
 
 # Одна модель и один credential на все узлы прокси — включая унаследованные
 # из исходника. Отсюда же их берёт build_time_flows: узел «T-Bank LLM proxy»

@@ -1929,7 +1929,9 @@ line('32б. ОДНА МОДЕЛЬ LLM во всех воркфлоу');
       if (!models.has(m)) models.set(m, []);
       models.get(m).push(`${name} / ${n.name}`);
       const c = (n.credentials || {}).openAiApi;
-      const cid = c ? c.id : '(нет)';
+      // Пара id+имя, а не id: у учётки со скриншота id неизвестен и стоит
+      // null — n8n подставит его по имени при импорте, см. тест 32.
+      const cid = c ? JSON.stringify({ id: c.id ?? null, name: c.name }) : '(нет)';
       if (!llmCreds.has(cid)) llmCreds.set(cid, []);
       llmCreds.get(cid).push(`${name} / ${n.name}`);
     }
@@ -1944,6 +1946,12 @@ line('32б. ОДНА МОДЕЛЬ LLM во всех воркфлоу');
   check('и она не пустая', !models.has('(пусто)'));
   check('credential прокси тоже один',
     llmCreds.size === 1 && !llmCreds.has('(нет)'));
+  // И он тот, что объявлен в сборщике: LLM_CRED в build_dd_flow.py.
+  const llmBuilder = fs.readFileSync('build_dd_flow.py', 'utf8');
+  const llmDecl = llmBuilder.match(/LLM_CRED = \{"openAiApi": \{"id": ("[^"]+"|None),\s*"name": "([^"]+)"/);
+  check('credential прокси объявлен в сборщике', Boolean(llmDecl));
+  check('и во флоу стоит именно он', Boolean(llmDecl) && llmCreds.has(JSON.stringify(
+    { id: llmDecl[1] === 'None' ? null : llmDecl[1].slice(1, -1), name: llmDecl[2] })));
 
   // Модель уезжает в телеметрию рядом с версией промпта: калибровка
   // помодельная, а prompt_version — хеш ПРОМПТОВ, и смена модели его
@@ -1957,7 +1965,7 @@ line('32б. ОДНА МОДЕЛЬ LLM во всех воркфлоу');
     /GROUP BY channel_kind, prompt_version, llm_model/.test(view));
 }
 
-line('32. ОДИН Service Account во всех воркфлоу');
+line('32. УЧЁТКИ: одна на каталог, одна на GitLab, и обе объявлены в сборщике');
 {
   // 2026-08-27: в живых «DD Lookup» и «Support Bot Core» credential поменяли
   // руками на «…Service Account Support», а сборщик продолжал выдавать
@@ -1966,16 +1974,24 @@ line('32. ОДИН Service Account во всех воркфлоу');
   // следующего импорта, поэтому отказ был бы отложенным и беспричинным
   // на вид: 401 и от каталога, и от чтения статей из GitLab сразу.
   //
-  // Проверяется не конкретный id, а СОГЛАСОВАННОСТЬ: id один на все
-  // воркфлоу. Смена Service Account — правка одной константы DP_CRED
-  // в build_dd_flow.py, а не обход четырёх файлов.
-  // ИСХОДНИК ПРОВЕРЯЕТСЯ НАРАВНЕ С СОБРАННЫМ. Прежде тест смотрел только
-  // на выход сборщика — а устаревший id лежал во ВХОДЕ, в «Support Bot.json»,
-  // и не попадал в проверку вовсе. Держалось всё на одной строке нормализации
-  // в build_dd_flow: пропади она, и старый аккаунт снова разъехался бы
-  // по трём воркфлоу, а тест остался бы зелёным. Ровно тот же класс, что
-  // gs.includes('root_id'): проверялось следствие, а не источник.
-  const creds = new Map();      // id → [где встретился]
+  // 2026-09-03: в живом ядре «Get a file» переведён руками на «Spirit
+  // (Devplatform) MAIN», каталог остался на Service Account Support. Один
+  // аккаунт на оба источника больше не факт, и тест держит два инварианта
+  // вместо одного: каталог — ОДНА учётка на все HTTP-ноды DD, GitLab — ОДНА
+  // учётка на все GitLab-ноды, включая ядро; и обе — те, что объявлены
+  // в build_dd_flow.py (DP_CRED и GITLAB_CRED). Иначе «всё согласовано»
+  // может значить «всё одинаково устарело».
+  // ИСХОДНИК ПРОВЕРЯЕТСЯ НАРАВНЕ С СОБРАННЫМ: устаревший id лежал именно
+  // во входе, а держалось всё на одной строке нормализации в build_dd_flow.
+  //
+  // Сравнение — по паре id+имя, а не по id: у учётки, снятой со скриншота,
+  // id неизвестен и в JSON стоит null. n8n при импорте подставит его по имени
+  // (useNodeHelpers.ts, matchCredentials: сначала по id, без id — единственная
+  // учётка типа с таким именем). Устаревший id перебил бы имя, поэтому null
+  // там намеренно, и тест его пропускает, а не требует строку.
+  const key = (c) => JSON.stringify({ id: c.id ?? null, name: c.name });
+  const catalog = new Map();   // ключ → [где встретился]
+  const gitlab = new Map();
   for (const [name, wf] of [['DD Lookup', load('DD Lookup.json')],
                             ['Support Bot DD', load('Support Bot DD.json')],
                             ['Support Bot (исходник)', load('Support Bot.json')],
@@ -1983,31 +1999,37 @@ line('32. ОДИН Service Account во всех воркфлоу');
     for (const n of wf.nodes) {
       const c = (n.credentials || {}).devplatformApi;
       if (!c) continue;
-      if (!creds.has(c.id)) creds.set(c.id, []);
-      creds.get(c.id).push(`${name} / ${n.name}`);
+      const bucket = /gitlab/i.test(n.type || '') ? gitlab : catalog;
+      if (!bucket.has(key(c))) bucket.set(key(c), []);
+      bucket.get(key(c)).push(`${name} / ${n.name}`);
     }
   }
-  check('credential вообще проставлен', creds.size > 0);
-  check('во всех воркфлоу он ОДИН',
-    creds.size === 1,
-    creds.size > 1
-      ? 'разъехались: ' + [...creds].map(([id, at]) =>
-          `${id} → ${at.join(', ')}`).join(' | ')
-      : '');
-  // Ядро читает GitLab тем же аккаунтом, что DD Lookup ходит в каталог:
-  // build_time_flows берёт GITLAB_CRED из собранного «Support Bot DD»,
-  // и если нормализация в build_dd_flow пропадёт, разъедется молча именно тут.
+  const spread = (m) => 'разъехались: ' +
+    [...m].map(([k, at]) => `${k} → ${at.join(', ')}`).join(' | ');
+  check('учётка каталога проставлена', catalog.size > 0);
+  check('и она ОДНА на все HTTP-ноды DD', catalog.size === 1,
+    catalog.size > 1 ? spread(catalog) : '');
+  check('учётка GitLab проставлена', gitlab.size > 0);
+  check('и она ОДНА на все GitLab-ноды, включая ядро', gitlab.size === 1,
+    gitlab.size > 1 ? spread(gitlab) : '');
+  // Ядро читает GitLab учёткой GitLab: build_time_flows берёт GITLAB_CRED
+  // из ноды «Get a file» собранного «Support Bot DD», и если нормализация
+  // в build_dd_flow пропадёт, разъедется молча именно тут.
   const coreCred = core.nodes.find((n) => n.name === 'Get a file')?.credentials
-    ?.devplatformApi?.id;
-  check('ядро читает GitLab тем же аккаунтом',
-    Boolean(coreCred) && creds.has(coreCred));
+    ?.devplatformApi;
+  check('ядро читает GitLab учёткой GitLab', Boolean(coreCred) && gitlab.has(key(coreCred)));
 
-  // И тот единственный id обязан быть тем, что объявлен в сборщике: иначе
-  // «все четыре согласованы» может значить «все четыре одинаково устарели».
   const builder = fs.readFileSync('build_dd_flow.py', 'utf8');
-  const declared = (builder.match(/DP_CRED = \{"devplatformApi": \{"id": "([^"]+)"/) || [])[1];
-  check('id объявлен в сборщике', Boolean(declared));
-  check('во флоу стоит именно объявленный id', creds.has(declared));
+  const declared = (re) => {
+    const m = builder.match(re);
+    return m ? { id: m[1] === 'None' ? null : m[1].slice(1, -1), name: m[2] } : null;
+  };
+  const dp = declared(/DP_CRED = \{"devplatformApi": \{"id": ("[^"]+"|None),\s*"name": "([^"]+)"/);
+  const gl = declared(/GITLAB_CRED = \{"devplatformApi": \{"id": ("[^"]+"|None),\s*"name": "([^"]+)"/);
+  check('учётка каталога объявлена в сборщике', Boolean(dp));
+  check('и во флоу стоит именно она', Boolean(dp) && catalog.has(key(dp)));
+  check('учётка GitLab объявлена в сборщике', Boolean(gl));
+  check('и во флоу стоит именно она', Boolean(gl) && gitlab.has(key(gl)));
 }
 
 // ===================================================================== 34
