@@ -69,6 +69,34 @@ the head or enters the frame from the bottom edge, it never covers the eyes or
 the cap, and it is the ONLY extra object. Where nothing else is listed, the
 image contains the character alone.
 
+THE BADGE: where the line below starts with the word BADGE and a colour, the
+character is not alone on empty background. He sits inside one big round badge
+of that colour which fills almost the whole image: a complete filled circle,
+centred, its diameter about nine tenths of the width of the image, leaving only
+a thin margin of grey background at the four corners. Nothing is drawn outside
+the circle, and nothing sticks out of it.
+
+The inside of the badge is not flat. It is a soft radial gradient of that one
+colour — lighter and warmer in the middle, behind the head, deeper and more
+saturated towards the rim — with a few wide, soft, blurred sunburst rays in a
+slightly lighter shade of the same colour fanning out from behind the head. The
+rays are diffuse like sunlight through haze, with blurred edges and low
+contrast: NOT sharp geometric spokes, NOT hard-edged lines, NOT a striped
+pattern. They stay entirely INSIDE the circle, they never touch or cross the rim
+and they never stick out of it. A thin lighter rim of the same colour runs
+around the inside edge of the badge. All of it stays low in contrast, so that
+shrunk to 128 x 128 pixels the badge still reads as one clear solid colour.
+
+The character is drawn in front of the badge, complete and never clipped by its
+rim: his cap, both ears, his muzzle, his chest and his paws all sit inside the
+circle with a small margin. In a BADGE image the head fills most of the BADGE
+rather than most of the frame — that is the one thing the badge is allowed to
+change about the framing. Where a mark or an object is listed, it sits inside
+the circle too.
+
+Where the line below does not start with BADGE, there is no badge at all: no
+circle, no rays, no gradient.
+
 Change ONLY this: <ЯЧЕЙКА>
 
 BACKGROUND: one flat uniform medium grey (#808080), completely empty. No
@@ -76,8 +104,9 @@ gradient, no vignette, no shadow on the background, no ground plane, no
 reflections, no extra objects apart from the one described above.
 
 Leave a clear empty margin of background on all four sides: the character, his
-ears, his paws and the object must not touch, overlap or run off the edges of
-the frame. Nothing may be cut off by the bottom edge: his chest and his
+ears, his paws, the object and, where present, the round badge must not touch,
+overlap or run off the edges of the frame. The grey background must go all the
+way around them, unbroken, to all four edges and into all four corners. Nothing may be cut off by the bottom edge: his chest and his
 shoulders sit fully inside the frame with grey background below them.
 
 Square image, 1:1 aspect ratio, at the highest resolution available. No caption,
@@ -88,6 +117,41 @@ no label, no watermark, no border, no frame.
 поля со всех четырёх сторон модель выполнила по трём, и персонаж почти везде
 упирался грудью в нижний край ячейки.
 
+## Плашка для вердиктов
+
+Четыре иконки, которые выносят вердикт, — `bully_done`, `bully_fail`,
+`bully_helpful`, `bully_not_helpful` — сделаны не «морда на сером», а **круглой
+плашкой**: морда внутри круга цвета кепки, круг во весь кадр, внутри него
+мягкий радиальный градиент и размытые солнечные лучи. Подстановка включает
+её словом `BADGE` и цветом в начале строки; всё остальное в шаблоне общее.
+
+Плашка появилась потому, что на 128×128 читается цвет, а не предмет — то же
+правило, на котором держится весь пак. Круглая заливка отдаёт цвету почти
+всю площадь иконки, а не край кепки.
+
+Три захода, и два первых были неправильным прочтением слова «лучи»:
+
+1. **Лучи наружу от круга.** Круг вышел мелким, лучи съели площадь, морда
+   на плашке реакции стала крошечной. Лучи — это украшение фона, а не рамка.
+2. **Круг «не больше головы с полями» плюс требование «голова занимает
+   большую часть кадра».** Два условия несовместимы, и модель разрешала их
+   каждый раз по-своему: у одной иконки залитый диск, у другой — тонкое
+   кольцо. Из этого правило: **пропорции задавать числом**, а не словами
+   «большой» и «маленький».
+3. **Круг в девять десятых кадра, лучи внутри него.** Работает. Морда
+   крупная, цвет читается первым, вырезание фона снимает только углы —
+   и на выходе получается круглая плашка с прозрачными углами, ровно то,
+   что нужно реакции в Mattermost.
+
+Лучи описаны как размытые и низкоконтрастные (`NOT sharp geometric spokes`):
+чёткие спицы на 128 px превращаются в рябь, а мягкие сливаются в градиент
+и просто делают фон живым.
+
+`thumbs-up` и `thumbs-down` из листового задания заменены **простой лапой**:
+поднятой у `bully_helpful`, опущенной у `bully_not_helpful`. Палец на 128 px
+не читается вовсе — на прогоне 04.09 это было видно, — а лапа читается,
+и направление даёт остаток смысла поверх цвета.
+
 ## Шестнадцать подстановок
 
 Порядок и имена — те же, что в `names-c.txt`. Текст ячеек взят из листового
@@ -97,11 +161,11 @@ no label, no watermark, no border, no frame.
 | файл | `<ЯЧЕЙКА>` |
 |---|---|
 | `bully_ready` | `Blue denim cap. Chin lifted proudly, chest puffed up, wide happy open smile, one front paw raised into the bottom of the frame in a confident presenting gesture. Nothing else in the image.` |
-| `bully_done` | `GREEN denim cap. Eyes closed in a satisfied happy smile, a huge bright green check mark beside the head, as tall as the head itself.` |
-| `bully_fail` | `RED denim cap. Ears drooping down, sad apologetic face, a huge bright red cross mark beside the head, as tall as the head itself.` |
+| `bully_done` | `BADGE green. GREEN denim cap. Eyes closed in a satisfied happy smile, a big bright white check mark beside the head inside the badge.` |
+| `bully_fail` | `BADGE red. RED denim cap. Ears drooping down, sad apologetic face, a big bright white cross mark beside the head inside the badge.` |
 | `bully_hi` | `Blue denim cap. One front paw raised high beside the head waving hello, big warm open smile, ears perked up. Nothing else in the image.` |
-| `bully_helpful` | `GREEN denim cap. One front paw raised into the frame beside the head giving a big thumbs-up, one eye winking, cheerful grin.` |
-| `bully_not_helpful` | `RED denim cap. One front paw raised into the frame beside the head giving a big thumbs-down, mouth a small sorry line, ears half down.` |
+| `bully_helpful` | `BADGE green. GREEN denim cap. One front paw raised beside the head, held up level with his eyes, shown as a simple open paw with the pad facing forward. No thumb, no thumbs-up gesture: just the raised paw. One eye winking, cheerful grin.` |
+| `bully_not_helpful` | `BADGE red. RED denim cap. One front paw held low under his muzzle, pointing downwards, shown as a simple open paw with the pad facing forward. No thumb, no thumbs-down gesture: just the lowered paw. Mouth a small sorry line, ears half down.` |
 | `bully_detail` | `Blue denim cap. Holding a short thick yellow pencil upright in one front paw beside the head and a small blank white notepad in the other front paw, attentive helpful expression, ready to write. The notepad is blank: no writing, no lines, no letters on it.` |
 | `bully_search` | `Blue denim cap. Holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression.` |
 | `bully_high` | `GREEN denim cap. Calm confident closed-mouth smile, eyes bright and steady, ears perked up, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green cap is the whole signal.` |
