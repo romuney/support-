@@ -45,6 +45,10 @@ the same head-to-body proportions with the head filling most of the frame, the
 same freckled muzzle, the same big upright ears, the same worn denim baseball
 cap with the white embroidered word "CROSS".
 
+One of the attached references shows him at a keyboard. The keyboard is not
+part of him: it is there for style only. Never draw a keyboard, a desk, a table
+or a laptop unless the line below asks for one.
+
 Do NOT redraw him. Do NOT restyle him. Do NOT turn him into a 2D illustration,
 a painted cartoon, a vector drawing or a printed emoji. No paper texture, no
 canvas texture, no glossy print finish, no outline drawing, no flat shading. He
@@ -104,7 +108,10 @@ frame: the same cream fur, the same soft studio lighting and the same 3D render
 as the attached references, with soft rounded brown pads. It is a dog's paw, not
 a human hand — broad, with short thick toes and visible pads, never human
 fingers, never a glove. There is no badge in a PAW image: no circle, no rays, no
-gradient, just the paw on flat grey background. Show ONLY the paw itself,
+gradient, just the paw on flat grey background. Everything in the image is in
+sharp focus: there is no depth of field, no blur, and nothing at all behind the
+paw — no second paw, no out-of-focus shape, no object in the background.
+Show ONLY the paw itself,
 cropped at the wrist: no forearm, no leg, no shoulder, nothing of the rest of
 him. The paw is centred and fills most of the frame — it is the same size in
 every PAW image, as big as it can be while still leaving clear grey background
@@ -212,6 +219,32 @@ no label, no watermark, no border, no frame.
 её не берёт независимо от яркости. Прогон 04.09 подтвердил — площадь
 непрозрачных пикселей у неё та же, что у зелёной `bully_high`.
 
+## Якорь держит стиль, а не композицию
+
+`--anchor` сначала требовал повторить «стиль, свет и фон» принятой картинки —
+формулировка перенесена из листового задания, где фон и правда общий. С плашкой
+она спорит: якорь тянул за собой серый фон, а подстановка требовала круг.
+
+Хуже другое: якорем служила иконка из этого же прогона, а она сама уже
+подсела по детализации. Через несколько прогонов пак уехал в гладкий плюш —
+шерсть без волосков, кепка без фактуры. Копия копии.
+
+Поэтому якорь теперь **только про стиль** и указывает на исходную принятую
+картинку, а не на соседнюю по прогону: тот же рендер, шерсть по волоску,
+веснушки, усы, фактура кепки, блики в глазах — **а позу, кадр и фон брать
+из задания и не копировать у якоря**. Прогон 04.09 с такой формулировкой
+вернул детализацию всему паку.
+
+Две утечки из референсов, обе стоили по прогону:
+
+- **Клавиатура.** `bully-style-ref.png` — кадр из анимации «бот печатает»,
+  и в `bully_not_helpful` модель положила лапу на клавиатуру. В листовом
+  задании запрет есть, в поштучное его забыли перенести. Теперь есть.
+- **Вторая лапа в расфокусе.** В `bully_detail` модель добавила глубину
+  резкости и размытую лапу на заднем плане; вырезалка сохранила её как
+  непрозрачную, и на 128 px это читалось висящим комком. Клауза `PAW`
+  теперь требует резкости во всём кадре и пустоты за лапой.
+
 ## Шестнадцать подстановок
 
 Порядок и имена — те же, что в `names-c.txt`. Текст ячеек взят из листового
@@ -226,7 +259,7 @@ no label, no watermark, no border, no frame.
 | `bully_hi` | `BADGE blue. Blue denim cap. One front paw raised high beside the head waving hello, big warm open smile, ears perked up. Nothing else in the image.` |
 | `bully_helpful` | `PAW. A big thumbs-up made with one front paw: the paw held upright, the side toe sticking straight up like a thumb, the other toes curled in, pads facing forward. Confident and friendly.` |
 | `bully_not_helpful` | `PAW. A big thumbs-down made with one front paw: the paw held upside down, the side toe pointing straight down like a thumb, the other toes curled in. Nothing else in the image.` |
-| `bully_detail` | `PAW. One front paw holding a short thick yellow pen upright and writing on a small blank white notepad. The paw is the biggest thing in the image and the notepad is small beneath it. The notepad is blank: no writing, no lines, no letters on it.` |
+| `bully_detail` | `PAW. One front paw entering the frame from the RIGHT side, holding a short thick yellow pen at a natural writing angle of about 45 degrees, the tip of the pen touching the paper and actually writing. Under it a small blank white notepad lying at a slight angle. The paw is the biggest thing in the image and the notepad is small beneath it. No head, no ears, no cap and no other part of him anywhere in the image. The notepad is blank: no writing, no lines, no letters on it.` |
 | `bully_search` | `BADGE blue. Blue denim cap. Holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression.` |
 | `bully_high` | `BADGE green. GREEN denim cap. Calm confident closed-mouth smile, eyes bright and steady, ears perked up, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
 | `bully_mid` | `BADGE amber-yellow. AMBER-YELLOW denim cap. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line, one ear up and one ear half down. Nothing else in the image at all: no object, no raised paws, no symbol.` |

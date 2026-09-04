@@ -60,9 +60,13 @@ DEFAULT_REFS = ["bulli-ref.png", "bully-style-ref.png"]
 # Фраза из `prompt-stickers.md`: она и есть приём, которым держится стиль
 # поштучных прогонов — второй образец подтверждает, что первый не случайность.
 ANCHOR_NOTE = (
-    "The last attached image is an already approved image from this exact set. "
-    "Match its style, its lighting, its background and its framing exactly: the "
-    "new image must look like it came from the same run as that one."
+    "The last attached image is an approved image of this character. Match its "
+    "STYLE exactly and only its style: the same 3D render, the same fine fur "
+    "with individual hairs, the same soft studio lighting and shading, the same "
+    "freckles and whiskers on the muzzle, the same worn fabric texture on the "
+    "cap, the same huge glossy eyes with the same highlights. Ignore its pose, "
+    "its crop and its background — those come from the instructions above, not "
+    "from it. Do not copy its background."
 )
 
 MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
