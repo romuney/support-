@@ -178,6 +178,16 @@ no label, no watermark, no border, no frame.
 а лапа во весь кадр читается сразу. Лапа именно собачья: широкая, с короткими
 толстыми пальцами и подушечками, не человеческая рука в перчатке.
 
+**Рука входит сбоку**, а не снизу и не сверху: у пальца вверх и пальца вниз
+предплечье уходит к левому краю, и жест отличается только направлением
+большого пальца. Когда рука входила снизу у одной и сверху у другой, две
+кнопки рядом выглядели как разные наборы.
+
+**Якорь для лапы — лапа, а не морда.** Прогон со стилевым якорем-мордой
+протащил в кадр кепку с ушами, хотя клауза их прямо запрещает: образец
+сильнее запрета. Якорем служит уже принятая лапа (`bully_detail`), и тогда
+запрет держится.
+
 Клауза `PAW` отменяет абзац про кадрирование: головы и кепки в таком кадре
 нет вовсе. Без этой отмены шаблон требует «голова занимает большую часть
 кадра», и модель пририсовывает морду к лапе.
@@ -257,8 +267,8 @@ no label, no watermark, no border, no frame.
 | `bully_done` | `BADGE green. GREEN denim cap. Eyes closed in a satisfied happy smile, a big bright white check mark beside the head inside the badge.` |
 | `bully_fail` | `BADGE red. RED denim cap. Sad apologetic face, ears drooping down, mouth a small unhappy line — the sadness is in the ears and the mouth, NOT in the eyes. The eyes stay exactly as in the attached references: huge, round, glossy, cartoon dark-brown eyes with the same big white highlights. They are not realistic dog eyes, not watery, not teary, not wrinkled, not narrowed. A big bright white cross mark beside the head inside the badge.` |
 | `bully_hi` | `BADGE blue. Blue denim cap. One front paw raised high beside the head waving hello, big warm open smile, ears perked up. Nothing else in the image.` |
-| `bully_helpful` | `PAW. A big thumbs-up made with one front paw: the paw held upright, the side toe sticking straight up like a thumb, the other toes curled in, pads facing forward. Confident and friendly.` |
-| `bully_not_helpful` | `PAW. A big thumbs-down made with one front paw: the paw held upside down, the side toe pointing straight down like a thumb, the other toes curled in. Nothing else in the image.` |
+| `bully_helpful` | `PAW. One front paw entering the frame horizontally from the LEFT side: the short stub of leg runs out to the LEFT edge, so the arm comes in from the side — NOT from below, NOT from above. The paw itself is in the middle of the frame at the end of that leg, making a big thumbs-up: the side toe sticking straight up like a thumb, the other toes curled in, pads facing forward. There is NO head, NO ears, NO cap, NO muzzle, NO body and NO other legs anywhere in the image: only this one paw and the short stub of leg it sits on.` |
+| `bully_not_helpful` | `PAW. One front paw entering the frame horizontally from the LEFT side: the short stub of leg runs out to the LEFT edge, so the arm comes in from the side — NOT from below, NOT from above. The paw itself is in the middle of the frame at the end of that leg, making a big thumbs-down: the side toe pointing straight down like a thumb, the other toes curled in, pads facing forward. There is NO head, NO ears, NO cap, NO muzzle, NO body and NO other legs anywhere in the image: only this one paw and the short stub of leg it sits on.` |
 | `bully_detail` | `PAW. One front paw entering the frame from the RIGHT side, holding a short thick yellow pen at a natural writing angle of about 45 degrees, the tip of the pen touching the paper and actually writing. Under it a small blank white notepad lying at a slight angle. The paw is the biggest thing in the image and the notepad is small beneath it. No head, no ears, no cap and no other part of him anywhere in the image. The notepad is blank: no writing, no lines, no letters on it.` |
 | `bully_search` | `BADGE blue. Blue denim cap. Holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression.` |
 | `bully_high` | `BADGE green. GREEN denim cap. Calm confident closed-mouth smile, eyes bright and steady, ears perked up, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
