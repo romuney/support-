@@ -97,6 +97,18 @@ the circle too.
 Where the line below does not start with BADGE, there is no badge at all: no
 circle, no rays, no gradient.
 
+THE PAW: where the line below starts with the word PAW, this overrides the
+framing paragraph above. The image does not show his head, his cap or his face
+at all. It shows ONE of his front paws alone, in close-up, filling most of the
+frame: the same cream fur, the same soft studio lighting and the same 3D render
+as the attached references, with soft rounded brown pads. It is a dog's paw, not
+a human hand — broad, with short thick toes and visible pads, never human
+fingers, never a glove. There is no badge in a PAW image: no circle, no rays, no
+gradient, just the paw on flat grey background. Show the paw itself, centred in
+the frame, with no leg behind it or at most a very short stub: the whole shape
+sits fully inside the frame with clear grey background on all four sides, and
+nothing is cut off by any edge.
+
 Change ONLY this: <ЯЧЕЙКА>
 
 BACKGROUND: one flat uniform medium grey (#808080), completely empty. No
@@ -147,10 +159,37 @@ no label, no watermark, no border, no frame.
 чёткие спицы на 128 px превращаются в рябь, а мягкие сливаются в градиент
 и просто делают фон живым.
 
-`thumbs-up` и `thumbs-down` из листового задания заменены **простой лапой**:
-поднятой у `bully_helpful`, опущенной у `bully_not_helpful`. Палец на 128 px
-не читается вовсе — на прогоне 04.09 это было видно, — а лапа читается,
-и направление даёт остаток смысла поверх цвета.
+## Обратная связь — лапой, без плашки
+
+Три иконки под ответом бота — `bully_helpful`, `bully_not_helpful`,
+`bully_detail` — сделаны иначе всех: **крупная бульдожья лапа во весь кадр,
+без морды и без плашки**. Включается словом `PAW` в начале подстановки.
+
+Это кнопки, а не вердикт: на них важен жест, и жесту нужна вся площадь.
+Палец вверх у морды на 128 px не читался вовсе — прогон 04.09 это показал, —
+а лапа во весь кадр читается сразу. Лапа именно собачья: широкая, с короткими
+толстыми пальцами и подушечками, не человеческая рука в перчатке.
+
+Клауза `PAW` отменяет абзац про кадрирование: головы и кепки в таком кадре
+нет вовсе. Без этой отмены шаблон требует «голова занимает большую часть
+кадра», и модель пририсовывает морду к лапе.
+
+`bully_detail` — та же лапа с ручкой над чистым блокнотом: «написать
+подробнее».
+
+## Светло-серая плашка и вырезание фона
+
+У `bully_unknown` кепка светло-серая, и плашка того же цвета ушла бы
+в прозрачность вместе с фоном. Дело не в оттенке: `sheet.key_background`
+снимает то, что **нейтрально** (насыщенность ≤ 12), **ровно** (перепад
+яркости в окне 3×3 ≤ 8) и **связано с краем кадра** — три признака, каждый
+из которых добавлен после конкретного брака, разбор в докстроке функции.
+Любой нейтральный серый под эти признаки попадает.
+
+Поэтому плашка у `unknown` описана как светло-серая **с явным холодным
+голубым подтоном**: насыщенность выше порога, и проверка на нейтральность
+её не берёт независимо от яркости. Прогон 04.09 подтвердил — площадь
+непрозрачных пикселей у неё та же, что у зелёной `bully_high`.
 
 ## Шестнадцать подстановок
 
@@ -160,22 +199,22 @@ no label, no watermark, no border, no frame.
 
 | файл | `<ЯЧЕЙКА>` |
 |---|---|
-| `bully_ready` | `Blue denim cap. Chin lifted proudly, chest puffed up, wide happy open smile, one front paw raised into the bottom of the frame in a confident presenting gesture. Nothing else in the image.` |
+| `bully_ready` | `BADGE blue. Blue denim cap. Chin lifted proudly, chest puffed up, wide happy open smile, one front paw raised in a confident presenting gesture. Nothing else in the image.` |
 | `bully_done` | `BADGE green. GREEN denim cap. Eyes closed in a satisfied happy smile, a big bright white check mark beside the head inside the badge.` |
 | `bully_fail` | `BADGE red. RED denim cap. Ears drooping down, sad apologetic face, a big bright white cross mark beside the head inside the badge.` |
-| `bully_hi` | `Blue denim cap. One front paw raised high beside the head waving hello, big warm open smile, ears perked up. Nothing else in the image.` |
-| `bully_helpful` | `BADGE green. GREEN denim cap. One front paw raised beside the head, held up level with his eyes, shown as a simple open paw with the pad facing forward. No thumb, no thumbs-up gesture: just the raised paw. One eye winking, cheerful grin.` |
-| `bully_not_helpful` | `BADGE red. RED denim cap. One front paw held low under his muzzle, pointing downwards, shown as a simple open paw with the pad facing forward. No thumb, no thumbs-down gesture: just the lowered paw. Mouth a small sorry line, ears half down.` |
-| `bully_detail` | `Blue denim cap. Holding a short thick yellow pencil upright in one front paw beside the head and a small blank white notepad in the other front paw, attentive helpful expression, ready to write. The notepad is blank: no writing, no lines, no letters on it.` |
-| `bully_search` | `Blue denim cap. Holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression.` |
-| `bully_high` | `GREEN denim cap. Calm confident closed-mouth smile, eyes bright and steady, ears perked up, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green cap is the whole signal.` |
-| `bully_mid` | `AMBER-YELLOW denim cap. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line, one ear up and one ear half down. Nothing else in the image at all: no object, no raised paws, no symbol.` |
-| `bully_none` | `RED denim cap. Ears drooping flat, eyes lowered, mouth a small sad apologetic line, shoulders sunk. Nothing else in the image at all: no object, no raised paws, no symbol.` |
-| `bully_unknown` | `Plain LIGHT GREY denim cap, washed out and unpainted. Completely blank puzzled expression, both eyebrows raised high, mouth slightly open, eyes wide and empty. Nothing else in the image at all: no object, no raised paws, no symbol.` |
-| `bully_flag` | `RED denim cap. Alarmed wide-open eyes, mouth open mid-bark, holding a small bright red flag on a short pole raised beside the head.` |
-| `bully_warn` | `AMBER-YELLOW denim cap. Worried expression, ears back, a big bright yellow warning triangle with a bold black exclamation mark inside it beside the head, as tall as the head itself.` |
-| `bully_lock` | `Blue denim cap. Holding a big closed golden padlock up just under the chin in both front paws, stern serious expression, one eyebrow raised.` |
-| `bully_expert` | `Blue denim cap. Head turned slightly to one side, one front paw raised pointing off to that side, a big bold yellow arrow beside the head pointing the same way, ears perked up high.` |
+| `bully_hi` | `BADGE blue. Blue denim cap. One front paw raised high beside the head waving hello, big warm open smile, ears perked up. Nothing else in the image.` |
+| `bully_helpful` | `PAW. A big thumbs-up made with one front paw: the paw held upright, the side toe sticking straight up like a thumb, the other toes curled in, pads facing forward. Confident and friendly.` |
+| `bully_not_helpful` | `PAW. A big thumbs-down made with one front paw: the paw held upside down, the side toe pointing straight down like a thumb, the other toes curled in. Nothing else in the image.` |
+| `bully_detail` | `PAW. One front paw holding a short thick yellow pen upright and writing on a small blank white notepad, seen close up. The notepad is blank: no writing, no lines, no letters on it.` |
+| `bully_search` | `BADGE blue. Blue denim cap. Holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression.` |
+| `bully_high` | `BADGE green. GREEN denim cap. Calm confident closed-mouth smile, eyes bright and steady, ears perked up, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
+| `bully_mid` | `BADGE amber-yellow. AMBER-YELLOW denim cap. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line, one ear up and one ear half down. Nothing else in the image at all: no object, no raised paws, no symbol.` |
+| `bully_none` | `BADGE red. RED denim cap. Ears drooping flat, eyes lowered, mouth a small sad apologetic line, shoulders sunk. Nothing else in the image at all: no object, no raised paws, no symbol.` |
+| `bully_unknown` | `BADGE cool blue-grey — a light grey with a clear cool blue tint, never a neutral or flat grey. Plain LIGHT GREY denim cap, washed out and unpainted. Completely blank puzzled expression, both eyebrows raised high, mouth slightly open, eyes wide and empty. Nothing else in the image at all: no object, no raised paws, no symbol.` |
+| `bully_flag` | `BADGE red. RED denim cap. Alarmed wide-open eyes, mouth open mid-bark, holding a small bright red flag on a short pole raised beside the head.` |
+| `bully_warn` | `BADGE amber-yellow. AMBER-YELLOW denim cap. Worried expression, ears back, a big bright yellow warning triangle with a bold black exclamation mark inside it beside the head.` |
+| `bully_lock` | `BADGE blue. Blue denim cap. Holding a big closed golden padlock up just under the chin in both front paws, stern serious expression, one eyebrow raised.` |
+| `bully_expert` | `BADGE blue. Blue denim cap. Head turned slightly to one side, one front paw raised pointing off to that side, a big bold yellow arrow beside the head pointing the same way, ears perked up high.` |
 
 ## Что пришло с прогона 2026-09-04
 
