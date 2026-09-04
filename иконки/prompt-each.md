@@ -111,6 +111,9 @@ fingers, never a glove. There is no badge in a PAW image: no circle, no rays, no
 gradient, just the paw on flat grey background. Everything in the image is in
 sharp focus: there is no depth of field, no blur, and nothing at all behind the
 paw — no second paw, no out-of-focus shape, no object in the background.
+The wrist and the leg behind the paw are SLIM — clearly
+thinner than the paw itself, about half its width — so that the paw stays the
+biggest shape in the image. The leg is never as thick as the paw.
 Show ONLY the paw itself,
 cropped at the wrist: no forearm, no leg, no shoulder, nothing of the rest of
 him. The paw is centred and fills most of the frame — it is the same size in
@@ -182,6 +185,10 @@ no label, no watermark, no border, no frame.
 предплечье уходит к левому краю, и жест отличается только направлением
 большого пальца. Когда рука входила снизу у одной и сверху у другой, две
 кнопки рядом выглядели как разные наборы.
+
+**Запястье тонкое** — вдвое уже самой лапы. Без этого модель рисует ногу
+той же толщины, что и лапа, и на 128 px кадр читается как кусок меха,
+а не как жест.
 
 **Якорь для лапы — лапа, а не морда.** Прогон со стилевым якорем-мордой
 протащил в кадр кепку с ушами, хотя клауза их прямо запрещает: образец
