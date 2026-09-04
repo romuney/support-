@@ -104,10 +104,11 @@ frame: the same cream fur, the same soft studio lighting and the same 3D render
 as the attached references, with soft rounded brown pads. It is a dog's paw, not
 a human hand — broad, with short thick toes and visible pads, never human
 fingers, never a glove. There is no badge in a PAW image: no circle, no rays, no
-gradient, just the paw on flat grey background. Show the paw itself, centred in
-the frame, with no leg behind it or at most a very short stub: the whole shape
-sits fully inside the frame with clear grey background on all four sides, and
-nothing is cut off by any edge.
+gradient, just the paw on flat grey background. Show ONLY the paw itself,
+cropped at the wrist: no forearm, no leg, no shoulder, nothing of the rest of
+him. The paw is centred and fills most of the frame — it is the same size in
+every PAW image, as big as it can be while still leaving clear grey background
+on all four sides, and nothing is cut off by any edge.
 
 Change ONLY this: <ЯЧЕЙКА>
 
@@ -175,7 +176,27 @@ no label, no watermark, no border, no frame.
 кадра», и модель пририсовывает морду к лапе.
 
 `bully_detail` — та же лапа с ручкой над чистым блокнотом: «написать
-подробнее».
+подробнее». Блокнот маленький и лежит под лапой: крупная в кадре именно лапа,
+иначе на 128 px жест теряется среди канцелярии.
+
+**Размер кисти во всех трёх одинаковый**, и держится он двумя вещами:
+клауза требует показать лапу по запястье, без предплечья, а прогон делается
+с уже принятой лапой в `--anchor`. Без первого модель дорисовывает лапе
+целую руку, и палец вверх выходит вдвое мельче пальца вниз — так и было
+на первом прогоне.
+
+## Грусть — ушами и ртом, а не глазами
+
+У `bully_fail` первый прогон дал реалистичные слезящиеся глаза: остальной пак
+мультяшный, а тут вдруг настоящая несчастная собака, и иконка выпадала из
+набора. Модель поняла «sad apologetic face» как задачу нарисовать грусть
+целиком, включая глаза.
+
+Поэтому в подстановке прямо сказано, ЧЕМ грустить: уши вниз, рот скорбной
+чертой, **а глаза остаются как на референсах** — огромные, круглые, глянцевые,
+с теми же бликами, не реалистичные и не заплаканные. Это общее правило пака:
+у выражения есть носители, и глаза в них не входят — их размер и форма
+и есть узнаваемость персонажа.
 
 ## Светло-серая плашка и вырезание фона
 
@@ -201,11 +222,11 @@ no label, no watermark, no border, no frame.
 |---|---|
 | `bully_ready` | `BADGE blue. Blue denim cap. Chin lifted proudly, chest puffed up, wide happy open smile, one front paw raised in a confident presenting gesture. Nothing else in the image.` |
 | `bully_done` | `BADGE green. GREEN denim cap. Eyes closed in a satisfied happy smile, a big bright white check mark beside the head inside the badge.` |
-| `bully_fail` | `BADGE red. RED denim cap. Ears drooping down, sad apologetic face, a big bright white cross mark beside the head inside the badge.` |
+| `bully_fail` | `BADGE red. RED denim cap. Sad apologetic face, ears drooping down, mouth a small unhappy line — the sadness is in the ears and the mouth, NOT in the eyes. The eyes stay exactly as in the attached references: huge, round, glossy, cartoon dark-brown eyes with the same big white highlights. They are not realistic dog eyes, not watery, not teary, not wrinkled, not narrowed. A big bright white cross mark beside the head inside the badge.` |
 | `bully_hi` | `BADGE blue. Blue denim cap. One front paw raised high beside the head waving hello, big warm open smile, ears perked up. Nothing else in the image.` |
 | `bully_helpful` | `PAW. A big thumbs-up made with one front paw: the paw held upright, the side toe sticking straight up like a thumb, the other toes curled in, pads facing forward. Confident and friendly.` |
 | `bully_not_helpful` | `PAW. A big thumbs-down made with one front paw: the paw held upside down, the side toe pointing straight down like a thumb, the other toes curled in. Nothing else in the image.` |
-| `bully_detail` | `PAW. One front paw holding a short thick yellow pen upright and writing on a small blank white notepad, seen close up. The notepad is blank: no writing, no lines, no letters on it.` |
+| `bully_detail` | `PAW. One front paw holding a short thick yellow pen upright and writing on a small blank white notepad. The paw is the biggest thing in the image and the notepad is small beneath it. The notepad is blank: no writing, no lines, no letters on it.` |
 | `bully_search` | `BADGE blue. Blue denim cap. Holding a big magnifying glass up in front of one eye, that eye hugely magnified through the lens, the other eye normal size, focused curious expression.` |
 | `bully_high` | `BADGE green. GREEN denim cap. Calm confident closed-mouth smile, eyes bright and steady, ears perked up, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
 | `bully_mid` | `BADGE amber-yellow. AMBER-YELLOW denim cap. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line, one ear up and one ear half down. Nothing else in the image at all: no object, no raised paws, no symbol.` |
