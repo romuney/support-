@@ -2,6 +2,7 @@
 """Прогон задания через Nano Banana (Gemini Image API) без ручной возни.
 
     python3 generate.py prompt-pack.md --out sheet-d.png
+    python3 generate.py prompt-each.md --each --out raw/
 
 Промпты уже лежат в репозитории (`prompt-pack.md`, `prompt-stickers.md`,
 `prompt-typing-gif.md`), референсы — рядом, нарезка делается `slice_grid.py`.
@@ -23,6 +24,10 @@
 * **Готовый файл не перезаписывается.** Лист стоит денег и минут ожидания,
   а имена вроде `sheet-c.jpg` уже разобраны в `prompt-pack.md`. Перезапись —
   только явным `--force`.
+
+* **`--each` не перегенерирует готовое.** Пачка — это шестнадцать оплаченных
+  прогонов, и повтор всей пачки ради одной неудачной иконки ровно то, от чего
+  уходили с листа. Перекатить одну — удалить файл и позвать с `--only`.
 
 Ключ — в `.env` (он в `.gitignore`) или в переменной окружения `GEMINI_API_KEY`.
 Где его взять — в README, раздел «Ключ к API».
@@ -52,6 +57,14 @@ DEFAULT_MODEL = "gemini-3-pro-image"
 
 DEFAULT_REFS = ["bulli-ref.png", "bully-style-ref.png"]
 
+# Фраза из `prompt-stickers.md`: она и есть приём, которым держится стиль
+# поштучных прогонов — второй образец подтверждает, что первый не случайность.
+ANCHOR_NOTE = (
+    "The last attached image is an already approved image from this exact set. "
+    "Match its style, its lighting, its background and its framing exactly: the "
+    "new image must look like it came from the same run as that one."
+)
+
 MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".webp": "image/webp"}
 
@@ -63,6 +76,42 @@ def read_prompt(path):
     if not blocks:
         sys.exit(f"{path}: не нашёл блока ``` с промптом")
     return blocks[0].strip()
+
+
+# Строка таблицы подстановок: | `имя` | `текст` |. Имя и текст в обратных
+# кавычках — так они уже записаны в `prompt-each.md` и `prompt-stickers.md`,
+# и по кавычкам строки таблицы отличаются от её шапки и разделителя.
+ROW = re.compile(r"^\|\s*`([^`|]+)`\s*\|\s*`([^`]+)`\s*\|\s*$", re.M)
+
+# Место подстановки в шаблоне: `Change ONLY this: <ЯЧЕЙКА>`. Плейсхолдер
+# заменяется целиком, а строка вокруг него не пересобирается — иначе съедается
+# пустая строка перед следующим абзацем, и два абзаца промпта слипаются в один.
+# Имя внутри скобок разное (`<ЯЧЕЙКА>`, `<ПОЗА>`), поэтому оно не фиксируется.
+SLOT = re.compile(r"(Change ONLY this:[ \t]*)<[^<>\n]+>")
+
+
+def read_rows(path):
+    """Таблица `| имя | подстановка |` из markdown-задания."""
+    rows = ROW.findall(Path(path).read_text(encoding="utf-8"))
+    if not rows:
+        sys.exit(f"{path}: не нашёл таблицы вида | `имя` | `подстановка` |")
+    names = [n for n, _ in rows]
+    doubled = {n for n in names if names.count(n) > 1}
+    if doubled:
+        # Имя эмодзи в Mattermost меняется только пересозданием, и молча
+        # затирать одну картинку другой того же имени нельзя.
+        sys.exit(f"{path}: имена повторяются: {', '.join(sorted(doubled))}")
+    return rows
+
+
+def fill(template, cell):
+    """Подстановка строки ячейки в шаблон, ровно в одно место."""
+    filled, n = SLOT.subn(lambda m: m.group(1) + cell.replace("\\", "\\\\"),
+                          template, count=1)
+    if n != 1:
+        sys.exit("в шаблоне нет места «Change ONLY this: <…>» — "
+                 "подставлять некуда")
+    return filled
 
 
 def load_key(env_file):
@@ -131,13 +180,61 @@ def images_and_text(data):
     return images, words
 
 
+def run(prompt, refs, out, a, key):
+    """Один прогон: собрать тело, отправить, разложить картинки по файлам."""
+    parts = [{"text": prompt}] + [part_from_image(r) for r in refs]
+    body = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "imageConfig": {"aspectRatio": a.aspect, "imageSize": a.size},
+        },
+    }
+
+    head = prompt.splitlines()[0] if prompt.splitlines() else ""
+    print(f"→ {out}", file=sys.stderr)
+    print(f"  {a.model}, {a.size} {a.aspect}, промпт {len(prompt)} символов, "
+          f"референсы: {', '.join(refs) or 'нет'}", file=sys.stderr)
+    print(f"  первая строка: {head[:70]}", file=sys.stderr)
+
+    if a.dry_run:
+        print(f"  тело {len(json.dumps(body))} байт, частей {len(parts)}, "
+              f"generationConfig={json.dumps(body['generationConfig'])}",
+              file=sys.stderr)
+        return True
+
+    images, words = images_and_text(call(a.model, body, key, a.timeout))
+    for line in words:
+        print(f"  модель: {line.strip()[:200]}", file=sys.stderr)
+    if not images:
+        print("  картинки в ответе нет", file=sys.stderr)
+        return False
+
+    # Больше одной картинки за прогон модель отдаёт редко, но если отдала —
+    # молча выбросить лишние нельзя: нужная могла прийти второй.
+    out.parent.mkdir(parents=True, exist_ok=True)
+    for i, blob in enumerate(images):
+        path = out if i == 0 else out.with_name(f"{out.stem}-{i + 1}{out.suffix}")
+        path.write_bytes(blob)
+        print(f"{path} — {len(blob) // 1024} КБ")
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="прогон задания из markdown через Gemini Image API")
     ap.add_argument("task", help="файл задания (prompt-pack.md) либо --text")
     ap.add_argument("--text", action="store_true",
                     help="считать аргумент готовым промптом, а не путём к md")
-    ap.add_argument("--out", default="sheet.png", help="куда положить лист")
+    ap.add_argument("--each", action="store_true",
+                    help="пачкой: шаблон задания плюс таблица подстановок, "
+                         "по прогону на строку; --out тогда папка")
+    ap.add_argument("--only", help="в пачке — только эти имена, через запятую")
+    ap.add_argument("--anchor", help="в пачке — принятая картинка из этой же "
+                                     "пачки: прикладывается последним "
+                                     "референсом и держит стиль остальных")
+    ap.add_argument("--out", default="sheet.png",
+                    help="файл, а с --each — папка (по умолчанию raw/)")
     ap.add_argument("--ref", action="append",
                     help="референс; можно несколько. По умолчанию "
                          + " и ".join(DEFAULT_REFS))
@@ -149,50 +246,62 @@ def main():
     ap.add_argument("--env", default="../.env", help="файл с GEMINI_API_KEY")
     ap.add_argument("--timeout", type=int, default=300,
                     help="секунд на ответ; лист 4K модель делает минутами")
-    ap.add_argument("--force", action="store_true", help="перезаписать --out")
+    ap.add_argument("--force", action="store_true",
+                    help="перезаписать готовое (в пачке — всю пачку целиком)")
     ap.add_argument("--dry-run", action="store_true",
                     help="показать, что отправится, и не отправлять")
     a = ap.parse_args()
 
-    out = Path(a.out)
-    if out.exists() and not a.force:
-        sys.exit(f"{out} уже есть. Перезаписать — --force, иначе задать --out")
+    if a.each and a.text:
+        sys.exit("--each и --text вместе не имеют смысла: пачка берётся из md")
 
-    prompt = a.task if a.text else read_prompt(a.task)
-    refs = [] if a.no_ref else (a.ref or DEFAULT_REFS)
-    parts = [{"text": prompt}] + [part_from_image(r) for r in refs]
+    refs = [] if a.no_ref else list(a.ref or DEFAULT_REFS)
+    key = None if a.dry_run else load_key(a.env)
 
-    body = {
-        "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"],
-            "imageConfig": {"aspectRatio": a.aspect, "imageSize": a.size},
-        },
-    }
+    if not a.each:
+        out = Path(a.out)
+        if out.exists() and not a.force:
+            sys.exit(f"{out} уже есть. Перезаписать — --force, иначе задать --out")
+        prompt = a.task if a.text else read_prompt(a.task)
+        sys.exit(0 if run(prompt, refs, out, a, key) else 1)
 
-    head = prompt.splitlines()[0] if prompt.splitlines() else ""
-    print(f"модель {a.model}, {a.size} {a.aspect}", file=sys.stderr)
-    print(f"промпт {len(prompt)} символов, первая строка: {head[:70]}", file=sys.stderr)
-    print(f"референсы: {', '.join(refs) or 'нет'}", file=sys.stderr)
+    template = read_prompt(a.task)
+    rows = read_rows(a.task)
+    if a.only:
+        want = [n.strip() for n in a.only.split(",") if n.strip()]
+        known = {n for n, _ in rows}
+        missing = [n for n in want if n not in known]
+        if missing:
+            sys.exit(f"{a.task}: нет строк {', '.join(missing)}")
+        rows = [(n, c) for n, c in rows if n in want]
 
-    if a.dry_run:
-        print(f"тело запроса: {len(json.dumps(body))} байт, частей {len(parts)}, "
-              f"generationConfig={json.dumps(body['generationConfig'])}",
-              file=sys.stderr)
-        return
+    prompt_tail = ""
+    if a.anchor:
+        anchor = Path(a.anchor)
+        if not anchor.is_file():
+            sys.exit(f"--anchor {anchor}: файла нет. Сначала прогнать одну "
+                     f"иконку без --anchor и убедиться, что стиль устоял")
+        refs = refs + [str(anchor)]
+        prompt_tail = "\n\n" + ANCHOR_NOTE
 
-    images, words = images_and_text(call(a.model, body, load_key(a.env), a.timeout))
-    for line in words:
-        print(f"модель: {line}", file=sys.stderr)
-    if not images:
-        sys.exit("картинки в ответе нет — смотреть строки «модель:» выше")
+    outdir = Path("raw" if a.out == "sheet.png" else a.out)
+    done = failed = skipped = 0
+    for i, (name, cell) in enumerate(rows, 1):
+        out = outdir / f"{name}.png"
+        if out.exists() and not a.force:
+            print(f"[{i}/{len(rows)}] {name}: уже есть, пропуск", file=sys.stderr)
+            skipped += 1
+            continue
+        print(f"[{i}/{len(rows)}] {name}", file=sys.stderr)
+        if run(fill(template, cell) + prompt_tail, refs, out, a, key):
+            done += 1
+        else:
+            failed += 1
 
-    # Больше одной картинки за прогон модель отдаёт редко, но если отдала —
-    # молча выбросить лишние нельзя: лист мог прийти вторым.
-    for i, blob in enumerate(images):
-        path = out if i == 0 else out.with_name(f"{out.stem}-{i + 1}{out.suffix}")
-        path.write_bytes(blob)
-        print(f"{path} — {len(blob) // 1024} КБ")
+    print(f"готово {done}, пропущено {skipped}, не вышло {failed}", file=sys.stderr)
+    # Неудачные не роняют пачку на первой же ошибке — остальные всё равно
+    # нужны, а перекатить одну дешевле, чем гнать шестнадцать заново.
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":
