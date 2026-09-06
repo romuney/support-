@@ -4866,8 +4866,12 @@ line('66. ССЫЛКА НА ОТЧЁТ: КЛЮЧ РЕЗОЛВИТ КОД, ПЕР
   check('угадывать отчёт запрещено прямо', /Не угадывай отчёт/.test(permaWords));
 
   const unknownWords = words(unknown, null);
-  check('про неизвестный ключ сказано, что отчёта в базе нет',
-    /КЛЮЧ ССЫЛКИ «37519» В БАЗЕ НЕ ЗАВЕДЁН/.test(unknownWords));
+  check('про неизвестный ключ сказано, что сопоставить не удалось',
+    /КЛЮЧ ССЫЛКИ «37519» В МОСТЕ НЕ ЗАВЕДЁН/.test(unknownWords));
+  // Материалов по отчёту нет — только тогда можно утверждать, что отчёта
+  // в базе нет. Это ветка «нечего читать», и она честная.
+  check('и раз материалов нет — сказано, что отчёта в базе нет',
+    /Так и скажи — «этого отчёта в базе знаний нет»/.test(unknownWords));
 
   // Старая заметка «спрашивают про отчёт, а его нет» не должна дублировать
   // новые: они говорят то же самое, но точнее.
@@ -4923,6 +4927,146 @@ line('66. ССЫЛКА НА ОТЧЁТ: КЛЮЧ РЕЗОЛВИТ КОД, ПЕР
   });
   check('про пермалинк сказано, что заводить нечего',
     taskPerma.kb_tasks.some((t) => /Заводить в мост нечего/.test(t)));
+}
+
+
+// ===================================================================== 67
+line('67. ССЫЛКА — ФАКТ, УПОМИНАНИЕ — ФОН; СВОЯ КАРТОЧКА — НЕ ЛЮБАЯ');
+{
+  const P = (trigger) => runPlan(
+    JSON.stringify({ domains: [], articles: [], dd: [], no_question: false }),
+    REGISTRY, trigger);
+
+  // ССЫЛКА ЗАКАЗЧИКА ПЕРЕБИВАЕТСЯ УПОМИНАНИЕМ В ТРЕДЕ — самый дорогой отказ
+  // этой правки, и он тихий сразу с двух сторон. Мост неполон (13 строк),
+  // и как только ключа формы в нём нет, резолв забирал себе ЛЮБОЙ известный
+  // ключ, помянутый в тексте: бот уверенно называл чужой отчёт и говорил
+  // про него «совпадение ключа однозначно». Заодно пропадала задача
+  // «завести строку на ключ формы» — очередь недосчитывалась ровно тех
+  // обращений, ради которых мост и заводили.
+  const hijack = P({
+    report_url: 'https://proteus.tcsbank.ru/superset/dashboard/25976/',
+    question: 'В отчёте не те цифры. Раньше смотрели dashboard/19710, там было верно',
+  });
+  check('ссылка из формы не перебивается упоминанием в тексте',
+    hijack.report_link_key === '25976' && hijack.report_link_outcome === 'unknown');
+  check('и отчёт по чужому ключу не подставлен', hijack.report_link_id === '');
+
+  // Пермалинк в форме — тот же случай: он НЕ резолвится, но и не уступает
+  // очередь тексту. Заказчик обязан услышать про свою ссылку, а не про чужую.
+  const hijackPerma = P({
+    report_url: 'https://proteus.tcsbank.ru/superset/dashboard/p/g9869Z4P3JN/',
+    question: 'похоже на то, что в dashboard/19710',
+  });
+  check('пермалинк из формы тоже не уступает тексту',
+    hijackPerma.report_link_outcome === 'permalink');
+
+  // А там, где разбирать больше нечего, короткая форма работает — ровно
+  // ради этого блок и писался.
+  check('без ссылки в форме упоминание всё ещё резолвится',
+    P({ question: 'смотрю dashboard/19710' }).report_link_id === 'r-attendance-calendar');
+
+  // СЛУЖЕБНЫЕ ПУТИ SUPERSET дашбордом не являются: /dashboard/list/ — это
+  // меню, /dashboard/new/ — создание. Исход `unknown` на них означал бы
+  // «отчёт существует, но не описан» и задачу завести строку моста на `list`.
+  for (const svc of ['list', 'new']) {
+    check(`служебный путь /dashboard/${svc}/ ключом не считается`,
+      P({ report_url: `https://proteus.tcsbank.ru/superset/dashboard/${svc}/` })
+        .report_link_outcome === '');
+  }
+
+  // СТРОКА МОСТА ПРИЗНАЁТСЯ ПО ФОРМЕ. В секции сорок строк прозы, и таблица
+  // на две колонки — такая, какая уже стоит в «Маршрутах», — разобралась бы
+  // мостом: вторая колонка стала бы id отчёта. Валидатор её не видит вовсе,
+  // он ищет таблицу по шапке колонок.
+  const poisoned = REGISTRY.replace(
+    '| ключ ссылки | id отчёта | проверено |',
+    '| слово | почему выброшено |\n|---|---|\n| 19710 | совпало на чужом отчёте |\n\n' +
+    '| ключ ссылки | id отчёта | проверено |');
+  const clean = runPlan(
+    JSON.stringify({ domains: [], articles: [], dd: [], no_question: false }),
+    poisoned, { report_url: 'https://proteus.tcsbank.ru/superset/dashboard/19710' });
+  check('пояснительная таблица в прозе секции мостом не становится',
+    clean.report_link_id === 'r-attendance-calendar');
+
+  // КАРТОЧКА ЧУЖОГО ОТЧЁТА НЕ СЧИТАЕТСЯ ЗА СВОЮ. Роутер называет отчёты сам,
+  // и проверка «в ddOk есть что-то типа report» засчитывала карточку соседа:
+  // автору говорили «владелец в блоке МЕТАДАННЫЕ КАТАЛОГА», а там владелец
+  // другого дашборда. Неверное имя владельца хуже отсутствующего.
+  const known = P({ report_url: 'https://proteus.tcsbank.ru/superset/dashboard/hr-executive-report' });
+  const foreign = 'urn:dd:reports:reports:report:1728';
+  const mats = (ddUrns) => runMaterials(
+    { ...known, dd: ddUrns.map((urn) => ({ urn, hint: '' })) },
+    known.files.map(() => ({ content: b64('# статья') })),
+    ddUrns.map((urn) => ({ dd_meta: 'ОБЪЕКТ DD: отчёт ' + urn + '\nВЛАДЕЛЕЦ ОТЧЁТА: кто-то' })),
+  ).materials;
+
+  check('своя карточка засчитана',
+    /Карточка отчёта из каталога — в блоке МЕТАДАННЫЕ КАТАЛОГА/
+      .test(mats([known.report_link_urn])));
+  check('чужая карточка за свою НЕ засчитана',
+    /Карточка отчёта из каталога НЕ доехала/.test(mats([foreign])));
+  check('и владельца в этом случае называть запрещено',
+    /Владельца и канал поддержки не называй/.test(mats([foreign])));
+
+  // «КЛЮЧ НЕ СОПОСТАВЛЕН» И «ОТЧЁТА В БАЗЕ НЕТ» — РАЗНЫЕ ВЕЩИ.
+  // Мост неполон по построению, у отчёта бывает несколько ключей, и отчёт
+  // мог приехать в материалы по названию: роутер находит его по алиасам.
+  // Заявить в этот момент «этого отчёта в базе знаний нет» значит соврать,
+  // имея статью на руках.
+  const unknownWithArticle = runPlan(
+    JSON.stringify({ domains: [], articles: ['r-hr-executive-report'], dd: [], no_question: false }),
+    REGISTRY, { report_url: 'https://proteus.tcsbank.ru/superset/dashboard/37519/' });
+  const wordsWithArticle = runMaterials(
+    unknownWithArticle,
+    unknownWithArticle.files.map(() => ({ content: b64('# статья\n\n## Назначение\nтекст') })),
+    null,
+  ).materials;
+  // Проверяется УТВЕРЖДЕНИЕ, а не подстрока: сама фраза в заметке есть —
+  // но под запретом («НЕ пиши …»), и это ровно то, чего мы хотим.
+  check('ключ не сопоставлен, а статья есть — утверждения «отчёта нет» нет',
+    !/Так и скажи — «этого отчёта в базе знаний нет»/.test(wordsWithArticle));
+  check('и фраза стоит под запретом',
+    /НЕ пиши «этого отчёта в базе знаний нет»/.test(wordsWithArticle));
+  check('и автору сказано отвечать по материалам',
+    /отчёт в материалах ЕСТЬ/.test(wordsWithArticle));
+
+  // Задача джуну в этом случае не должна велеть завести ВТОРУЮ строку
+  // сущности, которая уже есть.
+  const parseJs = js('Parse answer');
+  const task = (mat) => new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'Build materials') return { first: () => ({ json: mat }) };
+      if (name === 'When called by adapter') {
+        return { first: () => ({ json: { question: 'вопрос', mode: 'channel' } }) };
+      }
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      throw new Error('node not executed: ' + name);
+    },
+    { output: 'ЧЕРНОВИК ОТВЕТА:\nтекст\nУВЕРЕННОСТЬ: средняя' },
+  )[0].json.kb_tasks;
+
+  const base = { materials: 'x', has_materials: true, tables: [],
+                 asks_report: true, report_link_outcome: 'unknown',
+                 report_link_key: '37519' };
+  check('отчёт в базе есть — задача только про строку моста',
+    task({ ...base, report_seen: true }).some((t) => /не хватает только этой строки/.test(t)));
+  check('отчёта нет — задача называет и строку «Сущности»',
+    task({ ...base, report_seen: false }).some((t) => /Отчёта нет и в «Сущности»/.test(t)));
+
+  // ДОБОР КАРТОЧКИ КОДОМ ВИДЕН В ТРАССЕ. Иначе единственное, что код
+  // добирает по ссылке, остаётся невидимым, и разбор прогона не отличит
+  // «роутер угадал отчёт» от «резолв сработал».
+  check('карточка, добранная по ссылке, названа добором кода',
+    known.dd_added_by_code.includes(known.report_link_urn));
+  const byRouter = runPlan(
+    JSON.stringify({ domains: [], articles: [],
+                     dd: [{ urn: 'urn:dd:reports:reports:report:1845', hint: '' }],
+                     no_question: false }),
+    REGISTRY, { report_url: 'https://proteus.tcsbank.ru/superset/dashboard/hr-executive-report' });
+  check('а названная роутером — не приписана коду',
+    !byRouter.dd_added_by_code.includes('urn:dd:reports:reports:report:1845'));
+  check('и всё равно стоит первой', byRouter.dd[0].urn === 'urn:dd:reports:reports:report:1845');
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

@@ -235,11 +235,22 @@ def read_article_keys():
         if not m:
             continue
         url = m.group(1).strip()
-        k = re.search(r"/superset/dashboard/(p/[A-Za-z0-9_-]+|[A-Za-z0-9_-]+)", url)
+        # Форма ключа — дословно та же, что в REPORT_LINK_RE ядра
+        # (bot/build_time_flows.py): `/superset` необязателен, «dashboard/»
+        # отделено слева границей, регистр не важен. Копия, требовавшая
+        # `/superset/`, молча не видела короткую форму ссылки в статье —
+        # и сверка с каталогом на ней не работала вовсе.
+        k = re.search(r"(?:^|[^A-Za-z0-9_.-])dashboard/(p/[A-Za-z0-9_-]+|[A-Za-z0-9_-]+)",
+                      url, re.I)
         if not k:
             continue
         raw = k.group(1)
-        keys[c[0]] = raw[2:] if raw.startswith("p/") else raw
+        # Префикс `p/` СОХРАНЯЕТСЯ: пермалинк — не ключ отчёта, и сверке
+        # это надо знать. Без него пермалинк из статьи выглядел как второй
+        # ключ того же отчёта, и фаза K печатала «расхождение, заводите обе
+        # строки» — то есть предлагала завести в мост пермалинк, который
+        # валидатор оттуда же и выбрасывает.
+        keys[c[0]] = raw
     return {k: v for k, v in keys.items() if v}
 
 
@@ -2133,9 +2144,21 @@ asked.forEach((a, i) => {
       continue;
     }
     const inArticle = FROM_ARTICLES[a.id];
-    const row = `| ${parsed.key} | ${parsed.kind} | ${a.id} | __TODAY__ |`;
-    if (inArticle && inArticle !== parsed.key) {
-      conflict.push(`${a.id}: в статье «${inArticle}», каталог отдал «${parsed.key}»\n    ${row}`);
+    // ТРИ колонки, дословно как в таблице «Ссылки отчётов»: `ключ ссылки |
+    // id отчёта | проверено`. Вид ключа виден из самого ключа и в реестре
+    // не хранится — четвёртая колонка ломала бы вставку «как есть»
+    // (валидатор считает ячейки и ругается на несовпадение с шапкой).
+    const row = `| ${parsed.key} | ${a.id} | __TODAY__ |`;
+    if (inArticle && /^p\//.test(inArticle)) {
+      // В статье ПЕРМАЛИНК — это не второй ключ отчёта, а адрес состояния
+      // дашборда. Расхождением это не является: в мост идёт одна строка,
+      // из каталога.
+      ready.push(row);
+      perma.push(`${a.id} — в статье пермалинк ${inArticle.slice(2)}, в мост он ` +
+        `не идёт; каталог отдал ${parsed.kind} «${parsed.key}» — он и заведён выше`);
+    } else if (inArticle && inArticle !== parsed.key) {
+      conflict.push(`${a.id}: в статье «${inArticle}», каталог отдал ` +
+        `${parsed.kind} «${parsed.key}»\n    ${row}`);
     } else {
       ready.push(row);
     }
@@ -2148,8 +2171,8 @@ say(`Спрошено отчётов: ${asked.length}, ответов: ${res.len
 say('');
 say('--- ГОТОВЫЕ СТРОКИ для таблицы «Ссылки отчётов» в kb/index.md ---');
 if (ready.length) {
-  say('| ключ | вид | id отчёта | проверено |');
-  say('|---|---|---|---|');
+  say('| ключ ссылки | id отчёта | проверено |');
+  say('|---|---|---|');
   for (const r of ready.sort()) say(r);
 } else {
   say('  ни одной. Смотрите списки ниже — там сказано почему.');
