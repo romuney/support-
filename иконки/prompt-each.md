@@ -76,19 +76,22 @@ NOT zoom out, do NOT show a full body, do NOT make the head smaller.
 
 THE CAP: the same worn denim baseball cap, the same shape, the same soft fabric,
 with the same white embroidered word "CROSS" on the front, big and clearly
-legible. ONLY the dye colour of the fabric changes, exactly as listed below. The
-embroidery stays white and readable on any colour. The word "CROSS" is the only
+legible. ONLY the dye colour of the fabric changes, exactly as listed below.
+The cap is always a DEEPER shade than the badge behind it — clearly darker, so
+it stands out against it and never melts into it. The embroidery stays white
+and readable on any colour. The word "CROSS" is the only
 text anywhere in the image: no other letters, no other words. Marks that are
 symbols, not text — a check mark, a cross mark, an exclamation mark inside a
 warning triangle, an arrow — are fine where listed.
 
 THE OBJECT: where an object is listed, it is FLAT MATTE WHITE — pure white,
 whatever colour such a thing would normally be — so that it stays visible on
-any badge colour. It is BIG: at least HALF the diameter of the badge, simple
-and low on detail, a silhouette rather than a drawing, so that it still reads
-when the image is shrunk to 21 x 21 pixels. It sits beside the muzzle in the
-lower half of the badge, it never covers the eyes or the cap, and it is the
-ONLY extra object. Where nothing else is listed, the image contains the
+any badge colour. It is about ONE THIRD of the diameter of the badge — big enough
+to read when the image is shrunk to 21 x 21 pixels, small enough that it never
+makes the head smaller. Simple and low on detail, a silhouette rather than
+a drawing. It sits in the lower half of the badge beside the muzzle, in FRONT
+of him, and it may overlap his jowl or his chin; it never covers his eyes or
+his cap, it never pushes him back or down, and it is the ONLY extra object. Where nothing else is listed, the image contains the
 character alone.
 
 THE BADGE: where the line below starts with the word BADGE and a colour, the
@@ -98,31 +101,44 @@ centred, its diameter about nine tenths of the width of the image, leaving only
 a thin margin of grey background at the four corners. Nothing is drawn outside
 the circle, and nothing sticks out of it.
 
-The inside of the badge is not flat. It is a soft radial gradient of that one
-colour — lighter and warmer in the middle, behind the head, deeper and more
-saturated towards the rim — with a few wide, soft, blurred sunburst rays in a
-slightly lighter shade of the same colour fanning out from behind the head. The
-rays are diffuse like sunlight through haze, with blurred edges and low
-contrast: NOT sharp geometric spokes, NOT hard-edged lines, NOT a striped
-pattern. They stay entirely INSIDE the circle, they never touch or cross the rim
-and they never stick out of it. A thin lighter rim of the same colour runs
-around the inside edge of the badge. All of it stays low in contrast, so that
-shrunk to 128 x 128 pixels the badge still reads as one clear solid colour.
+The badge is LIGHT and airy, never dark and never heavy: the colour named
+below is its colour, and behind his head it lifts a shade lighter still, like
+a soft studio backdrop. A thin ring one shade deeper runs around the very edge,
+and that ring is the only hard edge in it. There may be a few very wide, very
+soft rays a shade lighter than the field, spreading from behind his head — but
+they are barely there, blurred and low in contrast: never dark wedges, never
+sharp spokes, never a second colour, never white. Shrunk to 21 x 21 pixels the
+whole badge must read as one clear light colour and not as a pattern. Nothing
+else is drawn inside the circle. A thin darker ring of the same colour runs around the
+outer edge of the badge, and that ring is the only detail in it. All of it
+stays low in contrast, so that shrunk to 21 x 21 pixels the badge reads as one
+clear solid colour.
 
 THE HEAD IS BIGGER THAN THE BADGE AND THE BADGE CROPS IT. He is framed like a
 portrait in a round frame, not like a small figure standing on a coloured disc.
-Measured across the ear tips his head is nearly as wide as the whole badge —
-about nine tenths of the badge's diameter, which is about eight tenths of the
-width of the image — and the brim of his cap spans about seven tenths of the
-badge. The crown of his cap and the tips of both ears reach the rim and are
-CUT OFF by it — the badge is in front of them and they simply end where it
-ends. His eyes sit on the horizontal centre line of the badge, his muzzle
-covers its middle, his chin reaches into its lower third, and below the chin
-at most the top of his chest shows before the badge ends. There is NO ring of
-empty badge colour above his cap: going down from the top of the badge, the
-very next thing is his cap. Do NOT shrink him to fit inside the circle, do NOT
-leave an even margin of badge colour around him, do NOT zoom out to show his
-shoulders or his whole body. Where a mark or an object is
+Place him by these landmarks, and check every one of them:
+
+- the tip of his LEFT ear touches the rim of the badge at about 10 o'clock;
+- the tip of his RIGHT ear touches the rim at about 2 o'clock;
+- the crown of his cap touches the rim at 12 o'clock, and the rim CUTS the top
+  of the cap off — the badge is in front of him and he simply ends where it
+  ends;
+- his eyes sit on the horizontal centre line of the badge;
+- his jowls almost touch the rim on the left and on the right at 9 and
+  3 o'clock;
+- his chin and the very top of his chest run off the BOTTOM of the badge and
+  are cut off by the rim there too.
+
+The simplest way to get this right: draw him FIRST, at exactly the size and
+crop he has in the attached portrait — that close, that big, filling the frame
+the same way — and only then put the badge in BEHIND him. The badge does not
+change his size at all. It is a round window he is leaning through, and the
+window is SMALLER than his head, so it crops him top, left and right.
+
+There is NO ring of empty badge colour anywhere around him — going inward from
+the rim at the top, the very next thing is his cap. Do NOT shrink him to fit
+inside the circle, do NOT leave a margin of badge colour around him, do NOT
+zoom out to show his shoulders, his front legs or his whole body. Where a mark or an object is
 listed, it sits inside the circle in the lower half, beside the muzzle.
 
 Where the line below does not start with BADGE, there is no badge at all: no
@@ -350,42 +366,50 @@ no label, no watermark, no border, no frame.
 
 | файл | `<ЯЧЕЙКА>` |
 |---|---|
-| `bully_ready` | `BADGE deep navy #1B3358 with mid navy #2F5288 rays. Cap dyed denim blue #596B88. Chin lifted proudly, wide happy open smile, one front paw raised in a confident presenting gesture. No object.` |
-| `bully_done` | `BADGE deep green #17583A with mid green #2E9E5B rays. Cap dyed green #698366. Eyes closed in a satisfied happy smile, a big flat WHITE check mark beside the muzzle in the lower half of the badge.` |
-| `bully_fail` | `BADGE deep red #7E241F with mid red #D2453F rays. Cap dyed red #CB5251. Sad apologetic face: mouth a small unhappy downturned line, eyebrows pulled up in the middle, head dipped slightly. The ears stay big and upright exactly as in the references, and the eyes stay exactly as in the references — huge, round, glossy, cartoon dark-brown with the same big white highlights. They are not realistic dog eyes, not watery, not teary, not narrowed. A big flat WHITE cross mark beside the muzzle in the lower half of the badge.` |
-| `bully_hi` | `BADGE deep navy #1B3358 with mid navy #2F5288 rays. Cap dyed denim blue #596B88. One front paw raised high beside the muzzle waving hello, big warm open smile. No object.` |
+| `bully_ready` | `BADGE soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Chin lifted proudly, wide happy open smile, one front paw raised in a confident presenting gesture. No object.` |
+| `bully_done` | `BADGE light sage green #89A074. Cap dyed deeper green #698265. Eyes closed in a satisfied happy smile, a big flat WHITE check mark beside the muzzle in the lower half of the badge.` |
+| `bully_fail` | `BADGE light warm red #CA6660. Cap dyed deeper red #A8504E. Sad apologetic face: mouth a small unhappy downturned line, eyebrows pulled up in the middle, head dipped slightly. The ears stay big and upright exactly as in the references, and the eyes stay exactly as in the references — huge, round, glossy, cartoon dark-brown with the same big white highlights. They are not realistic dog eyes, not watery, not teary, not narrowed. A big flat WHITE cross mark beside the muzzle in the lower half of the badge.` |
+| `bully_hi` | `BADGE soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. One front paw raised high beside the muzzle waving hello, big warm open smile. No object.` |
 | `bully_helpful` | `PAW. The paw makes a big clear thumbs-up: the outer toe stretched straight UP like a thumb, the other toes curled in towards the pad, pads facing forward. Nothing else in the image.` |
 | `bully_not_helpful` | `PAW. The paw makes a big clear thumbs-down: the outer toe stretched straight DOWN like a thumb, the other toes curled in towards the pad, pads facing forward. It is the same paw as the thumbs-up, in the same place and at the same size, turned over — the two differ ONLY in which way that toe points. Nothing else in the image.` |
 | `bully_detail` | `PAW. The paw holds a short thick yellow pencil clamped between two of its toes and pressed against the pad, tilted as if about to write — no fingers grip it, the toes stay short, thick and rounded. Under the tip of the pencil a small blank white notepad lies flat, clearly smaller than the paw. The notepad is completely blank: no writing, no ruled lines, no letters on it.` |
-| `bully_search` | `BADGE deep navy #1B3358 with mid navy #2F5288 rays. Cap dyed denim blue #596B88. Holding up a big magnifying glass with a thick flat WHITE rim and a white handle, at least half the diameter of the badge, in front of one eye; that eye hugely magnified through the clear lens, the other eye normal size, focused curious expression.` |
-| `bully_high` | `BADGE deep green #17583A with mid green #2E9E5B rays. Cap dyed green #698366. Calm confident closed-mouth smile, eyes bright and steady, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
-| `bully_mid` | `BADGE deep amber #9A6412 with mid amber #E09A2B rays. Cap dyed amber #D59F5E. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line. Both ears stay big and upright. Nothing else in the image at all: no object, no raised paws, no symbol.` |
-| `bully_none` | `BADGE deep red #7E241F with mid red #D2453F rays. Cap dyed red #CB5251. Eyes lowered, mouth a small sad apologetic line, head dipped. Both ears stay big and upright. Nothing else in the image at all: no object, no raised paws, no symbol.` |
-| `bully_unknown` | `BADGE cool blue-grey #4F5A6E with mid blue-grey #74829A rays — a grey with a clear cool blue tint, never a neutral or flat grey. Cap dyed plain light grey #BAB5B1, washed out and unpainted. Completely blank puzzled expression, both eyebrows raised high, mouth slightly open, eyes wide and empty. Nothing else in the image at all: no object, no raised paws, no symbol.` |
-| `bully_flag` | `BADGE deep red #7E241F with mid red #D2453F rays. Cap dyed red #CB5251. Alarmed wide-open eyes, mouth open mid-bark, holding a big flat WHITE flag on a short white pole raised beside the muzzle, the flag at least half the diameter of the badge.` |
-| `bully_warn` | `BADGE deep amber #9A6412 with mid amber #E09A2B rays. Cap dyed amber #D59F5E. Worried expression, mouth a flat tense line, both ears still big and upright. A big flat WHITE warning triangle with a bold dark exclamation mark inside it beside the muzzle, at least half the diameter of the badge.` |
-| `bully_lock` | `BADGE deep navy #1B3358 with mid navy #2F5288 rays. Cap dyed denim blue #596B88. Holding a big closed flat WHITE padlock, at least half the diameter of the badge, up just under the chin in both front paws, stern serious expression, one eyebrow raised.` |
-| `bully_expert` | `BADGE deep navy #1B3358 with mid navy #2F5288 rays. Cap dyed denim blue #596B88. Head turned slightly to one side, one front paw raised pointing off to that side, a big bold flat WHITE arrow beside the muzzle pointing the same way, at least half the diameter of the badge.` |
+| `bully_search` | `BADGE soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Holding up a big magnifying glass with a thick flat WHITE rim and a white handle, at least half the diameter of the badge, in front of one eye; that eye hugely magnified through the clear lens, the other eye normal size, focused curious expression.` |
+| `bully_high` | `BADGE light sage green #89A074. Cap dyed deeper green #698265. Calm confident closed-mouth smile, eyes bright and steady, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
+| `bully_mid` | `BADGE light amber #DDA060. Cap dyed deeper amber #C28B48. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line. Both ears stay big and upright. Nothing else in the image at all: no object, no raised paws, no symbol.` |
+| `bully_none` | `BADGE light warm red #CA6660. Cap dyed deeper red #A8504E. Eyes lowered, mouth a small sad apologetic line, head dipped. Both ears stay big and upright. Nothing else in the image at all: no object, no raised paws, no symbol.` |
+| `bully_unknown` | `BADGE light blue-grey #7E9BB8 — clearly BLUE-grey, cool and tinted, never a neutral, flat or silver grey. Cap dyed plain washed-out grey #808790. Washed out and unpainted. Completely blank puzzled expression, both eyebrows raised high, mouth slightly open, eyes wide and empty. Nothing else in the image at all: no object, no raised paws, no symbol.` |
+| `bully_flag` | `BADGE light warm red #CA6660. Cap dyed deeper red #A8504E. Alarmed wide-open eyes, mouth open mid-bark, holding up a WHITE pennant beside the muzzle: a clear TRIANGLE of white cloth on a short white pole, pointing away from him, about a third of the diameter of the badge. It is a triangular signal flag, NOT a rectangle, NOT a square, NOT a sheet of paper, NOT a napkin.` |
+| `bully_warn` | `BADGE light amber #DDA060. Cap dyed deeper amber #C28B48. Worried expression, mouth a flat tense line, both ears still big and upright. A big flat WHITE warning triangle with a bold dark exclamation mark inside it beside the muzzle, at least half the diameter of the badge.` |
+| `bully_lock` | `BADGE soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Holding a big closed flat WHITE padlock, at least half the diameter of the badge, up just under the chin in both front paws, stern serious expression, one eyebrow raised.` |
+| `bully_expert` | `BADGE soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Head turned slightly to one side, one front paw raised pointing off to that side, a big bold flat WHITE arrow beside the muzzle pointing the same way, at least half the diameter of the badge.` |
 
 Цвета не словами, а числом. Прогон 04.09 показал, зачем: на `GREEN`, `RED`
-и `AMBER-YELLOW` модель отвечает болотным, кирпичным и горчичным, и на 21 px
-янтарная плашка от красной уже не отличается — замер по прогону 06.09 даёт
-между `bully_mid` и `bully_none` 21.8 при пороге различимости 22, а это
-две соседние лампочки одного светофора в шапке ответа. Шестнадцатеричные
-коды замерены по паку `out/`, который модель уже рисовала: это не пожелание,
-а её же цвета, названные точно.
+и `AMBER-YELLOW` модель отвечает болотным, кирпичным и горчичным — каждый раз
+своим. Шестнадцатеричные коды замерены **по эталонному прогону 06.09**, тому
+самому, который приняли: это не пожелание, а его же цвета, названные точно.
 
-Три тона одной краски: плашка у ободка — тёмный, лучи и середина —
-средний, кепка — светлый. Разница по яркости между плашкой и кепкой
-держится в 50–90 единиц: меньше — и кепка на плашке тонет.
+**Плашка светлая, кепка темнее её.** Так устроен эталон, и это обратно тому,
+что планировалось в `prompt-pack-v2.md`: там диск был тёмным, а кепка светлой.
+Замер по эталону: кепка темнее плашки на 17–29 единиц яркости.
 
-**Тёмная плашка меняет и эталон, и это решено осознанно.** У `bully_done`
-из прогона 06.09 плашка светло-зелёная, а по этой таблице станет глубокой:
-эталоном он назван за персонажа и кадр — крупную морду, обрезанную ободком, —
-а не за оттенок, и владелец 06.09 выбрал тёмные тона. Светлая плашка стоила
-бы двух вещей сразу: янтарная с красной не разошлись бы на 21 px, и белому
-предмету не на чем было бы читаться. Не возвращать светлые тона «как было
-у эталона» — это не расхождение с ним, а его цена.
+| роль | плашка | кепка | Δ яркости |
+|---|---|---|---|
+| ок | `#89A074` | `#698265` | 29 |
+| с оговорками | `#DDA060` | `#C28B48` | 23 |
+| не ок | `#CA6660` | `#A8504E` | 25 |
+| просто работа | `#6690B5` | `#6A7A8C` | 17 |
+| непонятно | `#8DA3B8` | `#808790` | 25 |
+
+У «непонятно» кепка в самом эталоне отличалась от плашки на 5 единиц
+и на ней тонула; здесь она углублена до тех же 25, что у остальных.
+
+**Тёмную палитру пробовали и отвергли — прогон 07.09.** По замерам она
+выигрывала: янтарная плашка расходилась с красной вернее, белый предмет
+на тёмном контрастнее. Но пак с ней владелец забраковал с одного взгляда:
+«очень тёмные, потеряла лёгкость». Это и есть ответ на вопрос, зачем нужен
+эталон: он задаёт не только кадр и персонажа, но и тональность, а её
+замерами не выводят. Не «улучшать» палитру вглубь: светлая — решение,
+а не недоделка.
 
 Предмет во всех семи ячейках белый. Не потому, что так красивее: замок был
 золотой, треугольник жёлтый, флажок красный, стрелка жёлтая — и на 21 px
@@ -493,6 +517,56 @@ no label, no watermark, no border, no frame.
 на 21 px пары; контактные листы `--sheets` показывают то, что числом
 не берётся, — персонажа, уши и крупность морды.
 
+## Что пришло с прогона 2026-09-07 (`out-badge/`, светлая палитра)
+
+Прогон по исправленному промпту. **Четырнадцать иконок из шестнадцати
+готовы**, на `bully_mid` и `bully_unknown` кончились предоплаченные кредиты
+ключа — API отдал 429 `RESOURCE_EXHAUSTED`. Пополнить в
+[AI Studio → billing](https://ai.google.dev/gemini-api/docs/billing#prepay)
+и добрать две.
+
+Что починилось против прогона 06.09:
+
+* **Персонаж один во всех.** Уши стоячие везде — четырёх гончих, из-за
+  которых пак и смотрели, нет. Замер: разброс крупности головы 0.32 → 0.23,
+  минимум поднялся с 0.68 до 0.77 диаметра плашки при эталонных 0.85.
+* **Кадр по эталону.** Уши упираются в ободок, макушка кепки им обрезана,
+  подбородок уходит за нижний край плашки.
+* **Лапа стала лапой.** Человеческой кисти у `bully_detail` нет: четыре
+  коротких пальца, подушечки, карандаш зажат между ними. Все три входят
+  слева и одного размера — 123×94, 123×94, 124×96.
+* **Предметы белые и крупные**, читаются на плашке реакции.
+
+Три захода на палитру, и это отдельный урок:
+
+1. **Тёмная насыщенная** (`#17583A` и родня). По замерам лучше всех.
+   Забракована владельцем с одного взгляда: «очень тёмные, потеряла
+   лёгкость».
+2. **Светлая по эталону.** Тон совпал: поле `#A0AA8A` при эталонных
+   `#89A074`, яркость 163 против 148.
+3. **Светлая плюс ободок числом в подстановке.** Хуже: ободок не появился,
+   зато морда съехала обратно в мелкую. Клауза перетянула вес с кадра
+   на отделку — откачено. Ободок остался словами, и он слабее эталонного
+   (перепад 8 единиц яркости против 39).
+
+Отсюда правило: **в подстановку добавляют по одной вещи за раз.** Она
+короткая, и каждая новая клауза в ней отнимает вес у остальных — кадр
+ломается там, где правили цвет.
+
+Что осталось нехорошего:
+
+* **`bully_mid` пришёл с обрезанной плашкой** — силуэт заполняет круг на 81 %
+  при 95 % у остальных. Перекатывать.
+* **`bully_unknown` был годен, но удалён под перекат** ради более синей
+  плашки — и замены не пришло. Отсюда правило про `--force` вместо удаления
+  в разделе «Прогон».
+* **`bully_high` и `bully_unknown` расходятся на 44 при пороге 45** — обе
+  бледные, зелёная и сине-серая. Это две лампочки одного светофора, и там
+  предмета нет вовсе. Смотреть после переката `unknown`.
+* **Ободок слабее эталонного.** Диск читается мягким пятном, а не диском
+  с краем. Числом в подстановке не лечится (заход 3); пробовать словами
+  в шаблоне.
+
 ## Прогон
 
 Якорь — **эталон пака**, а не первая попавшаяся иконка прогона: он один
@@ -526,7 +600,13 @@ python3 check_pack.py out-badge --sheets review/
 
 Готовые файлы `--each` не перегенерирует: прогон стоит денег, и повтор всей
 пачки ради одной неудачной иконки — ровно то, от чего уходили с листа. Чтобы
-перекатить одну, файл удаляют и запускают с `--only`.
+перекатить одну, зовут с `--only <имя> --force`.
+
+**Именно `--force`, а не удаление файла.** `run()` пишет картинку только после
+того, как она пришла, поэтому оборвавшийся прогон оставляет старую на месте,
+а удаление — нет. Прогон 07.09: удалили `bully_unknown`, чтобы сделать плашку
+синее, и на этой же команде кончились предоплаченные кредиты. Иконка была
+годная, замены не пришло, в паке осталась дыра.
 
 **Но перекатывать по одной можно только пока правка местная.** Правка
 в шаблоне — кадр, уши, цвет предмета — меняет все шестнадцать, и пак после

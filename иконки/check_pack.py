@@ -38,6 +38,7 @@ Mattermost заменить не даёт, и чтобы перезалить п
 
 import argparse
 import itertools
+import math
 import sys
 from pathlib import Path
 
@@ -48,11 +49,29 @@ from PIL import Image, ImageDraw, ImageFont
 # в списке эмодзи и при наведении.
 REACTION_PX = 21
 
-# Порог различимости на плашке реакции: средняя разница по каналам между
-# двумя иконками, сведёнными к REACTION_PX. Откалиброван по паку out-badge:
-# пара bully_hi / bully_unknown даёт 16.5 и на плашке неразличима, пара
-# bully_helpful / bully_not_helpful даёт 32.6 и различима сразу.
-CONFUSE_MIN = 22.0
+# Порог различимости по ЦВЕТУ ПЛАШКИ: сумма модулей разницы по каналам между
+# средними цветами кольца двух иконок, сведённых к REACTION_PX.
+#
+# Сначала здесь стояла попиксельная разница всего кадра 21x21, и она оказалась
+# ровно неверной меркой: у пака с одинаковым персонажем центр кадра у всех
+# совпадает, разница падает — и проверка ругается тем сильнее, чем лучше пак
+# сведён. Прогон 06.09 (собаки разные) давал 7 «неразличимых» пар,
+# исправленный (собака одна) — 29, хотя цвета в нём разошлись, а не сошлись.
+# Мерка наказывала за то, ради чего пак и переделывали.
+#
+# Меряем поэтому то, что на 21 px и несёт смысл, — цвет плашки: медиану
+# кольца 0.62–0.97 радиуса. Медиану, а не среднее: уши достают до ободка,
+# и кремовая шерсть тянет среднее к себе — синий с зелёным сходились до 55.
+#
+# Порог 45 откалиброван по прогону 07.09 глазами на контактном листе:
+# пары одного цвета по замыслу (bully_hi / bully_search, обе синие) дают
+# 4–21, пары разных цветов (bully_flag красный / bully_warn янтарный)
+# начинаются с 49.
+CONFUSE_MIN = 45.0
+
+# Кольцо, по которому берётся цвет плашки: изнутри — за краем морды, снаружи —
+# не доходя до сглаженного края круга.
+RING_INNER, RING_OUTER = 0.62, 0.97
 
 # Доля вписанного эллипса, заполненная непрозрачным, выше которой силуэт
 # считается плашкой. Замер по трём прогонам — в докстроке roundness().
@@ -79,6 +98,13 @@ SLOTS = {
     "кнопки под ответом":
         ["bully_helpful", "bully_not_helpful", "bully_detail"],
 }
+
+# Слоты, где цвет — единственный сигнал, потому что предмета в иконке нет
+# вовсе. Совпадение цвета здесь ошибка: различать нечем. В остальных слотах
+# один цвет допустим по замыслу — `bully_lock` и `bully_expert` оба синие
+# и разводятся белым замком и белой стрелкой, — и совпадение цвета там лишь
+# повод посмотреть на контактный лист.
+COLOUR_ONLY_SLOTS = {"светофор в шапке ответа"}
 
 MATTERMOST_MAX_BYTES = 1024 * 1024
 ICON_PX = 128
@@ -185,7 +211,34 @@ def at_reaction(im, plate=(240, 241, 244)):
     return list(out.get_flattened_data())
 
 
-def distance(a, b):
+def badge_colour(im):
+    """Цвет плашки на размере реакции — то, что несёт смысл на 21 px.
+
+    Берём кольцо, а не весь кадр: в середине морда, и она у всего пака
+    одинаковая. Медиану, а не среднее: уши доходят до ободка и попадают
+    в кольцо, а кремовая шерсть среднее уводит — у медианы она остаётся
+    меньшинством.
+    """
+    small = im.resize((REACTION_PX, REACTION_PX), Image.LANCZOS)
+    px = small.load()
+    c = (REACTION_PX - 1) / 2
+    ring = []
+    for y in range(REACTION_PX):
+        for x in range(REACTION_PX):
+            r = math.hypot(x - c, y - c) / c
+            if RING_INNER < r < RING_OUTER and px[x, y][3] > 140:
+                ring.append(px[x, y][:3])
+    if not ring:
+        return None
+    return tuple(sorted(v[i] for v in ring)[len(ring) // 2] for i in range(3))
+
+
+def colour_distance(a, b):
+    return sum(abs(p - q) for p, q in zip(a, b))
+
+
+def pixel_distance(a, b):
+    """Попиксельная разница — только для лап: плашки у них нет."""
     n = REACTION_PX * REACTION_PX * 3
     return sum(abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
                for p, q in zip(a, b)) / n
@@ -291,7 +344,7 @@ def main():
     for extra in sorted(on_disk - set(names)):
         warnings.append(f"{extra}.png: лишний файл в папке пака")
 
-    images, reaction = {}, {}
+    images, reaction, colours = {}, {}, {}
     print(f"=== {folder} ===\n")
     print("%-18s %-11s %9s %9s %8s  %s" %
           ("иконка", "вид", "габарит", "круглость", "серого", "замечания"))
@@ -319,6 +372,8 @@ def main():
                           f"и чаще всего испортит прозрачность")
         images[name] = im
         reaction[name] = at_reaction(im)
+        if name not in PAW_ICONS:
+            colours[name] = badge_colour(im)
 
         geo = geometry(im)
         if geo is None:
@@ -373,32 +428,52 @@ def main():
                                 f"у остальных — на плашке реакции читается "
                                 f"как иконка не из этого пака")
 
-    # Неразличимые пары. Проверка не про красоту, а про смысл: две иконки,
-    # дающие на 21 px одно пятно, в интерфейсе значат одно и то же.
-    # Сначала — там, где это действительно бьёт: внутри одного места.
+    # Неразличимые пары. Проверка не про красоту, а про смысл: две иконки
+    # одного цвета в одном месте интерфейса значат одно и то же.
+    # У иконок с плашкой сравниваем цвет плашки, у лап плашки нет — там
+    # сравнивать можно только весь кадр.
+    def apart(x, y):
+        if x in PAW_ICONS and y in PAW_ICONS:
+            # Порог попиксельной мерки другой и к CONFUSE_MIN отношения
+            # не имеет: 24 — это bully_not_helpful / bully_detail из прогона
+            # 06.09, различимые с запасом.
+            return pixel_distance(reaction[x], reaction[y]), 22.0, "кадр"
+        if x in PAW_ICONS or y in PAW_ICONS:
+            return None  # лапа и морда не путаются по устройству
+        return (colour_distance(colours[x], colours[y]), CONFUSE_MIN,
+                "цвет плашки")
+
     for slot, members in SLOTS.items():
-        members = [n for n in members if n in reaction]
-        for x, y in itertools.combinations(members, 2):
-            d = distance(reaction[x], reaction[y])
-            if d < CONFUSE_MIN:
-                errors.append(f"{x} и {y}: на {REACTION_PX} px одно пятно "
-                              f"({d:.1f} при пороге {CONFUSE_MIN:g}), "
-                              f"а стоят в одном месте — {slot}")
+        for x, y in itertools.combinations([n for n in members
+                                            if n in reaction], 2):
+            got = apart(x, y)
+            if not got or got[0] >= got[1]:
+                continue
+            note = (f"{x} и {y}: на {REACTION_PX} px не различаются "
+                    f"({got[2]} {got[0]:.0f} при пороге {got[1]:g}), "
+                    f"а стоят в одном месте — {slot}")
+            if slot in COLOUR_ONLY_SLOTS:
+                errors.append(note + ". Предмета в этих иконках нет, "
+                                     "различать нечем")
+            else:
+                warnings.append(note + ". Различает только предмет — "
+                                       "посмотреть на контактном листе, "
+                                       "читается ли он на 21 px")
 
     in_slot = {frozenset((x, y)) for m in SLOTS.values()
                for x, y in itertools.combinations(m, 2)}
     pairs = []
     for x, y in itertools.combinations([n for n in names if n in reaction], 2):
-        d = distance(reaction[x], reaction[y])
-        if d < CONFUSE_MIN:
-            pairs.append((d, x, y, frozenset((x, y)) in in_slot))
+        got = apart(x, y)
+        if got and got[0] < got[1]:
+            pairs.append((got[0], x, y, got[2], frozenset((x, y)) in in_slot))
     pairs.sort()
     if pairs:
-        print(f"\nНеразличимы в плашке реакции ({REACTION_PX} px, "
-              f"порог {CONFUSE_MIN:g}):")
-        for d, x, y, same_slot in pairs:
-            print("   %-18s %-18s  %5.1f%s" %
-                  (x, y, d, "  ← в одном месте интерфейса" if same_slot else ""))
+        print(f"\nНе различаются на {REACTION_PX} px:")
+        for d, x, y, how, same_slot in pairs:
+            print("   %-18s %-18s %-14s %5.0f%s" %
+                  (x, y, how, d,
+                   "  ← в одном месте интерфейса" if same_slot else ""))
 
     if a.sheets:
         out = Path(a.sheets)
