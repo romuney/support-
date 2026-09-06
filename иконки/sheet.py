@@ -45,22 +45,8 @@ def split_grid(img, cols, rows):
     return out
 
 
-def find_gaps(img, n, axis, bright=200, share=0.7, inset=2):
-    """Границы n ячеек вдоль оси: по светлым полосам, иначе ровно.
-
-    Полосой считается линия, где почти всё (share) ярче `bright` по всем
-    каналам: фон листа — средний серый, персонаж кремовый с тёмными глазами,
-    и ни то, ни другое сплошной светлой линией через весь лист не идёт.
-
-    Полос должно найтись ровно n-1. Меньше — модель нарисовала не все
-    (или не рисовала вовсе), больше — в лист попало что-то ещё светлое;
-    в обоих случаях доверять находке нельзя, и деление идёт ровным. Тихо
-    подстроиться под «почти подошло» здесь хуже, чем поделить ровно:
-    сдвиг на одну ячейку переименует весь пак.
-
-    `inset` срезает сглаженный край полосы: у JPEG он размыт на пару
-    пикселей, и без запаса светлая кайма остаётся в ячейке.
-    """
+def scan_bands(img, axis, hit, share=0.7):
+    """Линии вдоль оси, где `hit` верно почти для всех пикселей (share)."""
     size = img.size[axis]
     px = img.convert("RGB").load()
     other = img.size[1 - axis]
@@ -70,13 +56,11 @@ def find_gaps(img, n, axis, bright=200, share=0.7, inset=2):
 
     bands, start = [], None
     for i in range(size):
-        lit = 0
-        total = 0
+        lit = total = 0
         for j in range(0, other, step):
-            xy = (i, j) if axis == 0 else (j, i)
-            c = px[xy]
+            c = px[(i, j) if axis == 0 else (j, i)]
             total += 1
-            if c[0] > bright and c[1] > bright and c[2] > bright:
+            if hit(c):
                 lit += 1
         if lit / total >= share:
             if start is None:
@@ -86,17 +70,46 @@ def find_gaps(img, n, axis, bright=200, share=0.7, inset=2):
             start = None
     if start is not None:
         bands.append((start, size - 1))
-
     # Полосы по краям листа — это поля, а не разделители.
-    bands = [b for b in bands if b[0] > 0 and b[1] < size - 1]
+    return [b for b in bands if b[0] > 0 and b[1] < size - 1]
 
-    if len(bands) != n - 1:
-        return [(round(k * size / n), round((k + 1) * size / n))
-                for k in range(n)]
 
-    starts = [0] + [b[1] + 1 + inset for b in bands]
-    stops = [b[0] - inset for b in bands] + [size]
-    return list(zip(starts, stops))
+def find_gaps(img, n, axis, bright=200, dark=70, share=0.7, inset=2):
+    """Границы n ячеек вдоль оси: по нарисованным разделителям, иначе ровно.
+
+    Промпт просит промежутки того же серого, что и фон, но модель раз за разом
+    рисует между ячейками полосы, и каждый раз своего цвета: прогон 02.09 —
+    белые шириной ~20 px, прогон 07.09 листом — почти чёрные. Полоса, попавшая
+    в ячейку, останавливает заливку фона от края, и на выходе получается
+    не прозрачный PNG, а серый квадрат с персонажем.
+
+    Поэтому детекторов два, и оба про сплошную линию через весь лист:
+    светлее `bright` по всем каналам либо темнее `dark` по всем. Ни фон
+    (средний серый), ни персонаж (кремовый с тёмными глазами), ни плашка
+    (цветная) сплошной линией ни того, ни другого рода через лист не идут.
+    Мерить «непохоже на фон» вообще нельзя: колонка через середину ячейки
+    почти вся занята плашкой и в такую мерку попадёт.
+
+    Полос должно найтись ровно n-1. Меньше — модель нарисовала не все
+    (или не рисовала вовсе), больше — в лист попало что-то ещё; в обоих
+    случаях доверять находке нельзя, и деление идёт ровным. Тихо подстроиться
+    под «почти подошло» здесь хуже, чем поделить ровно: сдвиг на одну ячейку
+    переименует весь пак.
+
+    `inset` срезает сглаженный край полосы: у JPEG он размыт на пару
+    пикселей, и без запаса кайма остаётся в ячейке.
+    """
+    for hit in (lambda c: c[0] > bright and c[1] > bright and c[2] > bright,
+                lambda c: c[0] < dark and c[1] < dark and c[2] < dark):
+        bands = scan_bands(img, axis, hit, share)
+        if len(bands) == n - 1:
+            starts = [0] + [b[1] + 1 + inset for b in bands]
+            stops = [b[0] - inset for b in bands] + [img.size[axis]]
+            return list(zip(starts, stops))
+
+    size = img.size[axis]
+    return [(round(k * size / n), round((k + 1) * size / n))
+            for k in range(n)]
 
 
 def key_background(cell, thresh=FLOOD_THRESH, sat_max=SAT_MAX,

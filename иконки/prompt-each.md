@@ -133,32 +133,41 @@ circle, no rays, no gradient.
 
 THE PAW: where the line below starts with the word PAW, this overrides the
 framing paragraph above. The image does not show his head, his cap or his face
-at all. It shows ONE of his front paws alone, in close-up, filling most of the
-frame: the same cream fur with the same visible individual hairs and the same
-shading, the same soft studio lighting and the same 3D render as the attached
-references, with soft rounded dark-brown pads. There is no badge in a PAW
-image: no circle, no rays, no gradient, just the paw on flat grey background.
-Everything in the image is in sharp focus: there is no depth of field, no blur,
-and nothing at all behind the paw — no second paw, no out-of-focus shape, no
-object in the background.
+at all, and there is no badge: no circle, no rim, no gradient — just the paw on
+flat grey background.
+
+FRAME IT LIKE A STANDARD EMOJI, because that is what it is. Think of the
+everyday thumbs-up emoji: the hand alone, very close, filling almost the whole
+square, and nothing else in the picture. Same here. THE PAW ITSELF — the pad
+and the toes — fills at least three quarters of the width and three quarters of
+the height of the frame, so that at 21 x 21 pixels the gesture alone is what
+you see.
+
+Of the leg show ONLY A SHORT STUB OF WRIST, and it is SMALL: no more than about
+a fifth of the height of the frame, just enough to say where the paw is
+attached. There is NO forearm, NO leg, NO arm crossing the frame and nothing
+running out to a side edge. Zoom right in on the paw.
+
+The wrist enters the way it does in the everyday emoji: for a thumbs-up from
+the BOTTOM edge, for a thumbs-down from the TOP edge. Everything else about the
+two is identical — the same paw, the same size, the same place in the frame,
+the same light — so that the pair reads as one set turned over.
 
 IT IS A DOG'S PAW AND NEVER A HAND. It is broad and chunky, with FOUR short
-thick rounded toes of roughly equal length and a big soft pad. There are NO
-fingers: no long jointed fingers, no separated fingers, no knuckles, no
-fingernails, no opposable thumb, no human wrist, no bare human skin, no glove.
-It is covered in fur everywhere except the pads. Where the paw holds something,
-it holds it CLAMPED BETWEEN THE TOES and pressed against the pad, the way a dog
-holds a stick — it never grips it with fingers.
+thick rounded toes of roughly equal length and a big soft pad: the same cream
+fur with the same visible individual hairs, the same soft studio lighting and
+the same 3D render as the attached references, with soft rounded dark-brown
+pads. There are NO fingers: no long jointed fingers, no separated fingers, no
+knuckles, no fingernails, no opposable thumb, no human wrist, no bare human
+skin, no glove. It is covered in fur everywhere except the pads. Where the paw
+holds something, it holds it CLAMPED BETWEEN THE TOES and pressed against the
+pad, the way a dog holds a stick — it never grips it with fingers.
 
-THE ARM IS THE SAME IN ALL THREE PAW IMAGES: one short furry foreleg entering
-horizontally from the LEFT edge of the frame, running out of the frame at that
-left edge and nowhere else. The foreleg is SLIM — about half the width of the
-paw — so that the paw stays the biggest shape in the image; it is never as
-thick as the paw, and no shoulder, chest or body is visible. The paw itself
-sits in the middle of the frame at the end of that foreleg. It is the SAME SIZE
-in all three PAW images — as big as it can be while still leaving clear grey
-background above, below and to the right of it. Apart from the foreleg at the
-left edge, nothing is cut off by any edge.
+Everything in the image is in sharp focus: there is no depth of field, no blur,
+and nothing at all behind the paw — no second paw, no out-of-focus shape, no
+object in the background. Apart from the short wrist stub at its one edge,
+leave a small even margin of grey on all four sides, and nothing else is cut
+off by any edge.
 
 Change ONLY this: <ЯЧЕЙКА>
 
@@ -357,9 +366,9 @@ no label, no watermark, no border, no frame.
 | `bully_done` | `BADGE with a thick vivid rim #40814C and a field of light sage green #95A67A. Cap dyed deeper green #698265. Eyes closed in a satisfied happy smile, a big flat WHITE check mark beside the muzzle in the lower half of the badge.` |
 | `bully_fail` | `BADGE with a thick vivid rim #86322D and a field of light warm red #CA6660. Cap dyed deeper red #A8504E. Sad apologetic face: mouth a small unhappy downturned line, eyebrows pulled up in the middle, head dipped slightly. The ears stay big and upright exactly as in the references, and the eyes stay exactly as in the references — huge, round, glossy, cartoon dark-brown with the same big white highlights. They are not realistic dog eyes, not watery, not teary, not narrowed. A big flat WHITE cross mark beside the muzzle in the lower half of the badge.` |
 | `bully_hi` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. One front paw raised high beside the muzzle waving hello, big warm open smile. No object.` |
-| `bully_helpful` | `PAW. The paw makes a big clear thumbs-up: the outer toe stretched straight UP like a thumb, the other toes curled in towards the pad, pads facing forward. Nothing else in the image.` |
-| `bully_not_helpful` | `PAW. The paw makes a big clear thumbs-down: the outer toe stretched straight DOWN like a thumb, the other toes curled in towards the pad, pads facing forward. It is the same paw as the thumbs-up, in the same place and at the same size, turned over — the two differ ONLY in which way that toe points. Nothing else in the image.` |
-| `bully_detail` | `PAW. The paw holds a short thick yellow pencil clamped between two of its toes and pressed against the pad, tilted as if about to write — no fingers grip it, the toes stay short, thick and rounded. Under the tip of the pencil a small blank white notepad lies flat, clearly smaller than the paw. The notepad is completely blank: no writing, no ruled lines, no letters on it.` |
+| `bully_helpful` | `PAW. A big clear thumbs-up framed like the standard thumbs-up emoji: the paw seen from the side and filling the frame, the outer toe stretched straight UP like a thumb, the other toes curled in towards the pad. Only a short stub of wrist at the BOTTOM edge — no forearm, no leg. Nothing else in the image.` |
+| `bully_not_helpful` | `PAW. A big clear thumbs-down framed like the standard thumbs-down emoji: the SAME paw as the thumbs-up at the same size and in the same place, turned over — the outer toe stretched straight DOWN like a thumb, the other toes curled in towards the pad. Only a short stub of wrist at the TOP edge — no forearm, no leg. Nothing else in the image.` |
+| `bully_detail` | `PAW. The same paw filling the frame the same way, holding a short thick yellow pencil clamped between two of its toes and pressed against the pad, tilted as if about to write — no fingers grip it. Only a short stub of wrist at the BOTTOM edge. Under the pencil tip a small blank white notepad, clearly smaller than the paw. The notepad is completely blank: no writing, no ruled lines, no letters on it.` |
 | `bully_search` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Holding up a big magnifying glass with a thick flat WHITE rim and a white handle, at least half the diameter of the badge, in front of one eye; that eye hugely magnified through the clear lens, the other eye normal size, focused curious expression.` |
 | `bully_high` | `BADGE with a thick vivid rim #40814C and a field of light sage green #95A67A. Cap dyed deeper green #698265. Calm confident closed-mouth smile, eyes bright and steady, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
 | `bully_mid` | `BADGE with a thick vivid rim #AD6B25 and a field of light amber #DDA060. Cap dyed deeper amber #C28B48. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line. Both ears stay big and upright. Nothing else in the image at all: no object, no raised paws, no symbol.` |

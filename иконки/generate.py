@@ -114,6 +114,73 @@ ROW = re.compile(r"^\|\s*`([^`|]+)`\s*\|\s*`([^`]+)`\s*\|\s*$", re.M)
 SLOT = re.compile(r"(Change ONLY this:[ \t]*)<[^<>\n]+>")
 
 
+# Позиции ячеек словами: «cell 3» модель считает хуже, чем «top left».
+CELL_WHERE = {
+    (2, 2): ["top left", "top right", "bottom left", "bottom right"],
+    (1, 3): ["top", "middle", "bottom"],
+    (3, 1): ["left", "middle", "right"],
+    (2, 1): ["left", "right"],
+    (1, 2): ["top", "bottom"],
+}
+
+
+def cell_places(cols, rows):
+    """Как назвать каждую ячейку. Для мелких сеток — словами, дальше номерами
+    строки и столбца: «row 2, column 3» модель держит, а «cell 7» теряет."""
+    named = CELL_WHERE.get((cols, rows))
+    if named:
+        return named
+    return [f"row {i // cols + 1}, column {i % cols + 1}"
+            for i in range(cols * rows)]
+
+
+def grid_block(cells, cols, rows):
+    """Текст, который встаёт вместо строки одной ячейки, когда гоним листом.
+
+    Лист — это одна оплаченная картинка вместо четырёх, и стиль внутри него
+    держится сам собой: все ячейки рисуются в одном проходе. Поэтому листом
+    гонят то, что обязано быть похожим между собой, — светофор целиком,
+    маркеры целиком.
+
+    Промежутки между ячейками требуем того же серого, что и фон. Прогон 02.09
+    показал, зачем это повторять: модель нарисовала между ячейками БЕЛЫЕ
+    полосы, ячейки разъехались по ширине, и вырезание фона оставило по краю
+    белую кайму. `sheet.split_grid` теперь ищет разделители, но лучше, чтобы
+    их не было вовсе.
+    """
+    where = cell_places(cols, rows)
+    lines = [f"Cell {i + 1} ({where[i]}): {cell}"
+             for i, (_, cell) in enumerate(cells)]
+    return (
+        f"This image is a GRID of {len(cells)} cells: {cols} columns by "
+        f"{rows} rows, equal cells, read left to right and top to bottom.\n\n"
+        "Wherever the rules above say \"the image\" or \"the frame\", they mean "
+        "one CELL of this grid, not the whole picture.\n\n"
+        "EVERY rule above applies inside EACH cell separately: each cell holds "
+        "one complete finished icon, framed exactly as described above, as if "
+        "it had been drawn on its own. The cells show the SAME character at "
+        "the SAME size, the SAME distance and the SAME crop, lit the same way "
+        "— they differ ONLY in what is listed for each cell below.\n\n"
+        "The gaps between the cells and the margin around the whole grid are "
+        "the SAME flat medium grey as the background inside the cells. Do NOT "
+        "draw white lines between the cells, and no borders, no frames, no "
+        "grid lines, no numbers, no captions and no labels anywhere.\n\n"
+        + "\n\n".join(lines)
+        + "\n\nCHECK EVERY CELL BEFORE YOU FINISH. On a sheet of many cells "
+          "these three are the first to go, and without them the icons are "
+          "unusable:\n"
+          "1. The white embroidered word \"CROSS\" on the front of the cap, "
+          "big and clearly legible, in EVERY cell that shows the cap. A cap "
+          "without the word is wrong.\n"
+          "2. The THICK vivid rim around each badge, in the saturated colour "
+          "named for that cell, with the lighter field inside it. A thin "
+          "outline is wrong.\n"
+          "3. His head big enough that his ears and the crown of his cap reach "
+          "the rim and are cut off by it. A small head with a ring of empty "
+          "colour above the cap is wrong."
+    )
+
+
 def read_rows(path):
     """Таблица `| имя | подстановка |` из markdown-задания."""
     rows = ROW.findall(Path(path).read_text(encoding="utf-8"))
@@ -254,6 +321,10 @@ def main():
                     help="пачкой: шаблон задания плюс таблица подстановок, "
                          "по прогону на строку; --out тогда папка")
     ap.add_argument("--only", help="в пачке — только эти имена, через запятую")
+    ap.add_argument("--grid", metavar="СТОЛБЦЫxСТРОКИ",
+                    help="гнать выбранные --only одним листом: одна оплаченная "
+                         "картинка вместо нескольких, и стиль внутри листа "
+                         "держится сам. Порядок имён в --only — порядок ячеек")
     ap.add_argument("--anchor", help="в пачке — принятая картинка из этой же "
                                      "пачки: прикладывается последним "
                                      "референсом и держит стиль остальных")
@@ -278,11 +349,16 @@ def main():
 
     if a.each and a.text:
         sys.exit("--each и --text вместе не имеют смысла: пачка берётся из md")
+    if a.grid and not a.only:
+        sys.exit("--grid без --only не работает: имена задают ячейки и порядок")
+    if a.grid and a.each:
+        sys.exit("--grid и --each — разные режимы: лист одной картинкой "
+                 "против картинки на иконку")
 
     refs = [] if a.no_ref else list(a.ref or DEFAULT_REFS)
     key = None if a.dry_run else load_key(a.env)
 
-    if not a.each:
+    if not a.each and not a.grid:
         out = Path(a.out)
         if out.exists() and not a.force:
             sys.exit(f"{out} уже есть. Перезаписать — --force, иначе задать --out")
@@ -297,7 +373,11 @@ def main():
         missing = [n for n in want if n not in known]
         if missing:
             sys.exit(f"{a.task}: нет строк {', '.join(missing)}")
-        rows = [(n, c) for n, c in rows if n in want]
+        # Листом порядок ячеек задаёт --only, а не порядок строк в таблице:
+        # нарезка потом раскладывает имена в том же порядке.
+        by_name = dict(rows)
+        rows = [(n, by_name[n]) for n in want] if a.grid else \
+               [(n, c) for n, c in rows if n in want]
 
     prompt_tail = ""
     if a.anchor:
@@ -307,6 +387,28 @@ def main():
                      f"иконку без --anchor и убедиться, что стиль устоял")
         refs = refs + [str(anchor)]
         prompt_tail = "\n\n" + ANCHOR_NOTE
+
+    if a.grid:
+        try:
+            cols, grows = (int(v) for v in a.grid.lower().split("x"))
+        except ValueError:
+            sys.exit(f"--grid {a.grid}: нужно вида 2x2")
+        if cols * grows != len(rows):
+            sys.exit(f"--grid {cols}x{grows} — это {cols * grows} ячеек, "
+                     f"а в --only имён {len(rows)}")
+        out = Path(a.out)
+        if out.is_dir() or a.out.endswith("/"):
+            sys.exit(f"--grid пишет ОДИН файл: --out {a.out} — это папка")
+        if out.exists() and not a.force:
+            sys.exit(f"{out} уже есть. Перезаписать — --force, иначе задать --out")
+        prompt = fill(template, grid_block(rows, cols, grows)) + prompt_tail
+        ok = run(prompt, refs, out, a, key)
+        if ok and not a.dry_run:
+            names = ",".join(n for n, _ in rows)
+            print(f"нарезать: python3 slice_grid.py {out} --cols {cols} "
+                  f"--rows {grows} --names {names} --out out-badge/",
+                  file=sys.stderr)
+        sys.exit(0 if ok else 1)
 
     outdir = Path("raw" if a.out == "sheet.png" else a.out)
     done = failed = skipped = 0
