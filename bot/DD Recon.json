@@ -14,7 +14,7 @@
     },
     {
       "parameters": {
-        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:1728') + '/related' }}",
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov') + '/related' }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "devplatformApi",
         "options": {
@@ -49,7 +49,7 @@
     },
     {
       "parameters": {
-        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:1728') + '/summary' }}",
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov') + '/summary' }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "devplatformApi",
         "options": {
@@ -84,7 +84,7 @@
     },
     {
       "parameters": {
-        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:1728') + '/attribute' }}",
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov') + '/attribute' }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "devplatformApi",
         "options": {
@@ -119,7 +119,7 @@
     },
     {
       "parameters": {
-        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:1728') + '/markdown' }}",
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov') + '/markdown' }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "devplatformApi",
         "options": {
@@ -154,7 +154,7 @@
     },
     {
       "parameters": {
-        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:1728') + '/link' }}",
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov') + '/link' }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "devplatformApi",
         "options": {
@@ -189,7 +189,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\n// Что вернули пять суб-ресурсов карточки отчёта и ГДЕ ЛЕЖИТ ВЛАДЕЛЕЦ.\n//\n// Это и есть вопрос, ради которого фаза A существует: если владелец приходит\n// из каталога, в git его дублировать не нужно — он там протухнет молча, как\n// протух бы список полей. Ответ читается глазами один раз, поэтому вывод\n// сделан текстом, а не структурой.\nconst NAMES = [\"Recon related\", \"Recon summary\", \"Recon attribute\", \"Recon markdown\", \"Recon link\"];\n// Прогон 2026-08-27: owner_hits оказался ПУСТ, хотя ответ владельца содержал.\n// В /attribute у отчёта лежат report_developer, data_team, developers_team\n// и support_channel — ни одно из них под прежний регексп не подходило,\n// и разведка отрапортовала «владельца не видно», имея его на руках.\n// Тихий отказ ровно того класса, от которого защищено всё остальное:\n// искали по угаданному списку слов и приняли промах списка за факт.\nconst OWNER_RE = /владел|owner|steward|ответствен|responsible|автор|author|куратор|developer|разработ|team|команд|support|поддержк|maintain|contact|контакт/i;\n\nconst lines = [];\nconst owners = [];\n\n// Значение атрибута DD — обёртка { type, data }. Без распаковки тип поля\n// однажды уехал агенту строкой «[object Object]»: та же ошибка здесь сделала\n// бы владельца нечитаемым.\nconst attrData = (v) => (v && typeof v === 'object' && 'data' in v ? v.data : v);\nconst short = (v) => {\n  const s = typeof v === 'string' ? v : JSON.stringify(v);\n  return s === undefined ? '(undefined)' : s.length > 300 ? s.slice(0, 300) + '…' : s;\n};\n\nfor (const name of NAMES) {\n  let res;\n  try {\n    res = $(name).first().json;\n  } catch (e) {\n    lines.push(`${name}: узел не выполнялся`);\n    continue;\n  }\n  const status = res?.statusCode ?? '(нет statusCode)';\n  const body = res?.body ?? res;\n  lines.push('');\n  lines.push(`=== ${name} — HTTP ${status} ===`);\n  if (status === 401) {\n    // Отдельной строкой, а не общим «не то пришло»: 401 это истёкший Service\n    // Account, и лечится он не правкой запроса.\n    lines.push('истёк Service Account — обновить credential, запрос ни при чём');\n    continue;\n  }\n  if (body === undefined || body === null || body === '') {\n    lines.push('пустое тело');\n    continue;\n  }\n  if (typeof body === 'string') {\n    // HTML вместо JSON — это страница логина: followRedirects выключен\n    // именно от этого, но если пришло, надо назвать причину, а не «странный\n    // ответ».\n    lines.push(/^\\s*</.test(body)\n      ? 'пришёл HTML, а не JSON — похоже на страницу логина'\n      : short(body));\n    continue;\n  }\n  const keys = Object.keys(body);\n  lines.push('ключи верхнего уровня: ' + (keys.length ? keys.join(', ') : '(пусто)'));\n  lines.push(short(body));\n\n  // Ищем владельца ВЕЗДЕ, а не в угаданном заранее поле: имя ключа неизвестно,\n  // и подобрать его перебором дороже, чем прочитать один раз глазами.\n  const walk = (v, path) => {\n    if (v === null || typeof v !== 'object') return;\n    for (const [k, raw] of Object.entries(v)) {\n      const here = path ? path + '.' + k : k;\n      if (OWNER_RE.test(k)) owners.push(`${name}: ${here} = ${short(attrData(raw))}`);\n      walk(raw, here);\n    }\n  };\n  walk(body, '');\n}\n\nconst head = [];\nhead.push('РАЗВЕДКА ОТЧЁТА ' + \"urn:dd:reports:reports:report:1728\");\nhead.push('');\nhead.push(owners.length\n  ? 'ВЛАДЕЛЕЦ НАЙДЕН ЗДЕСЬ:\\n— ' + owners.join('\\n— ')\n  : 'ВЛАДЕЛЬЦА НЕ ВИДНО НИ В ОДНОМ ИЗ ПЯТИ ОТВЕТОВ. Это не значит, что его нет: '\n    + 'ключ может называться иначе — прочитать тела ниже глазами. Если его там '\n    + 'правда нет, владелец остаётся в git как исключение, и это ответ на '\n    + 'вопрос, ради которого разведка делалась.');\nhead.push('');\nhead.push('СВЕРИТЬ С ЭТАЛОНОМ (кого аналитик тегает по этим отчётам):');\nfor (const [r, who] of [[\"[CrossData] Лидерский снепшот\", \"[Login79]\"], [\"Активность в GitLab\", \"Aliya Kolomeets\"], [\"Амбассадорство сотрудников\", \"s.kopytov\"]]) head.push(`— ${r} → ${who}`);\n\nreturn [{ json: { report: head.concat(lines).join('\\n'), owner_hits: owners } }];\n",
+        "jsCode": "\n// Что вернули пять суб-ресурсов карточки отчёта и ГДЕ ЛЕЖИТ ВЛАДЕЛЕЦ.\n//\n// Это и есть вопрос, ради которого фаза A существует: если владелец приходит\n// из каталога, в git его дублировать не нужно — он там протухнет молча, как\n// протух бы список полей. Ответ читается глазами один раз, поэтому вывод\n// сделан текстом, а не структурой.\nconst NAMES = [\"Recon related\", \"Recon summary\", \"Recon attribute\", \"Recon markdown\", \"Recon link\"];\n// Прогон 2026-08-27: owner_hits оказался ПУСТ, хотя ответ владельца содержал.\n// В /attribute у отчёта лежат report_developer, data_team, developers_team\n// и support_channel — ни одно из них под прежний регексп не подходило,\n// и разведка отрапортовала «владельца не видно», имея его на руках.\n// Тихий отказ ровно того класса, от которого защищено всё остальное:\n// искали по угаданному списку слов и приняли промах списка за факт.\nconst OWNER_RE = /владел|owner|steward|ответствен|responsible|автор|author|куратор|developer|разработ|team|команд|support|поддержк|maintain|contact|контакт/i;\n\nconst lines = [];\nconst owners = [];\n\n// Значение атрибута DD — обёртка { type, data }. Без распаковки тип поля\n// однажды уехал агенту строкой «[object Object]»: та же ошибка здесь сделала\n// бы владельца нечитаемым.\nconst attrData = (v) => (v && typeof v === 'object' && 'data' in v ? v.data : v);\nconst short = (v) => {\n  const s = typeof v === 'string' ? v : JSON.stringify(v);\n  return s === undefined ? '(undefined)' : s.length > 300 ? s.slice(0, 300) + '…' : s;\n};\n\nfor (const name of NAMES) {\n  let res;\n  try {\n    res = $(name).first().json;\n  } catch (e) {\n    lines.push(`${name}: узел не выполнялся`);\n    continue;\n  }\n  const status = res?.statusCode ?? '(нет statusCode)';\n  const body = res?.body ?? res;\n  lines.push('');\n  lines.push(`=== ${name} — HTTP ${status} ===`);\n  if (status === 401) {\n    // Отдельной строкой, а не общим «не то пришло»: 401 это истёкший Service\n    // Account, и лечится он не правкой запроса.\n    lines.push('истёк Service Account — обновить credential, запрос ни при чём');\n    continue;\n  }\n  if (body === undefined || body === null || body === '') {\n    lines.push('пустое тело');\n    continue;\n  }\n  if (typeof body === 'string') {\n    // HTML вместо JSON — это страница логина: followRedirects выключен\n    // именно от этого, но если пришло, надо назвать причину, а не «странный\n    // ответ».\n    lines.push(/^\\s*</.test(body)\n      ? 'пришёл HTML, а не JSON — похоже на страницу логина'\n      : short(body));\n    continue;\n  }\n  const keys = Object.keys(body);\n  lines.push('ключи верхнего уровня: ' + (keys.length ? keys.join(', ') : '(пусто)'));\n  lines.push(short(body));\n\n  // Ищем владельца ВЕЗДЕ, а не в угаданном заранее поле: имя ключа неизвестно,\n  // и подобрать его перебором дороже, чем прочитать один раз глазами.\n  const walk = (v, path) => {\n    if (v === null || typeof v !== 'object') return;\n    for (const [k, raw] of Object.entries(v)) {\n      const here = path ? path + '.' + k : k;\n      if (OWNER_RE.test(k)) owners.push(`${name}: ${here} = ${short(attrData(raw))}`);\n      walk(raw, here);\n    }\n  };\n  walk(body, '');\n}\n\nconst head = [];\nhead.push('РАЗВЕДКА ОТЧЁТА ' + \"urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov\");\nhead.push('');\nhead.push(owners.length\n  ? 'ВЛАДЕЛЕЦ НАЙДЕН ЗДЕСЬ:\\n— ' + owners.join('\\n— ')\n  : 'ВЛАДЕЛЬЦА НЕ ВИДНО НИ В ОДНОМ ИЗ ПЯТИ ОТВЕТОВ. Это не значит, что его нет: '\n    + 'ключ может называться иначе — прочитать тела ниже глазами. Если его там '\n    + 'правда нет, владелец остаётся в git как исключение, и это ответ на '\n    + 'вопрос, ради которого разведка делалась.');\nhead.push('');\nhead.push('СВЕРИТЬ С ЭТАЛОНОМ (кого аналитик тегает по этим отчётам):');\nfor (const [r, who] of [[\"[CrossData] Лидерский снепшот\", \"[Login79]\"], [\"Активность в GitLab\", \"Aliya Kolomeets\"], [\"Амбассадорство сотрудников\", \"s.kopytov\"]]) head.push(`— ${r} → ${who}`);\n\nreturn [{ json: { report: head.concat(lines).join('\\n'), owner_hits: owners } }];\n",
         "mode": "runOnceForAllItems"
       },
       "type": "n8n-nodes-base.code",
@@ -277,7 +277,7 @@
     },
     {
       "parameters": {
-        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:1728') + '/related/source_tables' }}",
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent('urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov') + '/related/source_tables' }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "devplatformApi",
         "options": {
@@ -690,7 +690,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "\n// Имена витрин берутся ИЗ РЕЕСТРА, а не из списка в сборщике: копия\n// разъехалась бы молча — то же правило, по которому состав полей\n// не копируется из каталога в статью.\nconst urns = [\"urn:dd:tables:greenplum:table:hrmart.mdm_employee_attendance\", \"urn:dd:tables:greenplum:table:dds.crm_user\", \"urn:dd:tables:greenplum:table:sdp_itsa_zup.disciplinary_sanction\", \"urn:dd:tables:greenplum:table:hrmart.legal_position_dismissal_reason\", \"urn:dd:tables:greenplum:table:hrmart.mdm_employee_education\", \"urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d\", \"urn:dd:tables:greenplum:table:chrono_peoplehub_masterid.individualchildren_public\", \"urn:dd:tables:greenplum:table:emart.mdm_employee_x_person_party\", \"urn:dd:tables:greenplum:table:dds_dic.employee_profession\", \"urn:dd:tables:greenplum:table:sse_crossdata.employee_residence\", \"urn:dd:tables:greenplum:table:dds.mdm_employee_x_profession\", \"urn:dd:tables:greenplum:table:emart.functional_role_d\", \"urn:dd:tables:dlh:table:dds.functional_unit\", \"urn:dd:tables:greenplum:table:emart.legal_position_d\", \"urn:dd:tables:greenplum:table:sse_crossdata.legal_position_attr_chng\", \"urn:dd:tables:dlh:table:dds.management_unit\", \"urn:dd:tables:greenplum:table:sse_crossdata.performance_metric_d\", \"urn:dd:tables:greenplum:table:sdp_edms_statement.statement_field\", \"urn:dd:tables:greenplum:table:hrmart.summary_evaluation\", \"urn:dd:tables:greenplum:table:hrmart.statement_vacation\"];\nreturn urns.map((urn) => {\n  // `schema.table` — хвост URN после последнего двоеточия. Ищем по ИМЕНИ\n  // таблицы: полное имя со схемой поиск не находит, а имя — находит.\n  const fqn = String(urn).split(':').pop();\n  const name = fqn.split('.').pop();\n  return { json: { urn, fqn, name } };\n});\n"
+        "jsCode": "\n// Имена витрин берутся ИЗ РЕЕСТРА, а не из списка в сборщике: копия\n// разъехалась бы молча — то же правило, по которому состав полей\n// не копируется из каталога в статью.\nconst urns = [\"urn:dd:tables:greenplum:table:hrmart.mdm_employee_attendance\", \"urn:dd:tables:greenplum:table:sse_crossdata.calendar_event\", \"urn:dd:tables:greenplum:table:sse_crossdata.calendar_event_x_ktalk_room\", \"urn:dd:tables:greenplum:table:sse_crossdata.calendar_event_x_mdm_employee\", \"urn:dd:tables:greenplum:table:sse_crossdata.calendar_event_x_meeting_room\", \"urn:dd:tables:greenplum:table:dds.crm_user\", \"urn:dd:tables:greenplum:table:sdp_itsa_zup.disciplinary_sanction\", \"urn:dd:tables:greenplum:table:hrmart.legal_position_dismissal_reason\", \"urn:dd:tables:greenplum:table:hrmart.mdm_employee_education\", \"urn:dd:tables:greenplum:table:emart.mdm_employee_structure_d\", \"urn:dd:tables:greenplum:table:chrono_peoplehub_masterid.individualchildren_public\", \"urn:dd:tables:greenplum:table:emart.mdm_employee_x_person_party\", \"urn:dd:tables:greenplum:table:dds_dic.employee_profession\", \"urn:dd:tables:greenplum:table:sse_crossdata.employee_residence\", \"urn:dd:tables:greenplum:table:dds.mdm_employee_x_profession\", \"urn:dd:tables:greenplum:table:emart.functional_role_d\", \"urn:dd:tables:dlh:table:dds.functional_unit\", \"urn:dd:tables:greenplum:table:usr_cross_data.head_segments_versions\", \"urn:dd:tables:greenplum:table:emart.legal_position_d\", \"urn:dd:tables:greenplum:table:sse_crossdata.legal_position_attr_chng\", \"urn:dd:tables:dlh:table:dds.management_unit\", \"urn:dd:tables:greenplum:table:emart.mdm_employee\", \"urn:dd:tables:greenplum:table:sse_crossdata.meeting_room\", \"urn:dd:tables:greenplum:table:sse_crossdata.performance_metric_d\", \"urn:dd:tables:greenplum:table:sdp_edms_statement.statement_field\", \"urn:dd:tables:greenplum:table:hrmart.summary_evaluation\", \"urn:dd:tables:greenplum:table:hrmart.statement_vacation\"];\nreturn urns.map((urn) => {\n  // `schema.table` — хвост URN после последнего двоеточия. Ищем по ИМЕНИ\n  // таблицы: полное имя со схемой поиск не находит, а имя — находит.\n  const fqn = String(urn).split(':').pop();\n  const name = fqn.split('.').pop();\n  return { json: { urn, fqn, name } };\n});\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1507,6 +1507,69 @@
       ],
       "id": "recon-shape-bulk",
       "name": "Shape bulk"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// Отчёты берутся ИЗ РЕЕСТРА, а не из списка в сборщике: копия разъехалась бы\n// молча — то же правило, по которому состав полей не копируется в статью.\nconst rows = [{\"id\": \"r-ambassadorstvo\", \"title\": \"Амбассадорство сотрудников\", \"urn\": \"urn:dd:reports:reports:report:ambassadorstvo-vneproektnye-aktivnosti-sotrudnikov\"}, {\"id\": \"r-attendance-calendar\", \"title\": \"Календарь присутствия сотрудников\", \"urn\": \"urn:dd:reports:reports:report:2529\"}, {\"id\": \"r-avatar-center\", \"title\": \"Центр развития Аватар\", \"urn\": \"urn:dd:reports:reports:report:1946\"}, {\"id\": \"r-btk-location\", \"title\": \"БТК. Местоположение и заявления для возврата почтой РФ\", \"urn\": \"urn:dd:reports:reports:report:2088\"}, {\"id\": \"r-daily-activity-detail\", \"title\": \"Детализация дневной активности\", \"urn\": \"urn:dd:reports:reports:report:2115\"}, {\"id\": \"r-employment-period\", \"title\": \"Периоды работы сотрудника\", \"urn\": \"urn:dd:reports:reports:report:2680\"}, {\"id\": \"r-gitlab-activity\", \"title\": \"Активность в GitLab\", \"urn\": \"urn:dd:reports:reports:report:aktivnost-v-gitlab\"}, {\"id\": \"r-hr-detail-list\", \"title\": \"HR Executive — Детальные списки\", \"urn\": \"urn:dd:reports:reports:report:1728\"}, {\"id\": \"r-hr-executive-report\", \"title\": \"HR Executive Report\", \"urn\": \"urn:dd:reports:reports:report:1845\"}, {\"id\": \"r-legal-position-period\", \"title\": \"Юридические позиции сотрудника за период\", \"urn\": \"urn:dd:reports:reports:report:1801\"}, {\"id\": \"r-ok-rs\", \"title\": \"Отчет по ОК РС\", \"urn\": \"urn:dd:reports:reports:report:1804\"}, {\"id\": \"r-online-meetings-hq\", \"title\": \"Онлайн-встречи сотрудников HQ\", \"urn\": \"urn:dd:reports:reports:report:2275\"}, {\"id\": \"r-payment-details\", \"title\": \"Платежные реквизиты по юридическим позициям\", \"urn\": \"urn:dd:reports:reports:report:2330\"}, {\"id\": \"r-referral-support\", \"title\": \"Поддержка программы Приведи друга\", \"urn\": \"urn:dd:reports:reports:report:2048\"}, {\"id\": \"r-social-graph\", \"title\": \"Социальный граф\", \"urn\": \"urn:dd:reports:reports:report:2668\"}];\nreturn rows.map((r) => ({ json: r }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        2400
+      ],
+      "id": "recon-k-report-rows",
+      "name": "K report rows"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://dd.t-tech.team/api/v3/entity/' + encodeURIComponent($json.urn) + '/link' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "devplatformApi",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        180,
+        2400
+      ],
+      "id": "recon-k-report-link",
+      "name": "K report link",
+      "credentials": {
+        "devplatformApi": {
+          "id": "mR1hhfmm8mKuMeX0",
+          "name": "Spirit (Devplatform) Service Account Support"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\n// ГОТОВЫЕ СТРОКИ ТАБЛИЦЫ «Ссылки отчётов» ДЛЯ kb/index.md.\n//\n// Печатается три списка, и они намеренно разделены:\n//   ✔ каталог отдал ссылку — строка готова к вставке;\n//   ≠ каталог отдал ДРУГОЙ ключ, чем стоит в статье — обе строки, решает человек;\n//   ✗ ссылки нет — в карточке отчёта не заполнен `/link`, это пробел\n//     на стороне владельца, а не отказ ручки, и лечится он в DD, не у нас.\n// Слить их в один список значит выдать пробел владельца за отказ каталога:\n// чинить их надо в разных местах.\nconst out = [];\nconst say = (s) => out.push(s);\n\nlet asked = [];\ntry { asked = $('K report rows').all().map((i) => i.json); } catch (e) { asked = []; }\nlet res = [];\ntry { res = $('K report link').all().map((i) => i.json); } catch (e) { res = []; }\n\n// Ключи ссылок из статей kb/reports/*.md — вписаны сборщиком на момент сборки.\n// Нужны РОВНО для сверки: расхождение «в статье одно, в каталоге другое»\n// это единственное, что человек обязан увидеть глазами.\nconst FROM_ARTICLES = {\"r-ambassadorstvo\": \"employee_ambassadorship\", \"r-attendance-calendar\": \"19710\", \"r-btk-location\": \"15657\", \"r-daily-activity-detail\": \"employee-activity-detail\", \"r-employment-period\": \"31423\", \"r-gitlab-activity\": \"grp7GLNyp7V\", \"r-hr-detail-list\": \"hr-executive-detail-employee\", \"r-hr-executive-report\": \"hr-executive-report\", \"r-legal-position-period\": \"4823\", \"r-ok-rs\": \"rs_assessment_report\", \"r-online-meetings-hq\": \"25690\", \"r-payment-details\": \"payments_requsites\", \"r-referral-support\": \"14586\"};\n\n// РАЗБОР КЛЮЧА — ОДНО ПРАВИЛО НА ВЕСЬ ПРОЕКТ.\n// Копия этого разбора живёт в ядре бота (REPORT_LINK_JS в build_time_flows.py),\n// и разъехаться им нельзя: там по ключу ищут строку, здесь строку печатают.\n// Поэтому форма ключа описана одинаково и словами, и регуляркой.\n//   /superset/dashboard/19710      → числовой\n//   /superset/dashboard/lna/       → слаг\n//   /superset/dashboard/p/aBc123/  → пермалинк: создаётся на каждый шаринг,\n//                                    с ключом отчёта не связан, в мост НЕ идёт\nfunction parseKey(url) {\n  const m = String(url || '').match(\n    /(?:^|[^A-Za-z0-9_.-])dashboard\\/(p\\/[A-Za-z0-9_-]+|[A-Za-z0-9_-]+)/i);\n  if (!m) return null;\n  const raw = m[1];\n  if (/^p\\//.test(raw)) return { key: raw.slice(2), kind: 'пермалинк' };\n  return { key: raw, kind: /^\\d+$/.test(raw) ? 'числовой' : 'слаг' };\n}\n\nconst ready = [];\nconst conflict = [];\nconst missing = [];\nconst perma = [];\n\nasked.forEach((a, i) => {\n  const r = res[i] || {};\n  const code = r && r.statusCode;\n  const body = (r && r.body) || r || {};\n  if (code !== undefined && code >= 400) {\n    missing.push(`${a.id} — HTTP ${code} по ${a.urn}` +\n      (code === 401 ? ' (истёк Service Account)' : ''));\n    return;\n  }\n  // Ответ `/link` — СЛОВАРЬ «ключ источника → {url}», а не массив.\n  // Печатаем все пришедшие ключи: источников у отчёта может быть несколько,\n  // и молча брать первый значит однажды взять не тот.\n  const keys = body && typeof body === 'object' && !Array.isArray(body)\n    ? Object.keys(body) : [];\n  const urls = keys.map((k) => [k, body[k] && body[k].url]).filter(([, u]) => u);\n  if (!urls.length) {\n    missing.push(`${a.id} — /link ответил, но ссылок в нём нет ` +\n      `(ключи: ${keys.join(', ') || 'нет вовсе'}). ` +\n      'Это пробел в карточке отчёта, чинится в DD.');\n    return;\n  }\n  for (const [src, url] of urls) {\n    const parsed = parseKey(url);\n    if (!parsed) {\n      missing.push(`${a.id} — ссылка не похожа на дашборд Proteus: ${url} (источник ${src})`);\n      continue;\n    }\n    if (parsed.kind === 'пермалинк') {\n      perma.push(`${a.id} — каталог отдал ПЕРМАЛИНК ${parsed.key}: ${url}`);\n      continue;\n    }\n    const inArticle = FROM_ARTICLES[a.id];\n    const row = `| ${parsed.key} | ${parsed.kind} | ${a.id} | ГГГГ-ММ-ДД |`;\n    if (inArticle && inArticle !== parsed.key) {\n      conflict.push(`${a.id}: в статье «${inArticle}», каталог отдал «${parsed.key}»\\n    ${row}`);\n    } else {\n      ready.push(row);\n    }\n  }\n});\n\nsay('ФАЗА K. КЛЮЧИ ССЫЛОК PROTEUS ПО ОТЧЁТАМ РЕЕСТРА');\nsay('');\nsay(`Спрошено отчётов: ${asked.length}, ответов: ${res.length}`);\nsay('');\nsay('--- ГОТОВЫЕ СТРОКИ для таблицы «Ссылки отчётов» в kb/index.md ---');\nif (ready.length) {\n  say('| ключ | вид | id отчёта | проверено |');\n  say('|---|---|---|---|');\n  for (const r of ready.sort()) say(r);\n} else {\n  say('  ни одной. Смотрите списки ниже — там сказано почему.');\n}\n\nif (conflict.length) {\n  say('');\n  say('--- РАСХОЖДЕНИЕ: в статье один ключ, в каталоге другой ---');\n  say('Оба верны: у отчёта бывает и числовой ключ, и слаг. Заводите ОБЕ строки —');\n  say('таблица допускает несколько ключей на один отчёт, ради этого и сделана.');\n  for (const c of conflict) say('  ' + c);\n}\n\nif (perma.length) {\n  say('');\n  say('--- КАТАЛОГ ОТДАЛ ПЕРМАЛИНК ---');\n  say('В мост НЕ идёт: пермалинк создаётся на каждый шаринг дашборда и с ключом');\n  say('отчёта не связан. Попросите владельца отчёта поставить в карточку DD');\n  say('ссылку из адресной строки дашборда — тогда ключ появится сам.');\n  for (const c of perma) say('  ' + c);\n}\n\nif (missing.length) {\n  say('');\n  say('--- ССЫЛКИ НЕТ ---');\n  for (const m of missing) say('  ' + m);\n}\n\nsay('');\nsay('ЧТО С ЭТИМ ДЕЛАТЬ');\nsay('  Скопировать блок «ГОТОВЫЕ СТРОКИ» в kb/index.md, в таблицу');\nsay('  «Ссылки отчётов», и прогнать `python3 validate_kb.py`: он проверит,');\nsay('  что каждый id существует в «Сущности» и имеет тип report, а один ключ');\nsay('  не назначен двум отчётам. Строки из «РАСХОЖДЕНИЕ» добавляются ТОЖЕ —');\nsay('  это второй ключ того же отчёта, а не замена первому.');\n\nreturn [{ json: { report: out.join('\\n') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        2400
+      ],
+      "id": "recon-shape-report-keys",
+      "name": "Shape report keys"
     }
   ],
   "connections": {
@@ -2021,6 +2084,39 @@
         [
           {
             "node": "Shape bulk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape bulk": {
+      "main": [
+        [
+          {
+            "node": "K report rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "K report rows": {
+      "main": [
+        [
+          {
+            "node": "K report link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "K report link": {
+      "main": [
+        [
+          {
+            "node": "Shape report keys",
             "type": "main",
             "index": 0
           }

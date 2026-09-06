@@ -109,6 +109,7 @@ def read_index():
             cur = None
 
     domains, entities, self_service, routes = None, None, None, None
+    report_links = None
     for header, rows in tables:
         if header and header[0] == "домен":
             domains = (header, rows)
@@ -118,12 +119,14 @@ def read_index():
             self_service = (header, rows)
         elif header and header[0] == "маршрут":
             routes = (header, rows)
+        elif header and header[0] == "ключ ссылки":
+            report_links = (header, rows)
 
     if domains is None:
         err("index.md: не найдена таблица доменов (первая колонка «домен»)")
     if entities is None:
         err("index.md: не найдена таблица сущностей (первая колонка «id»)")
-    return domains, entities, self_service, routes
+    return domains, entities, self_service, routes, report_links
 
 
 def as_dicts(table, name, required):
@@ -390,6 +393,101 @@ def check_self_service(ss_rows, ent_rows):
         if not r.get("ключевые слова"):
             err(f"index.md:{line}: у «{rid}» пустые «ключевые слова» — "
                 f"строка никогда не сработает")
+
+
+def check_report_links(rl_rows, ent_rows):
+    """Проверка таблицы «Ссылки отчётов»: ключ ведёт к одному живому отчёту.
+
+    Три отказа, и все три тихие. Ключ, назначенный двум отчётам, — бот
+    уверенно назовёт не тот, а по виду прогона это неотличимо от нормы.
+    Ключ на сущность без типа `report` — резолв найдёт строку, а карточки
+    отчёта в DD не будет. Пермалинк в таблице — строка, которая совпадёт
+    ровно один раз и будет выглядеть правилом.
+    """
+    by_id = {r["id"]: r for r in ent_rows}
+    seen = {}
+    for r in rl_rows:
+        line, key, rid = r["_line"], r["ключ ссылки"], r["id отчёта"]
+
+        if not key or key == DASH:
+            err(f"index.md:{line}: пустой ключ ссылки — строка не совпадёт никогда")
+            continue
+
+        # Ключ хранится ГОЛЫМ: без хоста, схемы, слэшей, query и якоря.
+        # Резолв в «Plan» сравнивает именно голый ключ, и строка со ссылкой
+        # целиком не совпала бы ни с чем — молча, как отсутствующая.
+        if re.search(r"[/?#]|^https?:", key):
+            err(f"index.md:{line}: ключ «{key}» содержит путь, хост или query — "
+                f"нужен только хвост после /superset/dashboard/")
+            continue
+
+        # Пермалинк — ссылка на СОСТОЯНИЕ дашборда, а не на дашборд: её
+        # создаёт кнопка «поделиться» на каждый шаринг. Строка на пермалинк
+        # покрывает одно обращение и притворяется правилом.
+        #
+        # Признак измерен, а не выдуман: 25 пермалинков из выгрузки канала
+        # и из FEEDBACK_KEYS — ВСЕ ровно 11 символов, буквы и цифры без
+        # разделителей. Ни один из тридцати с лишним настоящих слагов той же
+        # выгрузки под это не подходит: у слагов есть дефисы или подчёркивания
+        # (`hr-executive-report`, `Office_traffic_daily_detail`) либо длина
+        # другая (`lna`, `growth`). Появится слаг ровно из 11 букв и цифр —
+        # проверка забракует его ложно, но ГРОМКО: строку увидит человек,
+        # а не бот молча зарезолвит не тот отчёт.
+        if re.fullmatch(r"[A-Za-z0-9]{11}", key) and not key.isdigit():
+            err(f"index.md:{line}: «{key}» похож на пермалинк Proteus "
+                f"(/dashboard/p/…). Пермалинки в мост не заводятся — "
+                f"нужен ключ из адресной строки дашборда")
+            continue
+
+        # Дубли ищутся БЕЗ УЧЁТА РЕГИСТРА — так же, как резолвит бот.
+        # Слаги в Proteus бывают и `Office_traffic_daily_detail`,
+        # и `hr-executive-report`, заказчик копирует ссылку как придётся,
+        # поэтому «Plan» сравнивает в нижнем регистре. Проверка, различающая
+        # регистр, пропустила бы пару `LNA` / `lna`: валидатор зелёный,
+        # а в карте бота остаётся ОДНА из двух строк — которая, зависит
+        # от порядка в файле. Ровно тот тихий отказ, ради которого
+        # эта таблица и проверяется.
+        low = key.lower()
+        if low in seen:
+            err(f"index.md:{line}: ключ «{key}» уже встречался в строке "
+                f"{seen[low]} — один ключ не может вести к двум отчётам "
+                f"(регистр не различается: так же резолвит бот)")
+        seen[low] = line
+
+        ent = by_id.get(rid)
+        if ent is None:
+            err(f"index.md:{line}: «{rid}» в «Ссылки отчётов» отсутствует "
+                f"в таблице «Сущности»")
+        elif ent["тип"] != "report":
+            err(f"index.md:{line}: «{rid}» в «Ссылки отчётов» имеет тип "
+                f"«{ent['тип']}», ожидается «report»")
+
+        checked = r.get("проверено", "")
+        if checked and checked != DASH and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", checked):
+            err(f"index.md:{line}: «проверено» у «{key}» — «{checked}», "
+                f"ожидается дата ГГГГ-ММ-ДД или прочерк")
+
+    # Ключ из статьи, которого нет в мосте, — самый дорогой пропуск: ссылка
+    # в статье есть, человек считает отчёт закрытым, а бот по ней не резолвит
+    # ничего. Ловится сверкой с `links:` фронтматтера.
+    for e in ent_rows:
+        if e["тип"] != "report" or e["путь"] in ("", DASH):
+            continue
+        if not os.path.isfile(e["путь"]):
+            continue          # отсутствие файла ловит check_articles
+        fm, _ = parse_frontmatter(e["путь"])
+        links = (fm or {}).get("links") or []
+        for url in links if isinstance(links, list) else [links]:
+            m = re.search(r"/superset/dashboard/(p/[A-Za-z0-9_-]+|[A-Za-z0-9_-]+)", url)
+            if not m:
+                continue
+            raw = m.group(1)
+            if raw.startswith("p/"):
+                continue          # пермалинк — в мост не идёт намеренно
+            if raw.lower() not in seen:
+                err(f"{e['путь']}: ключ ссылки «{raw}» из `links:` не заведён "
+                    f"в таблицу «Ссылки отчётов» — бот по этой ссылке "
+                    f"отчёт не найдёт")
 
 
 def check_routes(rt_rows):
@@ -726,7 +824,7 @@ def main():
         print(f"не найден {INDEX} — запускать из корня репозитория", file=sys.stderr)
         return 1
 
-    domains, entities, self_service, routes = read_index()
+    domains, entities, self_service, routes, report_links = read_index()
     dom_rows = as_dicts(domains, "Домены", ["домен", "о чём вопросы", "мастер"])
     ent_rows = as_dicts(entities, "Сущности",
                         ["id", "тип", "домен", "название", "путь",
@@ -735,6 +833,8 @@ def main():
                        ["id отчёта", "ключевые слова"])
     rt_rows = as_dicts(routes, "Маршруты",
                        ["маршрут", "ключевые слова", "кому", "где", "проверено"])
+    rl_rows = as_dicts(report_links, "Ссылки отчётов",
+                       ["ключ ссылки", "id отчёта", "проверено"])
 
     if ent_rows:
         check_entities(ent_rows)
@@ -744,6 +844,7 @@ def main():
             check_domains(dom_rows, ent_rows)
         if ss_rows:
             check_self_service(ss_rows, ent_rows)
+        check_report_links(rl_rows, ent_rows)
     if rt_rows:
         check_routes(rt_rows)
     check_process()

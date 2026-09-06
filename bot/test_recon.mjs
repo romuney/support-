@@ -622,6 +622,71 @@ line('11. ФАЗА J: ОПТОВЫЙ ПУТЬ ДОКАЗЫВАЕТСЯ СРАВ�
     /переводить нельзя/.test(sensPartial));
 }
 
+
+line('ФАЗА K: КЛЮЧ ССЫЛКИ PROTEUS ПО ОТЧЁТУ РЕЕСТРА');
+{
+  // Мост «ключ ссылки → отчёт» строится с той единственной стороны, которая
+  // замкнута: у нас есть подтверждённые URN отчётов, а /link по URN отдаёт
+  // ссылку Proteus. Фазы B и F ходили с других сторон и обе провалились.
+  //
+  // Пара «отчёт ↔ его ответ» держится ИНДЕКСОМ — тот же приём, на котором
+  // проект уже обжигался: промах здесь даёт не ошибку, а строки моста,
+  // назначенные не тем отчётам, и по виду вывода это неотличимо от нормы.
+  const runKeys = (rows, res) => new Function('$', '$json', js('Shape report keys'))(
+    (name) => {
+      if (name === 'K report rows') return { all: () => rows.map((json) => ({ json })) };
+      if (name === 'K report link') return { all: () => res.map((json) => ({ json })) };
+      throw new Error('node not executed: ' + name);
+    }, {})[0].json.report;
+
+  const R = (id, urn) => ({ id, title: id, urn });
+  const link = (url) => ok({ reports: { url } });
+
+  const out = runKeys(
+    [R('r-hr-detail-list', 'urn:dd:reports:reports:report:1728'),
+     R('r-attendance-calendar', 'urn:dd:reports:reports:report:2529'),
+     R('r-ok-rs', 'urn:dd:reports:reports:report:1804'),
+     R('r-social-graph', 'urn:dd:reports:reports:report:2668')],
+    [link('https://proteus.tcsbank.ru/superset/dashboard/hr-executive-detail-employee'),
+     link('https://proteus.tcsbank.ru/superset/dashboard/p/jQpM212k30X/'),
+     ok({}),
+     { statusCode: 404, body: {} }]);
+
+  check('готовая строка печатается в формате таблицы реестра',
+    /\| hr-executive-detail-employee \| слаг \| r-hr-detail-list \|/.test(out));
+  // Пермалинк в мост не идёт: это адрес состояния дашборда, на один отчёт
+  // их сколько угодно. Строка на него притворялась бы правилом.
+  check('пермалинк вынесен отдельно, а не в готовые строки',
+    /КАТАЛОГ ОТДАЛ ПЕРМАЛИНК/.test(out) &&
+    !/\| jQpM212k30X \|/.test(out));
+  // «Ссылки в карточке нет» и «ручка отказала» чинятся в разных местах:
+  // первое — владельцем отчёта в DD, второе — доступом. Слитые в один
+  // диагноз, они отправляют чинить не то.
+  check('пустой /link назван пробелом карточки, а не отказом',
+    /r-ok-rs — \/link ответил, но ссылок в нём нет/.test(out));
+  check('а отказ ручки назван кодом', /r-social-graph — HTTP 404/.test(out));
+
+  // Пара держится индексом: сдвиг на один элемент назначил бы ключ
+  // соседнему отчёту — молча и правдоподобно.
+  check('ключ назначен своему отчёту, а не соседнему',
+    !/\| hr-executive-detail-employee \| слаг \| r-attendance-calendar \|/.test(out));
+
+  // Расхождение «в статье один ключ, в каталоге другой» — не ошибка:
+  // у отчёта бывает и числовой ключ, и слаг. Но человек обязан увидеть
+  // его глазами, а не получить молча перезаписанным.
+  const conflict = runKeys(
+    [R('r-gitlab-activity', 'urn:dd:reports:reports:report:aktivnost-v-gitlab')],
+    [link('https://proteus.tcsbank.ru/superset/dashboard/35005/')]);
+  const known = JSON.parse(fs.readFileSync('DD Recon.json', 'utf8'))
+    .nodes.find((n) => n.name === 'Shape report keys')
+    .parameters.jsCode.includes("r-gitlab-activity");
+  check('ключ из статьи вписан сборщиком для сверки', known);
+  check('расхождение показано обеими сторонами',
+    /РАСХОЖДЕНИЕ/.test(conflict) && /grp7GLNyp7V/.test(conflict) && /35005/.test(conflict));
+  check('и сказано, что заводить надо ОБЕ строки',
+    /Заводите ОБЕ строки/.test(conflict));
+}
+
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');
 console.log('='.repeat(70));
 process.exit(fails ? 1 : 0);

@@ -458,6 +458,21 @@ bot AS (
            -- с `unit_link`, они отправляли бы чинить не то.
            max_by(json_extract_scalar(payload, '$.unit_state'),
                   event_ts) AS unit_state,
+           -- Ссылка на ОТЧЁТ: '' / 'resolved' / 'permalink' / 'unknown'.
+           -- Отчёт по ссылке узнаёт код, по таблице «Ссылки отчётов»
+           -- в реестре: ключ дашборда и ключ объекта в каталоге не связаны
+           -- ничем, и вывести один из другого нечем. Три исхода чинятся
+           -- в трёх разных местах, поэтому и колонка одна, а не флаг:
+           -- `resolved` — покрытие моста, `unknown` — очередь на заведение
+           -- строки, `permalink` — то, что мост не закроет НИКОГДА
+           -- (ссылка на состояние дашборда, а не на дашборд).
+           max_by(json_extract_scalar(payload, '$.report_link'),
+                  event_ts) AS report_link,
+           -- Сам ключ — рядом с исходом, и это не избыточность: по нему
+           -- заводят строку моста. Метрика без ключа называет проблему
+           -- и не даёт её починить.
+           max_by(json_extract_scalar(payload, '$.report_link_key'),
+                  event_ts) AS report_link_key,
            -- Плейсхолдер вида `<rk из шага 1>` в блоке ```sql``` готового
            -- ТЗ. Такой запрос выглядит запросом и не запускается
            -- копированием, а подставить значение заказчику нечем — ради
@@ -722,6 +737,8 @@ SELECT
     COALESCE(b.check_fields, 0)                             AS check_fields,
     b.unit_link,
     b.unit_state,
+    b.report_link,
+    b.report_link_key,
     b.draft_placeholders,
     b.draft_foreign_ids,
     b.draft_key_unlabeled,

@@ -947,6 +947,14 @@ line('13. ПРОЕКЦИЯ РЕЕСТРА: в промпт уходят толь
     !out.text.includes('## Самостоятельные выгрузки'));
   check('«Маршруты» в проекцию не уходят', !out.text.includes('## Маршруты'));
   check('и строки маршрутов тоже', !out.text.includes('Kirill Seliverstov'));
+  // Мост «ключ дашборда → отчёт» роутеру не просто не нужен — он вреден:
+  // ключи вида `19700` и `19710` модель перепутает, а код сравнивает
+  // дословно. Резолв делает «Plan», и таблицу он берёт из full.
+  check('«Ссылки отчётов» в проекцию не уходят',
+    !out.text.includes('## Ссылки отчётов'));
+  check('и сами ключи ссылок тоже',
+    !out.text.includes('hr-executive-detail-employee | r-hr-detail-list'));
+  check('но для Plan таблица сохранена', out.full.includes('## Ссылки отчётов'));
   // Сам id отчёта остаётся — он есть и в «Сущности», где он законен.
   // Проверяем по ключевым словам: они живут только в таблице самообслуживания.
   check('и ключевые слова самообслуживания тоже',
@@ -4746,6 +4754,175 @@ line('65. ТРАССА ПОКАЗЫВАЕТ ТОТ ПРОХОД, КОТОРЫЙ 
   check('без правки трасса читает первый проход',
     /уверенность действующая: medium/.test(one));
   check('и про правку не пишет ничего', !/ПРАВКА/.test(one));
+}
+
+
+// ===================================================================== 66
+line('66. ССЫЛКА НА ОТЧЁТ: КЛЮЧ РЕЗОЛВИТ КОД, ПЕРМАЛИНК НЕ РЕЗОЛВИТ НИКТО');
+{
+  // Самый частый вид обращения в канале — ссылка на дашборд плюс описание
+  // проблемы: в выгрузке за июль–август поле «Отчет» заполнено в 47 случаях
+  // из 156, и в 37 из них стоит ссылка. До этой правки ядро тратило ссылку
+  // на один булев признак `asksReport` и писало автору «отчёта в материалах
+  // нет» — имея адрес отчёта на руках.
+  //
+  // Ключ ссылки и ключ объекта в каталоге не связаны ничем (у «Активности
+  // в GitLab» ключ 35005, в DD она `aktivnost-v-gitlab`), поиск по ключу
+  // отдаёт пусто, от витрины к отчёту в каталоге пути нет. Значит пара живёт
+  // в git, и резолв — это сверка со строкой реестра, а не догадка модели.
+  const P = (trigger) => runPlan(
+    JSON.stringify({ domains: [], articles: [], dd: [], no_question: false }),
+    REGISTRY, trigger);
+
+  const slug = P({ report_url: 'https://proteus.tcsbank.ru/superset/dashboard/hr-executive-report' });
+  check('слаг резолвится в отчёт', slug.report_link_id === 'r-hr-executive-report');
+  check('вид ключа назван', slug.report_link_kind === 'slug');
+  check('исход назван словом', slug.report_link_outcome === 'resolved');
+  check('название отчёта уехало автору', slug.report_link_title === 'HR Executive Report');
+  check('статья отчёта в материалах', slug.files.includes('kb/reports/hr-executive-report.md'));
+  check('и добрана кодом, а не роутером', slug.added_report_link.includes('r-hr-executive-report'));
+  // Карточка отчёта — ПЕРВЫМ объектом, впереди витрины по умолчанию:
+  // на вопрос со ссылкой отвечают назначение и владелец, а не инвентарь
+  // витрины под ним, а потолок MAX_DD режет хвост.
+  check('карточка отчёта — первый объект DD',
+    slug.dd[0].urn === 'urn:dd:reports:reports:report:1845');
+
+  // ХОСТ ЛЮБОЙ, СЛЭШ И QUERY НЕ МЕШАЮТ. В выгрузке канала встречаются оба
+  // хоста — proteus.tcsbank.ru и proteus.tbank.ru, — и ссылка приходит
+  // и со слэшем, и с фильтрами в query.
+  const num = P({ report_url: 'https://proteus.tbank.ru/superset/dashboard/19710/?native_filters=abc#tab' });
+  check('числовой ключ с другого хоста, со слэшем и query',
+    num.report_link_id === 'r-attendance-calendar' && num.report_link_key === '19710');
+
+  // ПЕРМАЛИНК УЗНАЁТСЯ И НЕ РЕЗОЛВИТСЯ. Это адрес сохранённого состояния
+  // дашборда: его создаёт кнопка «поделиться», на один отчёт их сколько
+  // угодно. Притвориться, что резолв возможен, здесь дороже всего —
+  // неверно названный отчёт хуже неназванного.
+  const perma = P({ report_url: 'https://proteus.tcsbank.ru/superset/dashboard/p/g9869Z4P3JN/' });
+  check('пермалинк узнан', perma.report_link_kind === 'permalink');
+  check('и НЕ зарезолвен', perma.report_link_id === '');
+  check('исход отличается от «ключа нет»', perma.report_link_outcome === 'permalink');
+
+  const unknown = P({ report_url: 'https://proteus.tcsbank.ru/superset/dashboard/37519/' });
+  check('ключа нет в мосте — свой исход', unknown.report_link_outcome === 'unknown');
+  check('и ключ назван, по нему заведут строку', unknown.report_link_key === '37519');
+
+  // ШИРОКО ИЩЕМ, УЗКО ПРИНИМАЕМ. Ключ без схемы («dashboard/14586» в тексте)
+  // принимается ТОЛЬКО если нашёлся в реестре: совпасть надо и с путём,
+  // и со строкой таблицы. Не нашёлся — исхода нет вовсе, а не «unknown»:
+  // про пересказанную в переписке ссылку сказать нечего.
+  // Шапка таблицы отсеивается разбором: иначе в мосте оказывается пара
+  // «ключ ссылки» → «id отчёта». Совпасть она не может, но мусор в карте
+  // ровно того класса, из-за которого id маршрута однажды стал id отчёта.
+  check('шапка таблицы не стала строкой моста',
+    P({ question: 'dashboard/id отчёта' }).report_link_outcome === '');
+
+  const bare = P({ question: 'проблема тут dashboard/14586 не грузится' });
+  check('короткая ссылка из текста резолвится', bare.report_link_id === 'r-referral-support');
+  const bareMiss = P({ question: 'смотрю dashboard/99999 и там пусто' });
+  check('короткая ссылка без строки в мосте молчит', bareMiss.report_link_outcome === '');
+  const inWord = P({ question: 'открой mydashboard/4823 там' });
+  check('слово внутри слова не совпадает', inWord.report_link_outcome === '');
+
+  // Из двух ссылок берётся ТА, что нашлась, а не первая по порядку:
+  // заказчик прикладывает и пермалинк, и адрес дашборда.
+  const two = P({ report_url: 'https://proteus.tcsbank.ru/superset/dashboard/p/Xb3e0nbkpdm/ ' +
+                              'https://proteus.tcsbank.ru/superset/dashboard/4823' });
+  check('из двух ссылок выбрана резолвящаяся',
+    two.report_link_id === 'r-legal-position-period');
+
+  const none = P({ question: 'сколько людей в юните' });
+  check('без ссылки признака нет', none.report_link_outcome === '');
+
+  // ------------------------------------------------- слова автору
+  const words = (plan, dd) => runMaterials(
+    plan,
+    plan.files.map(() => ({ content: b64('# статья\n\n## Назначение\nтекст') })),
+    dd,
+  ).materials;
+
+  const cardOk = words(slug, slug.dd.map((d) => ({
+    dd_meta: 'ОБЪЕКТ DD: отчёт ' + d.urn + '\nНАЗНАЧЕНИЕ:\nдинамика численности',
+  })));
+  check('узнанный отчёт назван автору по имени',
+    /ОТЧЁТ УЗНАН ПО ССЫЛКЕ[^\n]*HR Executive Report/.test(cardOk));
+  check('и сказано сверить проблему с назначением',
+    /сверь описанную проблему с назначением/.test(cardOk));
+  check('и назвать владельца из карточки', /назови владельца и канал поддержки/.test(cardOk));
+
+  // Карточка могла не доехать: отказ ручки, потолок, невыполнившийся узел.
+  // Тогда у автора есть статья и нет владельца — и он обязан знать, чего
+  // именно у него нет, а не выдумывать имя.
+  const cardMissing = words(slug, null);
+  check('карточка не доехала — это сказано отдельно',
+    /Карточка отчёта из каталога НЕ доехала/.test(cardMissing));
+  check('и владельца называть запрещено', /Владельца и канал поддержки не называй/.test(cardMissing));
+
+  const permaWords = words(perma, null);
+  check('про пермалинк сказано, что резолвить нечем',
+    /ПЕРМАЛИНК PROTEUS[\s\S]*не определяется НИКАК/.test(permaWords));
+  check('и попрошена ссылка из адресной строки',
+    /адресной строки/i.test(permaWords));
+  check('угадывать отчёт запрещено прямо', /Не угадывай отчёт/.test(permaWords));
+
+  const unknownWords = words(unknown, null);
+  check('про неизвестный ключ сказано, что отчёта в базе нет',
+    /КЛЮЧ ССЫЛКИ «37519» В БАЗЕ НЕ ЗАВЕДЁН/.test(unknownWords));
+
+  // Старая заметка «спрашивают про отчёт, а его нет» не должна дублировать
+  // новые: они говорят то же самое, но точнее.
+  check('старая заметка не дублирует новые',
+    !/Спрашивают про ОТЧЁТ, а самого отчёта в материалах нет/.test(unknownWords));
+
+  // ------------------------------------------------- трасса
+  const tr = runTrace({
+    'When called by adapter': { question: 'вопрос', mode: 'channel' },
+    'Decode registry': { full: REGISTRY },
+    Plan: slug,
+    'Build materials': { has_materials: true, tables: [] },
+  }).trace;
+  check('трасса называет ключ и исход',
+    /ссылка на отчёт[^\n]*slug[^\n]*hr-executive-report[^\n]*r-hr-executive-report/.test(tr));
+  const trPerma = runTrace({
+    'When called by adapter': { question: 'вопрос', mode: 'channel' },
+    'Decode registry': { full: REGISTRY },
+    Plan: perma,
+    'Build materials': { has_materials: true, tables: [] },
+  }).trace;
+  check('и про пермалинк пишет, что резолвить нечем',
+    /пермалинк, резолвить нечем/.test(trPerma));
+
+  // ------------------------------------------------- задача для базы
+  const parseJs = js('Parse answer');
+  const runP = (mat) => new Function('$', '$json', parseJs)(
+    (name) => {
+      if (name === 'Build materials') return { first: () => ({ json: mat }) };
+      if (name === 'When called by adapter') {
+        return { first: () => ({ json: { question: 'вопрос', mode: 'channel' } }) };
+      }
+      if (name === 'Plan') return { first: () => ({ json: {} }) };
+      throw new Error('node not executed: ' + name);
+    },
+    { output: 'ЧЕРНОВИК ОТВЕТА:\nтекст\nУВЕРЕННОСТЬ: средняя' },
+  )[0].json;
+
+  const taskUnknown = runP({
+    materials: 'x', has_materials: true, tables: [],
+    asks_report: true, report_seen: false,
+    report_link_outcome: 'unknown', report_link_key: '37519',
+  });
+  check('задача для базы называет сам ключ',
+    taskUnknown.kb_tasks.some((t) => /«37519»[\s\S]*Ссылки отчётов/.test(t)));
+  check('и исход уехал в телеметрию', taskUnknown.report_link === 'unknown');
+  check('вместе с ключом', taskUnknown.report_link_key === '37519');
+
+  const taskPerma = runP({
+    materials: 'x', has_materials: true, tables: [],
+    asks_report: true, report_seen: false,
+    report_link_outcome: 'permalink', report_link_key: 'g9869Z4P3JN',
+  });
+  check('про пермалинк сказано, что заводить нечего',
+    taskPerma.kb_tasks.some((t) => /Заводить в мост нечего/.test(t)));
 }
 
 console.log(fails ? `ПРОВАЛОВ: ${fails}` : 'ВСЕ ПРОВЕРКИ ПРОШЛИ');

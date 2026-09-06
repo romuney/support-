@@ -177,7 +177,7 @@ def read_registry():
     at = next((p for p in REGISTRY_PATHS if os.path.exists(p)), None)
     if at is None:
         raise SystemExit("не найден реестр, искали: " + ", ".join(REGISTRY_PATHS))
-    tables, reports = [], []
+    tables, reports, report_rows = [], [], []
     for line in open(at, encoding="utf-8"):
         if not line.strip().startswith("|"):
             continue
@@ -187,17 +187,63 @@ def read_registry():
         urn = c[5]
         if not urn.startswith("urn:"):
             continue
-        (tables if c[1] == "table" else reports if c[1] == "report" else []).append(urn)
+        if c[1] == "table":
+            tables.append(urn)
+        elif c[1] == "report":
+            reports.append(urn)
+            # id и название нужны фазе K: она печатает готовые строки таблицы
+            # «Ссылки отчётов», а там колонка — именно id сущности реестра.
+            report_rows.append({"id": c[0], "title": c[3], "urn": urn})
     if not tables:
         raise SystemExit("в реестре не нашлось ни одной таблицы с dd_urn")
     if not reports:
         raise SystemExit(
             "в реестре нет ни одного отчёта с dd_urn — фазе A нечего разведывать"
         )
-    return tables, reports
+    return tables, reports, report_rows
 
 
-TABLE_URNS, REPORT_URNS = read_registry()
+TABLE_URNS, REPORT_URNS, REPORT_ROWS = read_registry()
+
+
+def read_article_keys():
+    """id отчёта → ключ ссылки Proteus, вычитанный из `links:` его статьи.
+
+    Нужен РОВНО для сверки в фазе K: расхождение «в статье один ключ,
+    в каталоге другой» человек обязан увидеть глазами, а не получить
+    молча перезаписанным. Источником моста этот словарь не является:
+    в статье стоит одна ссылка из нескольких возможных, и та — та,
+    которую однажды прислал заказчик.
+    """
+    # Путь к статье лежит в той же строке реестра, что и dd_urn, но
+    # read_registry его не отдаёт — колонку берём здесь, перечитав файл.
+    known = {r["id"] for r in REPORT_ROWS}
+    keys = {}
+    at = next((p for p in REGISTRY_PATHS if os.path.exists(p)), None)
+    base = os.path.dirname(at)
+    for line in open(at, encoding="utf-8"):
+        if not line.strip().startswith("| r-"):
+            continue
+        c = [x.strip() for x in line.strip().strip("|").split("|")]
+        if len(c) < 6 or c[0] not in known:
+            continue
+        path = os.path.join(base, "..", c[4])
+        if c[4] in ("", "—") or not os.path.exists(path):
+            continue
+        text = open(path, encoding="utf-8").read()
+        m = re.search(r"^links:\s*\[(.*?)\]", text, re.M)
+        if not m:
+            continue
+        url = m.group(1).strip()
+        k = re.search(r"/superset/dashboard/(p/[A-Za-z0-9_-]+|[A-Za-z0-9_-]+)", url)
+        if not k:
+            continue
+        raw = k.group(1)
+        keys[c[0]] = raw[2:] if raw.startswith("p/") else raw
+    return {k: v for k, v in keys.items() if v}
+
+
+ARTICLE_KEYS = read_article_keys()
 RECON_URN = REPORT_URNS[0]
 
 # Ключи ссылок Proteus из фидбека аналитика 2026-08-26. Нужны РОВНО для одного:
@@ -1968,6 +2014,190 @@ nodes.append(
 )
 
 
+
+# ---------------------------------------------------------------- ФАЗА K
+#
+# КЛЮЧ ССЫЛКИ PROTEUS ПО КАЖДОМУ ОТЧЁТУ РЕЕСТРА — ТОТ САМЫЙ МОСТ.
+#
+# Фазы B и F пытались построить мост ОПТОМ, со стороны каталога, и обе были
+# несостоятельны (см. заголовок файла): от витрины к дашборду пути нет,
+# а перечисление каталога отдаёт отчёты всей компании, десятки тысяч.
+# Здесь мост строится с ТРЕТЬЕЙ стороны, и она единственная замкнута:
+# у нас есть пятнадцать ПОДТВЕРЖДЁННЫХ URN отчётов в реестре, а `/link`
+# по URN отдаёт ссылку Proteus — живой прогон 2026-08-27 на report:1728
+# вернул `{"reports": {"url": "…/superset/dashboard/hr-executive-detail-employee"}}`.
+#
+# То есть направление «наш отчёт → его ключ ссылки» работает, а обратное
+# («чужой ключ → отчёт») не работает ничем. Мост поэтому и строится один раз
+# по своим отчётам, а в git ложится готовой таблицей: ключ не протухает,
+# протухает то, что лежит по URN.
+#
+# Три ноды на пятнадцать отчётов: список из реестра, HTTP по разу на элемент,
+# шейпер печатает ГОТОВЫЕ СТРОКИ таблицы «Ссылки отчётов» для kb/index.md.
+# Тот же приём, что в фазе G, и по той же причине: пятнадцать статических
+# нод разъехались бы с реестром при первой же новой строке.
+REPORT_KEYS_JS = r"""
+// Отчёты берутся ИЗ РЕЕСТРА, а не из списка в сборщике: копия разъехалась бы
+// молча — то же правило, по которому состав полей не копируется в статью.
+const rows = __REPORT_ROWS__;
+return rows.map((r) => ({ json: r }));
+"""
+
+nodes.append(
+    node("K report rows", "n8n-nodes-base.code", 2, [-40, 2400],
+         {"mode": "runOnceForAllItems",
+          "jsCode": REPORT_KEYS_JS.replace(
+              "__REPORT_ROWS__", json.dumps(REPORT_ROWS, ensure_ascii=False))})
+)
+
+nodes.append(
+    get("K report link",
+        f"={{{{ '{BASE}/entity/' + encodeURIComponent($json.urn) + '/link' }}}}",
+        [180, 2400])
+)
+
+SHAPE_REPORT_KEYS_JS = r"""
+// ГОТОВЫЕ СТРОКИ ТАБЛИЦЫ «Ссылки отчётов» ДЛЯ kb/index.md.
+//
+// Печатается три списка, и они намеренно разделены:
+//   ✔ каталог отдал ссылку — строка готова к вставке;
+//   ≠ каталог отдал ДРУГОЙ ключ, чем стоит в статье — обе строки, решает человек;
+//   ✗ ссылки нет — в карточке отчёта не заполнен `/link`, это пробел
+//     на стороне владельца, а не отказ ручки, и лечится он в DD, не у нас.
+// Слить их в один список значит выдать пробел владельца за отказ каталога:
+// чинить их надо в разных местах.
+const out = [];
+const say = (s) => out.push(s);
+
+let asked = [];
+try { asked = $('K report rows').all().map((i) => i.json); } catch (e) { asked = []; }
+let res = [];
+try { res = $('K report link').all().map((i) => i.json); } catch (e) { res = []; }
+
+// Ключи ссылок из статей kb/reports/*.md — вписаны сборщиком на момент сборки.
+// Нужны РОВНО для сверки: расхождение «в статье одно, в каталоге другое»
+// это единственное, что человек обязан увидеть глазами.
+const FROM_ARTICLES = __ARTICLE_KEYS__;
+
+// РАЗБОР КЛЮЧА — ОДНО ПРАВИЛО НА ВЕСЬ ПРОЕКТ.
+// Копия этого разбора живёт в ядре бота (REPORT_LINK_JS в build_time_flows.py),
+// и разъехаться им нельзя: там по ключу ищут строку, здесь строку печатают.
+// Поэтому форма ключа описана одинаково и словами, и регуляркой.
+//   /superset/dashboard/19710      → числовой
+//   /superset/dashboard/lna/       → слаг
+//   /superset/dashboard/p/aBc123/  → пермалинк: создаётся на каждый шаринг,
+//                                    с ключом отчёта не связан, в мост НЕ идёт
+function parseKey(url) {
+  const m = String(url || '').match(
+    /(?:^|[^A-Za-z0-9_.-])dashboard\/(p\/[A-Za-z0-9_-]+|[A-Za-z0-9_-]+)/i);
+  if (!m) return null;
+  const raw = m[1];
+  if (/^p\//.test(raw)) return { key: raw.slice(2), kind: 'пермалинк' };
+  return { key: raw, kind: /^\d+$/.test(raw) ? 'числовой' : 'слаг' };
+}
+
+const ready = [];
+const conflict = [];
+const missing = [];
+const perma = [];
+
+asked.forEach((a, i) => {
+  const r = res[i] || {};
+  const code = r && r.statusCode;
+  const body = (r && r.body) || r || {};
+  if (code !== undefined && code >= 400) {
+    missing.push(`${a.id} — HTTP ${code} по ${a.urn}` +
+      (code === 401 ? ' (истёк Service Account)' : ''));
+    return;
+  }
+  // Ответ `/link` — СЛОВАРЬ «ключ источника → {url}», а не массив.
+  // Печатаем все пришедшие ключи: источников у отчёта может быть несколько,
+  // и молча брать первый значит однажды взять не тот.
+  const keys = body && typeof body === 'object' && !Array.isArray(body)
+    ? Object.keys(body) : [];
+  const urls = keys.map((k) => [k, body[k] && body[k].url]).filter(([, u]) => u);
+  if (!urls.length) {
+    missing.push(`${a.id} — /link ответил, но ссылок в нём нет ` +
+      `(ключи: ${keys.join(', ') || 'нет вовсе'}). ` +
+      'Это пробел в карточке отчёта, чинится в DD.');
+    return;
+  }
+  for (const [src, url] of urls) {
+    const parsed = parseKey(url);
+    if (!parsed) {
+      missing.push(`${a.id} — ссылка не похожа на дашборд Proteus: ${url} (источник ${src})`);
+      continue;
+    }
+    if (parsed.kind === 'пермалинк') {
+      perma.push(`${a.id} — каталог отдал ПЕРМАЛИНК ${parsed.key}: ${url}`);
+      continue;
+    }
+    const inArticle = FROM_ARTICLES[a.id];
+    const row = `| ${parsed.key} | ${parsed.kind} | ${a.id} | __TODAY__ |`;
+    if (inArticle && inArticle !== parsed.key) {
+      conflict.push(`${a.id}: в статье «${inArticle}», каталог отдал «${parsed.key}»\n    ${row}`);
+    } else {
+      ready.push(row);
+    }
+  }
+});
+
+say('ФАЗА K. КЛЮЧИ ССЫЛОК PROTEUS ПО ОТЧЁТАМ РЕЕСТРА');
+say('');
+say(`Спрошено отчётов: ${asked.length}, ответов: ${res.length}`);
+say('');
+say('--- ГОТОВЫЕ СТРОКИ для таблицы «Ссылки отчётов» в kb/index.md ---');
+if (ready.length) {
+  say('| ключ | вид | id отчёта | проверено |');
+  say('|---|---|---|---|');
+  for (const r of ready.sort()) say(r);
+} else {
+  say('  ни одной. Смотрите списки ниже — там сказано почему.');
+}
+
+if (conflict.length) {
+  say('');
+  say('--- РАСХОЖДЕНИЕ: в статье один ключ, в каталоге другой ---');
+  say('Оба верны: у отчёта бывает и числовой ключ, и слаг. Заводите ОБЕ строки —');
+  say('таблица допускает несколько ключей на один отчёт, ради этого и сделана.');
+  for (const c of conflict) say('  ' + c);
+}
+
+if (perma.length) {
+  say('');
+  say('--- КАТАЛОГ ОТДАЛ ПЕРМАЛИНК ---');
+  say('В мост НЕ идёт: пермалинк создаётся на каждый шаринг дашборда и с ключом');
+  say('отчёта не связан. Попросите владельца отчёта поставить в карточку DD');
+  say('ссылку из адресной строки дашборда — тогда ключ появится сам.');
+  for (const c of perma) say('  ' + c);
+}
+
+if (missing.length) {
+  say('');
+  say('--- ССЫЛКИ НЕТ ---');
+  for (const m of missing) say('  ' + m);
+}
+
+say('');
+say('ЧТО С ЭТИМ ДЕЛАТЬ');
+say('  Скопировать блок «ГОТОВЫЕ СТРОКИ» в kb/index.md, в таблицу');
+say('  «Ссылки отчётов», и прогнать `python3 validate_kb.py`: он проверит,');
+say('  что каждый id существует в «Сущности» и имеет тип report, а один ключ');
+say('  не назначен двум отчётам. Строки из «РАСХОЖДЕНИЕ» добавляются ТОЖЕ —');
+say('  это второй ключ того же отчёта, а не замена первому.');
+
+return [{ json: { report: out.join('\n') } }];
+"""
+
+nodes.append(
+    node("Shape report keys", "n8n-nodes-base.code", 2, [400, 2400],
+         {"mode": "runOnceForAllItems",
+          "jsCode": SHAPE_REPORT_KEYS_JS
+          .replace("__ARTICLE_KEYS__", json.dumps(ARTICLE_KEYS, ensure_ascii=False))
+          .replace("__TODAY__", "ГГГГ-ММ-ДД")})
+)
+
+
 CHAIN = (
     ["Run recon"]
     + [n for n, _ in PHASE_A]
@@ -1985,6 +2215,7 @@ CHAIN = (
     + ["J ref summary"]
     + [n for n, _, _ in PHASE_J_POST]
     + ["J sens urns", "J batch sens", "Shape bulk"]
+    + ["K report rows", "K report link", "Shape report keys"]
 )
 conn = {
     a: {"main": [[{"node": b, "type": "main", "index": 0}]]}
@@ -2011,6 +2242,8 @@ print(f"OK {OUT} — {len(nodes)} нод")
 print(f"  разведка отчёта: {RECON_URN}")
 print(f"  витрин из реестра: {len(TABLE_URNS)}")
 print(f"  ключей эталона:   {len(FEEDBACK_KEYS)}")
+print(f"  отчётов для фазы K: {len(REPORT_ROWS)}, "
+      f"ключей из статей для сверки: {len(ARTICLE_KEYS)}")
 print()
 print("ОТКРЫТ ОДИН ВОПРОС — ФАЗА J: есть ли оптовый путь за описаниями полей.")
 print("Пока он не измерен, поиск по смыслу стоит ТРИ запроса на колонку")
@@ -2028,6 +2261,9 @@ print("  «Shape sensitivity» — ГДЕ лежит признак чувств
 print("  «Shape bulk»   — есть ли ОПТОВЫЙ путь за описаниями полей:")
 print("                   сверка оптового ответа с эталоном, взятым")
 print("                   одиночной ручкой в этом же прогоне")
+print("  «Shape report keys» — ГОТОВЫЕ СТРОКИ таблицы «Ссылки отчётов»:")
+print("                   ключ ссылки Proteus по каждому отчёту реестра,")
+print("                   вставляется в kb/index.md как есть")
 print("  «Shape values» — видит ли Trino витрины, кардинальность поля")
 print("                   и чем отказ по недоступной таблице отличается")
 print("                   от пустого результата")
