@@ -60,14 +60,33 @@ DEFAULT_REFS = ["bulli-ref.png", "bully-style-ref.png"]
 
 # Фраза из `prompt-stickers.md`: она и есть приём, которым держится стиль
 # поштучных прогонов — второй образец подтверждает, что первый не случайность.
+# Якорь — принятая иконка, и она в этом паке главнее описания словами.
+#
+# Раньше здесь стояло «Ignore its pose, its crop and its background»: якорь
+# подавался как образец одной фактуры, а кадр, плашку и позу задание описывало
+# заново словами. Это и оказалось причиной, по которой пак раз за разом
+# приходил не тем: описание словами проигрывает картинке, и каждая новая
+# клауза про плашку сдвигала кадр. Прогоны 06–07.09 — три захода на палитру
+# и два на кадр, и всё это время принятая иконка лежала рядом неиспользованной.
+#
+# Теперь наоборот: с якоря копируется ВСЁ, кроме того, что подстановка меняет
+# явно, — поза, кадр, плашка, её рамка и переход тонов, свет. Подстановка
+# меняет цвет, выражение и предмет, и только их.
 ANCHOR_NOTE = (
-    "The last attached image is an approved image of this character. Match its "
-    "STYLE exactly and only its style: the same 3D render, the same fine fur "
-    "with individual hairs, the same soft studio lighting and shading, the same "
-    "freckles and whiskers on the muzzle, the same worn fabric texture on the "
-    "cap, the same huge glossy eyes with the same highlights. Ignore its pose, "
-    "its crop and its background — those come from the instructions above, not "
-    "from it. Do not copy its background."
+    "The last attached image is the APPROVED icon of this set. It is the "
+    "master: copy it as closely as you can. Reproduce EXACTLY, without "
+    "redesigning any of it — the same 3D render, the same fine fur with "
+    "individual hairs, the same soft studio lighting and shading, the same "
+    "freckles and whiskers, the same worn fabric texture on the cap, the same "
+    "huge glossy eyes with the same highlights; the same round badge at the "
+    "same size in the frame, with the same thick vivid rim and the same fade "
+    "from the bright ring inwards to the paler centre behind his head; the "
+    "same camera distance, the same crop, the same chubby proportions and the "
+    "same amount of him showing. Think of it as the same photograph retouched, "
+    "not as a new picture of the same character. Change ONLY the three things "
+    "the instructions above name for this one image: the dye colour, the "
+    "expression and the object. Everything else must match the approved icon "
+    "pixel for pixel as far as you can manage."
 )
 
 MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
