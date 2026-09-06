@@ -103,11 +103,12 @@ a thin margin of grey background at the four corners.
 The badge has three zones, from the edge inwards, and the first of them is what
 makes it look like a badge at all:
 
-1. **A THICK, VIVID RIM.** A bold ring of strong saturated colour running all
-   the way around the edge of the circle. It is THICK — about one twentieth of
-   the badge's diameter, a band you notice, not a hairline. It is the most
-   SATURATED colour in the whole image, and clearly DARKER than the field
-   inside it. Its exact colour is named for each image below. This rim is what
+1. **A THICK, VIVID RIM.** A bold, heavy ring of strong saturated colour
+   running all the way around the edge of the circle. It is WIDE — about one
+   TENTH of the badge's diameter, as thick as the white check mark is wide,
+   a band you see before you see anything else. It is NOT a hairline, NOT a
+   thin outline, NOT a 1-pixel stroke. It is the most SATURATED colour in the
+   whole image, and clearly DARKER than the field inside it. Its exact colour is named for each image below. This rim is what
    makes the badge read as a badge at 21 x 21 pixels; without it the icon
    looks like a pale washed-out blob.
 2. **A BRIGHT FIELD** just inside the rim, in the lighter, less saturated shade
@@ -143,15 +144,19 @@ and the toes — fills at least three quarters of the width and three quarters o
 the height of the frame, so that at 21 x 21 pixels the gesture alone is what
 you see.
 
-Of the leg show ONLY A SHORT STUB OF WRIST, and it is SMALL: no more than about
-a fifth of the height of the frame, just enough to say where the paw is
-attached. There is NO forearm, NO leg, NO arm crossing the frame and nothing
-running out to a side edge. Zoom right in on the paw.
+Of the leg show ONLY A TINY STUB OF WRIST — about a TENTH of the height of the
+frame, a couple of centimetres of fur and no more, just enough to say where the
+paw is attached. There is NO forearm, NO leg, NO arm, no long furry column
+running across the picture and nothing running out to a side edge. If the stub
+is as long as the paw is tall, it is far too long. Zoom right in on the paw:
+the paw and the toes are the picture, the wrist is barely there.
 
 The wrist enters the way it does in the everyday emoji: for a thumbs-up from
-the BOTTOM edge, for a thumbs-down from the TOP edge. Everything else about the
-two is identical — the same paw, the same size, the same place in the frame,
-the same light — so that the pair reads as one set turned over.
+the BOTTOM edge, for a thumbs-down from the TOP edge. Everything else is
+identical in EVERY paw image — the same paw, the SAME SIZE, the same place in
+the frame, the same light. Measure it: the paw covers the same share of its
+frame in all of them, so that side by side on three buttons they look like one
+set. An object in the paw never makes the paw smaller.
 
 IT IS A DOG'S PAW AND NEVER A HAND. It is broad and chunky, with FOUR short
 thick rounded toes of roughly equal length and a big soft pad: the same cream
@@ -362,18 +367,18 @@ no label, no watermark, no border, no frame.
 
 | файл | `<ЯЧЕЙКА>` |
 |---|---|
-| `bully_ready` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Chin lifted proudly, wide happy open smile, one front paw raised in a confident presenting gesture. No object.` |
+| `bully_ready` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Chin lifted high and proud, chest puffed out, a closed-mouth satisfied smile with the head tilted slightly back — pleased with himself, a job just finished. Both front paws rest on the lower rim of the badge. He is NOT waving and NOT raising a paw: that is the greeting icon, and these two must not look alike. No object.` |
 | `bully_done` | `BADGE with a thick vivid rim #40814C and a field of light sage green #95A67A. Cap dyed deeper green #698265. Eyes closed in a satisfied happy smile, a big flat WHITE check mark beside the muzzle in the lower half of the badge.` |
 | `bully_fail` | `BADGE with a thick vivid rim #86322D and a field of light warm red #CA6660. Cap dyed deeper red #A8504E. Sad apologetic face: mouth a small unhappy downturned line, eyebrows pulled up in the middle, head dipped slightly. The ears stay big and upright exactly as in the references, and the eyes stay exactly as in the references — huge, round, glossy, cartoon dark-brown with the same big white highlights. They are not realistic dog eyes, not watery, not teary, not narrowed. A big flat WHITE cross mark beside the muzzle in the lower half of the badge.` |
-| `bully_hi` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. One front paw raised high beside the muzzle waving hello, big warm open smile. No object.` |
+| `bully_hi` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. One front paw raised high beside the muzzle, pad forward, waving hello, big warm open smile with the tongue showing. The raised waving paw is what makes this one different from the proud icon. No object.` |
 | `bully_helpful` | `PAW. A big clear thumbs-up framed like the standard thumbs-up emoji: the paw seen from the side and filling the frame, the outer toe stretched straight UP like a thumb, the other toes curled in towards the pad. Only a short stub of wrist at the BOTTOM edge — no forearm, no leg. Nothing else in the image.` |
 | `bully_not_helpful` | `PAW. A big clear thumbs-down framed like the standard thumbs-down emoji: the SAME paw as the thumbs-up at the same size and in the same place, turned over — the outer toe stretched straight DOWN like a thumb, the other toes curled in towards the pad. Only a short stub of wrist at the TOP edge — no forearm, no leg. Nothing else in the image.` |
-| `bully_detail` | `PAW. The same paw filling the frame the same way, holding a short thick yellow pencil clamped between two of its toes and pressed against the pad, tilted as if about to write — no fingers grip it. Only a short stub of wrist at the BOTTOM edge. Under the pencil tip a small blank white notepad, clearly smaller than the paw. The notepad is completely blank: no writing, no ruled lines, no letters on it.` |
+| `bully_detail` | `PAW. The SAME paw at the SAME size and in the same place as the thumbs-up, holding a short thick yellow pencil clamped between two of its toes and pressed against the pad, tilted as if about to write — no fingers grip it. Only a short stub of wrist at the BOTTOM edge. There is NO paper, NO notepad and NO desk: the paw with the pencil fills the frame exactly as the other two paws do.` |
 | `bully_search` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Holding up a big magnifying glass with a thick flat WHITE rim and a white handle, at least half the diameter of the badge, in front of one eye; that eye hugely magnified through the clear lens, the other eye normal size, focused curious expression.` |
 | `bully_high` | `BADGE with a thick vivid rim #40814C and a field of light sage green #95A67A. Cap dyed deeper green #698265. Calm confident closed-mouth smile, eyes bright and steady, head straight. Nothing else in the image at all: no object, no raised paws, no symbol. The green badge is the whole signal.` |
 | `bully_mid` | `BADGE with a thick vivid rim #AD6B25 and a field of light amber #DDA060. Cap dyed deeper amber #C28B48. Head tilted to one side, one eyebrow raised higher than the other, mouth a small wavy unsure line. Both ears stay big and upright. Nothing else in the image at all: no object, no raised paws, no symbol.` |
 | `bully_none` | `BADGE with a thick vivid rim #86322D and a field of light warm red #CA6660. Cap dyed deeper red #A8504E. Eyes lowered, mouth a small sad apologetic line, head dipped. Both ears stay big and upright. Nothing else in the image at all: no object, no raised paws, no symbol.` |
-| `bully_unknown` | `BADGE with a thick vivid rim #4F7090 and a field of light blue-grey #8DA3B8, clearly BLUE-grey and never a neutral, flat or silver grey. Cap dyed plain washed-out grey #808790. Washed out and unpainted. Completely blank puzzled expression, both eyebrows raised high, mouth slightly open, eyes wide and empty. Nothing else in the image at all: no object, no raised paws, no symbol.` |
+| `bully_unknown` | `BADGE with a thick vivid rim #426183 and a field of cool blue-grey #7E93AB, clearly BLUE-grey and never a neutral, flat or silver grey. Cap dyed plain washed-out grey #808790. Washed out and unpainted. Completely blank puzzled expression, both eyebrows raised high, mouth slightly open, eyes wide and empty. Nothing else in the image at all: no object, no raised paws, no symbol.` |
 | `bully_flag` | `BADGE with a thick vivid rim #86322D and a field of light warm red #CA6660. Cap dyed deeper red #A8504E. Alarmed wide-open eyes, mouth open mid-bark, holding up a WHITE pennant beside the muzzle: a clear TRIANGLE of white cloth on a short white pole, pointing away from him, about a third of the diameter of the badge. It is a triangular signal flag, NOT a rectangle, NOT a square, NOT a sheet of paper, NOT a napkin.` |
 | `bully_warn` | `BADGE with a thick vivid rim #AD6B25 and a field of light amber #DDA060. Cap dyed deeper amber #C28B48. Worried expression, mouth a flat tense line, both ears still big and upright. A big flat WHITE warning triangle with a bold dark exclamation mark inside it beside the muzzle, at least half the diameter of the badge.` |
 | `bully_lock` | `BADGE with a thick vivid rim #395B7A and a field of soft denim blue #6690B5. Cap dyed deeper slate blue #6A7A8C. Holding a big closed flat WHITE padlock, at least half the diameter of the badge, up just under the chin in both front paws, stern serious expression, one eyebrow raised.` |
@@ -404,10 +409,13 @@ no label, no watermark, no border, no frame.
 | с оговорками | `#AD6B25` | `#DDA060` | `#C28B48` |
 | не ок | `#86322D` | `#CA6660` | `#A8504E` |
 | просто работа | `#395B7A` | `#6690B5` | `#6A7A8C` |
-| непонятно | `#4F7090` | `#8DA3B8` | `#808790` |
+| непонятно | `#426183` | `#7E93AB` | `#808790` |
 
 Зелёная рамка замерена с оригинала, остальные четыре выведены в том же
-контрасте к своему полю. Кепка темнее поля на 17–29 единиц: так у оригинала,
+контрасте к своему полю. Сине-серый углублён против первой прикидки
+(`#8DA3B8` → `#7E93AB`): со светло-зелёным светофора он расходился на 44 при
+пороге 45, а это две лампочки в одном месте, и различать их больше нечем —
+предмета у них нет. Кепка темнее поля на 17–29 единиц: так у оригинала,
 и это обратно плану из `prompt-pack-v2.md`, где диск был тёмным, а кепка
 светлой.
 
@@ -525,43 +533,64 @@ no label, no watermark, no border, no frame.
 на 21 px пары; контактные листы `--sheets` показывают то, что числом
 не берётся, — персонажа, уши и крупность морды.
 
-## Что пришло с прогона 2026-09-07 (откачен)
+## Что пришло с прогона 2026-09-07 (листами)
 
-Прогон по исправленному промпту дал четырнадцать иконок из шестнадцати
-(на двух кончились кредиты) — и **владелец забраковал их все**: «бледная
-херня», «некрасивые». Пак откачен к прогону 06.09, картинки остались
-в истории git.
+Пак собран тремя листами: две шестёрки с плашкой и лист из трёх лап.
+Три оплаченные картинки вместо пятнадцати. `check_pack.py` ошибок не даёт.
 
-По персонажу прогон был лучше: уши стоячие во всех, разброс крупности
-головы 0.32 → 0.23, лапа перестала быть человеческой кистью. По виду —
-хуже, и вот чем.
+**Сколько ячеек влезает в лист — выяснено, а не выбрано.** На двенадцати
+модель теряет мелочи: надпись CROSS пропала со всех кепок, рамка стала
+тонкой, морда отъехала от ободка. Чек-лист в конце промпта не помог, второй
+прогон дал то же. На шести всё держится, на четырёх рамка выходит даже
+толще. Отсюда шесть — потолок для этого пака.
 
-**Первое: я мерил не ту величину.** Замерил среднюю яркость поля плашки,
-получил 163 при эталонных 148 и решил, что тон совпал. А цвет иконки живёт
-не в средней яркости, а в ПРОФИЛЕ от края к центру. Замер профиля
-оригинала — в разделе про палитру: рамка `#40814C` насыщенностью 65, поле
-`#95A67A` насыщенностью 44, центр почти серый. У моего было поле
-насыщенностью 32 и рамка с перепадом 8 единиц вместо 52. Формально
-«светлый, как эталон» — на деле выцветший круг без края.
+**Якорь работает, только если он единственный референс.** С двумя портретами
+`bulli-ref.png` и `bully-style-ref.png` впереди принятая иконка шла третьей,
+и плашку модель рисовала по описанию, а не по ней: тонкий контур вместо
+толстой рамки, у `bully_none` снова повисли уши. С `--no-ref --anchor` —
+эталонная рамка, стоячие уши, крупная морда. Два портрета без плашки
+перевешивали одну с плашкой.
 
-**Второе, и оно важнее: рядом всё это время лежала принятая иконка,
-а я описывал её словами.** Якорь подавался модели с оговоркой
-`Ignore its pose, its crop and its background` — то есть как образец одной
-фактуры; плашку, кадр и позу задание задавало заново текстом. Отсюда все
-метания: три захода на палитру, два на кадр, и каждый раз новая клауза
-про плашку сдвигала кадр, потому что подстановка короткая и вес в ней
-делится. Поза при этом уехала тоже — бульдожка вышел суше и тоньше того,
-что приняли.
+**Слом стиля никуда не делся.** Лист A на одном из прогонов пришёл плоским
+мультиком: шерсти нет, заливка ровная. Запрет `Do NOT turn him into a 2D
+illustration` в промпте стоял. Перекат тем же промптом дал нормальный 3D,
+то есть это не описание виновато, а случайность прогона.
 
-Оговорка снята (`ANCHOR_NOTE` в `generate.py`): с якоря теперь копируется
-всё — поза, кадр, плашка с её рамкой и переходом тонов, — а подстановка
-меняет только цвет, выражение и предмет. **Правило: если принятая картинка
-есть, она главнее любого описания словами.** Описание остаётся на случай,
-когда якоря нет вовсе.
+Ловится это глазом по контактному листу, но есть и ранний признак, дешевле:
+**размер сырого листа.** Плоский сжался в 5.3 МБ, оба нормальных — в 8.2
+и 8.4. Разница в полтора раза, и видна она до нарезки. Меркой фактуры это
+не ловится: замер по нарезанным 128 px дал у плоских 27.7–31.4, у нормальных
+30.4–34.0 — диапазоны перекрываются, потому что уменьшение до 128 съедает
+как раз ту шерсть, которая их различает.
 
-**Что делать дальше.** Пополнить кредиты и прогнать пятнадцать иконок
-(все, кроме `bully_done` — он принят и не трогается) с ним в якоре;
-команды — в разделе «Прогон».
+**Мерка различимости перекалибрована второй раз, и снова потому, что
+наказывала за улучшение.** Кольцо 0.62–0.97 забирало в себя уши: морда стала
+крупнее — шерсти в кольце прибавилось, и расстояния просели (зелёный
+со сине-серым сошлись с 44 до 39, хотя цвета РАЗОШЛИСЬ). Кольцо прижато
+к ободку (0.80–0.99), где морды нет, и порог взят из полной матрицы пака:
+пары одного цвета по замыслу доходят до 36, пары разных цветов начинаются
+с 38. Правило на будущее: **мерку проверяют на паке, который заведомо хорош.**
+Если она ругается тем сильнее, чем лучше пак, мерка не та.
+
+Что ещё поправлено этим прогоном:
+
+* **Лапы кадрированы как настоящее эмодзи** — одна ладошка во весь кадр,
+  от ноги короткий обрубок запястья, снизу у пальца вверх и сверху у пальца
+  вниз. Было пол-руки через весь кадр. Размер у всех трёх один: блокнот
+  у `bully_detail` убран, он съедал место и делал лапу мельче соседних.
+* **`bully_ready` и `bully_hi` разведены позой.** Оба синие и без предмета,
+  и модель рисовала обоим одно и то же — машущую лапу. Теперь `ready` —
+  гордая поза с лапами на ободке и закрытой улыбкой, `hi` — машет лапой
+  с высунутым языком.
+* **Сине-серый углублён** с `#8DA3B8` до `#7E93AB`: со светло-зелёным
+  светофора он расходился на 44 при пороге 45.
+
+Что осталось известным и допущено:
+
+* `bully_unknown` даёт 10 % нейтрально-серого — это его светло-серая кепка,
+  а не остаток фона. Проверка про это предупреждает и будет предупреждать.
+* `bully_lock` и `bully_expert` синие оба: по замыслу, разводятся белым
+  замком и белой стрелкой.
 
 ## Прогон
 

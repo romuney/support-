@@ -38,17 +38,28 @@
    из самого задания (первый огороженный блок файла), прикладывает оба
    референса и просит 2K PNG:
 
+   **Пак идёт листами, а не по картинке на иконку:** платится за картинку,
+   и лист из шести — это одна оплаченная вместо шести. Внутри листа ячейки
+   рисуются в одном проходе, поэтому и персонаж выходит один и тот же.
+   Шесть — потолок: на двенадцати модель теряет надпись CROSS и рамку
+   плашки (замер — в разделе «Что пришло с прогона 2026-09-07 (листами)»).
+
    ```
-   # сначала эталон — одна картинка, на ней видно кадр, уши и CROSS
-   python3 generate.py prompt-each.md --each --only bully_done --out raw-badge/
-   # остальные с принятым эталоном третьим референсом; полный порядок
-   # с четырьмя шагами и списками имён — в разделе «Прогон» задания
-   python3 generate.py prompt-each.md --each --anchor raw-badge/bully_done.png --out raw-badge/
+   # лист из шести, принятый эталон ЕДИНСТВЕННЫМ референсом
+   python3 generate.py prompt-each.md --grid 3x2 --aspect 3:2 --size 4K \
+       --only bully_ready,bully_fail,bully_hi,bully_search,bully_high,bully_mid \
+       --no-ref --anchor out-badge/bully_done.png --out raw-badge/sheet-a6.png
    # черновой прогон подешевле
-   python3 generate.py prompt-each.md --each --only bully_done --out draft/ --model gemini-3.1-flash-image --size 1K
+   python3 generate.py prompt-each.md --grid 3x2 --aspect 3:2 --size 1K \
+       --only ... --out draft.png --model gemini-3.1-flash-image
    # посмотреть, что уйдёт, и не отправлять
-   python3 generate.py prompt-each.md --each --only bully_done --out raw-badge/ --dry-run
+   python3 generate.py prompt-each.md --grid 3x2 --only ... --out x.png --dry-run
    ```
+
+   **`--no-ref` не опечатка.** С двумя портретами без плашки впереди принятая
+   иконка идёт третьей, и плашку модель рисует по описанию словами, а не
+   по ней: тонкий контур вместо толстой рамки. Единственным референсом
+   она держит и рамку, и позу, и уши.
 
    Промпт живёт в markdown и никуда не копируется: вторая копия разъехалась бы
    с заданием молча. Скрипт печатает первую строку взятого блока — если взялся
@@ -63,9 +74,13 @@
 3. Прислать полученные картинки сюда. Нарезка и сборка:
 
 ```
-# пак: по картинке на иконку, имя файла и есть имя эмодзи
-for f in raw-badge/*.png; do n=$(basename "$f" .png); \
-    python3 slice_grid.py "$f" --cols 1 --rows 1 --names "$n" --out out-badge/; done
+# лист: имена по порядку ячеек, тем же порядком, что в --only
+python3 slice_grid.py raw-badge/sheet-a6.png --cols 3 --rows 2 \
+    --names bully_ready,bully_fail,bully_hi,bully_search,bully_high,bully_mid \
+    --out out-badge/
+# лист лап — в столбик
+python3 slice_grid.py raw-badge/sheet-lapy.png --cols 1 --rows 3 \
+    --names bully_helpful,bully_not_helpful,bully_detail --out out-badge/
 # по одному стикеру
 python3 slice_grid.py bully_yes.png --cols 1 --rows 1 --names bully_yes --out out/
 # если всё же вышло листом 4x4 или 3x3
@@ -225,7 +240,7 @@ GEMINI_API_KEY=<ключ>
 |---|---|---|---|
 | `out/` | 02.09, лист `sheet-c.jpg` | v1: морда на прозрачном, цвет несёт кепка | **залито в Mattermost**, это то, что видят люди |
 | `out-each/` | 04.09, по картинке за прогон | тот же v1, без плашки | кандидат, не залит. На 21 px хуже обоих: 41 неразличимая пара из 120 против 6–7 |
-| `out-badge/` | 06.09, по картинке за прогон | **v2: круглая плашка, обратная связь лапой** | кандидат, не залит. `bully_done` из него **принят как эталон пака** и не перегенерируется: он задаёт позу, кадр и плашку с яркой рамкой. Остальные пятнадцать прогнать заново с ним в якоре. Прогон 07.09 забракован и откачен — разбор в `prompt-each.md` |
+| `out-badge/` | 07.09, тремя листами | **v2: круглая плашка, обратная связь лапой** | **готов, ошибок у `check_pack.py` нет.** Не залит. `bully_done` — эталон пака, взят из прогона 06.09 и не перегенерируется: он задаёт позу, кадр и плашку с яркой рамкой, остальные пятнадцать прогнаны с ним в якоре |
 
 Три папки с тремя дизайнами — это и есть та беда, из-за которой пак смотрят
 `check_pack.py` и заливают один раз. Когда новый пак принят и залит, две
