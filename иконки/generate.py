@@ -165,6 +165,10 @@ def grid_block(cells, cols, rows):
         "the SAME flat medium grey as the background inside the cells. Do NOT "
         "draw white lines between the cells, and no borders, no frames, no "
         "grid lines, no numbers, no captions and no labels anywhere.\n\n"
+        + ("The cells are one single strip. Do NOT draw a box or a frame "
+           "around the strip and do NOT draw lines down its sides: the plain "
+           "grey background runs unbroken to all four edges of the picture.\n\n"
+           if cols == 1 or rows == 1 else "")
         + "\n\n".join(lines)
         + "\n\nCHECK EVERY CELL BEFORE YOU FINISH. On a sheet of many cells "
           "these three are the first to go, and without them the icons are "
@@ -179,7 +183,14 @@ def grid_block(cells, cols, rows):
           "named for that cell, with the lighter field inside it.\n"
           "3. His head big enough that his ears and the crown of his cap reach "
           "the rim and are cut off by it. A small head with a ring of empty "
-          "colour above the cap is wrong."
+          "colour above the cap is wrong.\n"
+          "4. The soft pale glow behind his head in every badge. A badge of "
+          "one flat even colour is wrong.\n"
+          "5. The same portrait in every cell: head and the very top of the "
+          "chest, cut off there by the badge. No body, no hind legs, nobody "
+          "sitting and nobody standing.\n"
+          "6. Every object the same size as every other object across the "
+          "cells — as tall as his muzzle is wide."
     )
 
 
