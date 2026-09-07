@@ -350,7 +350,11 @@ def main():
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--size", default="2K", choices=["1K", "2K", "4K"],
                     help="разрешение; лист режется на 128px, мельче 2K брать нечего")
-    ap.add_argument("--aspect", default="1:1", help="соотношение сторон")
+    # Список — из ответа API на неверное значение. Проверяем на месте: иначе
+    # ошибка приходит после отправки, а с листом это ещё и минуты ожидания.
+    ap.add_argument("--aspect", default="1:1", choices=[
+        "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4",
+        "8:1", "9:16", "16:9", "21:9"], help="соотношение сторон")
     ap.add_argument("--env", default="../.env", help="файл с GEMINI_API_KEY")
     ap.add_argument("--timeout", type=int, default=300,
                     help="секунд на ответ; лист 4K модель делает минутами")
